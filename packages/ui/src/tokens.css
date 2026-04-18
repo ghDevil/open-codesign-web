@@ -17,11 +17,14 @@
   --color-border: #e3ddd0;
   --color-border-muted: #ece6d8;
   --color-border-subtle: #f3efe6;
+  --color-border-strong: #d4cdbc;
 
   /* Accent */
   --color-accent: #c96442;
   --color-accent-hover: #b75636;
   --color-accent-muted: #f3d9cf;
+  --color-accent-soft: rgba(201, 100, 66, 0.08);
+  --color-focus-ring: rgba(201, 100, 66, 0.3);
 
   /* Text */
   --color-text-primary: #1f1d18;
@@ -34,14 +37,46 @@
   --color-error: #b04030;
   --color-mcp: #4a6b8a;
 
-  /* Shadow */
-  --shadow-soft: 0 1px 2px rgba(31, 29, 24, 0.04);
-  --shadow-card: 0 2px 8px rgba(31, 29, 24, 0.06);
-  --shadow-elevated: 0 8px 24px rgba(31, 29, 24, 0.1);
+  /* Shadow — warm-tinted, three discrete levels */
+  --shadow-soft: 0 1px 2px rgba(57, 41, 24, 0.04);
+  --shadow-card: 0 1px 2px rgba(57, 41, 24, 0.04), 0 4px 16px rgba(57, 41, 24, 0.06);
+  --shadow-elevated: 0 2px 4px rgba(57, 41, 24, 0.05), 0 12px 32px rgba(57, 41, 24, 0.1);
+  --shadow-inset-soft: inset 0 0 0 1px var(--color-border-subtle);
 
-  /* Type scale */
+  /* Typography */
   --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+
+  /* Type scale — strict 7 sizes */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+
+  /* Line height */
+  --leading-heading: 1.2;
+  --leading-ui: 1.4;
+  --leading-body: 1.6;
+
+  /* Letter spacing */
+  --tracking-heading: -0.01em;
+  --tracking-tight: -0.005em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
+
+  /* Spacing — strict 4-px scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
 
   /* Radius */
   --radius-sm: 6px;
@@ -49,6 +84,15 @@
   --radius-lg: 10px;
   --radius-xl: 14px;
   --radius-2xl: 16px;
+  --radius-full: 9999px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms;
+  --transition-base: all var(--duration-base) var(--ease-out);
+  --transition-fast: all var(--duration-fast) var(--ease-out);
 }
 
 .dark {
@@ -62,10 +106,13 @@
   --color-border: #3a352f;
   --color-border-muted: #2f2b26;
   --color-border-subtle: #26221d;
+  --color-border-strong: #4a443c;
 
   --color-accent: #d97757;
   --color-accent-hover: #e88868;
   --color-accent-muted: #4a2b22;
+  --color-accent-soft: rgba(217, 119, 87, 0.1);
+  --color-focus-ring: rgba(217, 119, 87, 0.35);
 
   --color-text-primary: #f5f1e8;
   --color-text-secondary: #b8b3a6;
@@ -77,6 +124,14 @@
   --color-mcp: #6a8aab;
 
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
-  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25), 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-elevated: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-inset-soft: inset 0 0 0 1px var(--color-border-subtle);
+}
+
+/* Global focus-visible style — every interactive element inherits unless overridden. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }

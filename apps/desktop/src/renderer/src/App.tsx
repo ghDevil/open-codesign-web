@@ -2,15 +2,9 @@ import { buildSrcdoc } from '@open-codesign/runtime';
 import { BUILTIN_DEMOS } from '@open-codesign/templates';
 import { Button } from '@open-codesign/ui';
 import { Send, Sparkles } from 'lucide-react';
-<<<<<<< HEAD
 import { useEffect, useState } from 'react';
-import { Onboarding } from './onboarding';
-||||||| parent of bca116c (feat(core,exporters,desktop): end-to-end first demo + HTML export)
-import { useState } from 'react';
-=======
-import { useState } from 'react';
 import { PreviewToolbar } from './components/PreviewToolbar';
->>>>>>> bca116c (feat(core,exporters,desktop): end-to-end first demo + HTML export)
+import { Onboarding } from './onboarding';
 import { useCodesignStore } from './store';
 
 export function App() {

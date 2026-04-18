@@ -1,6 +1,5 @@
 import { PROVIDER_SHORTLIST, type SupportedOnboardingProvider } from '@open-codesign/shared';
-import { Button } from '@open-codesign/ui';
-import { ExternalLink, KeyRound, Rocket, Server } from 'lucide-react';
+import { ArrowRight, ExternalLink, KeyRound, Rocket, Server } from 'lucide-react';
 
 interface WelcomeProps {
   onPickKey: () => void;
@@ -10,32 +9,32 @@ interface WelcomeProps {
 
 export function Welcome({ onPickKey, onPickFreeTier, ollamaDetected }: WelcomeProps) {
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h2 className="text-2xl font-semibold text-[var(--color-text-primary)] mb-2">
-          Welcome to open-codesign
-        </h2>
-        <p className="text-sm text-[var(--color-text-secondary)]">
+    <div className="flex flex-col gap-[var(--space-6)]">
+      <div className="flex flex-col gap-[var(--space-2)]">
+        <h1 className="text-[var(--text-xl)] font-semibold text-[var(--color-text-primary)] tracking-[var(--tracking-heading)] leading-[var(--leading-heading)]">
+          Design with any model.
+        </h1>
+        <p className="text-[var(--text-base)] text-[var(--color-text-secondary)] leading-[var(--leading-body)]">
           Pick how you want to power your designs. You can change this later in Settings.
         </p>
       </div>
 
-      <div className="grid gap-3">
+      <div className="flex flex-col gap-[var(--space-3)]">
         <PathButton
-          icon={<Rocket className="w-5 h-5 text-[var(--color-accent)]" />}
+          icon={<Rocket className="w-[18px] h-[18px]" />}
           title="Try free now"
           subtitle="OpenRouter free tier — paste an OpenRouter key, then pick a free model."
           onClick={onPickFreeTier}
         />
         <PathButton
-          icon={<KeyRound className="w-5 h-5 text-[var(--color-accent)]" />}
+          icon={<KeyRound className="w-[18px] h-[18px]" />}
           title="Use my API key"
           subtitle="Anthropic, OpenAI, or OpenRouter. Auto-detected from the key prefix."
           onClick={onPickKey}
         />
         {ollamaDetected ? (
           <PathButton
-            icon={<Server className="w-5 h-5 text-[var(--color-text-muted)]" />}
+            icon={<Server className="w-[18px] h-[18px]" />}
             title="Use local model (Ollama detected)"
             subtitle="Coming in v0.2 — Ollama integration is on the roadmap."
             disabled
@@ -43,22 +42,28 @@ export function Welcome({ onPickKey, onPickFreeTier, ollamaDetected }: WelcomePr
         ) : null}
       </div>
 
-      <div className="text-xs text-[var(--color-text-muted)] flex flex-wrap gap-x-4 gap-y-1">
-        {(
-          Object.values(PROVIDER_SHORTLIST) as Array<
-            (typeof PROVIDER_SHORTLIST)[SupportedOnboardingProvider]
-          >
-        ).map((p) => (
-          <a
-            key={p.provider}
-            href={p.keyHelpUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
-          >
-            How to get a {p.label} key <ExternalLink className="w-3 h-3" />
-          </a>
-        ))}
+      <div className="pt-[var(--space-2)] border-t border-[var(--color-border-subtle)] flex flex-col gap-[var(--space-2)]">
+        <span className="text-[var(--text-xs)] uppercase tracking-[var(--tracking-wide)] text-[var(--color-text-muted)] font-mono">
+          Where to get a key
+        </span>
+        <div className="flex flex-wrap gap-x-[var(--space-4)] gap-y-[var(--space-1)]">
+          {(
+            Object.values(PROVIDER_SHORTLIST) as Array<
+              (typeof PROVIDER_SHORTLIST)[SupportedOnboardingProvider]
+            >
+          ).map((p) => (
+            <a
+              key={p.provider}
+              href={p.keyHelpUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-[4px] text-[var(--text-xs)] text-[var(--color-text-secondary)] hover:text-[var(--color-accent)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
+            >
+              {p.label}
+              <ExternalLink className="w-[11px] h-[11px]" />
+            </a>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -74,18 +79,24 @@ interface PathButtonProps {
 
 function PathButton({ icon, title, subtitle, onClick, disabled }: PathButtonProps) {
   return (
-    <Button
-      variant="secondary"
-      size="lg"
+    <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
-      className="!h-auto !justify-start text-left py-4"
+      className="group relative flex items-start gap-[var(--space-4)] w-full text-left p-[var(--space-4)] rounded-[var(--radius-lg)] bg-[var(--color-surface)] border border-[var(--color-border)] shadow-[var(--shadow-soft)] transition-[transform,box-shadow,border-color,background-color] duration-[var(--duration-base)] ease-[var(--ease-out)] hover:-translate-y-[1px] hover:border-[var(--color-border-strong)] hover:shadow-[var(--shadow-card)] disabled:opacity-50 disabled:pointer-events-none"
     >
-      <span className="shrink-0">{icon}</span>
-      <span className="flex flex-col items-start gap-0.5">
-        <span className="text-sm font-medium text-[var(--color-text-primary)]">{title}</span>
-        <span className="text-xs text-[var(--color-text-muted)] font-normal">{subtitle}</span>
+      <span className="shrink-0 mt-[2px] inline-flex items-center justify-center w-[34px] h-[34px] rounded-[var(--radius-md)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+        {icon}
       </span>
-    </Button>
+      <span className="flex flex-col gap-[2px] flex-1 min-w-0">
+        <span className="text-[var(--text-base)] font-semibold text-[var(--color-text-primary)] tracking-[var(--tracking-tight)]">
+          {title}
+        </span>
+        <span className="text-[var(--text-xs)] text-[var(--color-text-secondary)] leading-[var(--leading-ui)]">
+          {subtitle}
+        </span>
+      </span>
+      <ArrowRight className="w-[14px] h-[14px] mt-[10px] shrink-0 text-[var(--color-text-muted)] opacity-0 -translate-x-[4px] transition-[opacity,transform] duration-[var(--duration-base)] ease-[var(--ease-out)] group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-[var(--color-accent)]" />
+    </button>
   );
 }

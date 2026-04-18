@@ -1,5 +1,5 @@
-import { defineConfig } from 'vitepress';
 import tailwindcss from '@tailwindcss/vite';
+import { defineConfig } from 'vitepress';
 
 const SITE_ORIGIN = 'https://opencoworkai.github.io';
 const SITE_BASE = '/open-codesign/';
@@ -40,8 +40,7 @@ export default defineConfig({
       'meta',
       {
         name: 'twitter:description',
-        content:
-          'Open-source desktop AI design tool. Multi-model, BYOK, local-first. Apache-2.0.',
+        content: 'Open-source desktop AI design tool. Multi-model, BYOK, local-first. Apache-2.0.',
       },
     ],
     ['meta', { name: 'twitter:image', content: OG_IMAGE }],
@@ -106,9 +105,7 @@ export default defineConfig({
       },
     ],
 
-    socialLinks: [
-      { icon: 'github', link: 'https://github.com/OpenCoworkAI/open-codesign' },
-    ],
+    socialLinks: [{ icon: 'github', link: 'https://github.com/OpenCoworkAI/open-codesign' }],
 
     footer: {
       message: 'Released under the Apache-2.0 License.',

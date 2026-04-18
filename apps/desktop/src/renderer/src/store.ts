@@ -26,15 +26,11 @@ interface CodesignState {
   previewHtml: string | null;
   isGenerating: boolean;
   errorMessage: string | null;
-<<<<<<< HEAD
   config: OnboardingState | null;
   configLoaded: boolean;
+  toastMessage: string | null;
   loadConfig: () => Promise<void>;
   completeOnboarding: (next: OnboardingState) => void;
-||||||| parent of bca116c (feat(core,exporters,desktop): end-to-end first demo + HTML export)
-=======
-  toastMessage: string | null;
->>>>>>> bca116c (feat(core,exporters,desktop): end-to-end first demo + HTML export)
   sendPrompt: (prompt: string) => Promise<void>;
   exportActive: (format: ExportFormat) => Promise<void>;
   dismissToast: () => void;
@@ -49,9 +45,9 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
   previewHtml: null,
   isGenerating: false,
   errorMessage: null,
-<<<<<<< HEAD
   config: null,
   configLoaded: false,
+  toastMessage: null,
 
   async loadConfig() {
     if (!window.codesign) {
@@ -68,10 +64,6 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
   completeOnboarding(next: OnboardingState) {
     set({ config: next });
   },
-||||||| parent of bca116c (feat(core,exporters,desktop): end-to-end first demo + HTML export)
-=======
-  toastMessage: null,
->>>>>>> bca116c (feat(core,exporters,desktop): end-to-end first demo + HTML export)
 
   async sendPrompt(prompt: string) {
     if (get().isGenerating) return;
@@ -92,44 +84,6 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       errorMessage: null,
     }));
 
-<<<<<<< HEAD
-||||||| parent of bca116c (feat(core,exporters,desktop): end-to-end first demo + HTML export)
-    // Tier 1 wiring: hardcoded provider/model and key-from-env until the
-    // onboarding flow lands. The real flow will read from the keychain.
-    const apiKey = '';
-    if (!apiKey) {
-      set((s) => ({
-        messages: [
-          ...s.messages,
-          {
-            role: 'assistant',
-            content:
-              'No API key configured yet. Onboarding flow coming in v0.1 — see docs/research/06-api-onboarding-ux.md.',
-          },
-        ],
-        isGenerating: false,
-      }));
-      return;
-    }
-
-=======
-    const apiKey = DEV_API_KEY;
-    if (!apiKey) {
-      set((s) => ({
-        messages: [
-          ...s.messages,
-          {
-            role: 'assistant',
-            content:
-              'No API key configured yet. Set VITE_OPEN_CODESIGN_DEV_KEY for dev, or wait for the onboarding flow (wt/onboarding) to land.',
-          },
-        ],
-        isGenerating: false,
-      }));
-      return;
-    }
-
->>>>>>> bca116c (feat(core,exporters,desktop): end-to-end first demo + HTML export)
     try {
       const result = await window.codesign.generate({
         prompt,

@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 
 /**
  * open-codesign tokens — kept in sync with packages/ui/src/tokens.css.
@@ -32,8 +32,8 @@
   --shadow-card: 0 2px 8px rgba(31, 29, 24, 0.06);
   --shadow-elevated: 0 8px 24px rgba(31, 29, 24, 0.1);
 
-  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
 
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -120,10 +120,7 @@
 }
 
 html {
-  font-feature-settings:
-    'cv11',
-    'ss01',
-    'ss03';
+  font-feature-settings: "cv11", "ss01", "ss03";
 }
 
 body {
@@ -148,8 +145,8 @@ body {
   background: var(--color-surface);
   box-shadow: var(--shadow-soft);
   border-radius: var(--radius-xl);
-  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease,
-    border-color 0.18s ease;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease, border-color
+    0.18s ease;
 }
 .VPFeature:hover {
   transform: translateY(-2px);

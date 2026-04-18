@@ -6,7 +6,6 @@ import type {
 } from '@open-codesign/shared';
 import { contextBridge, ipcRenderer } from 'electron';
 
-<<<<<<< HEAD
 export interface ValidateKeyResult {
   ok: true;
   modelCount: number;
@@ -17,8 +16,6 @@ export interface ValidateKeyError {
   message: string;
 }
 
-||||||| parent of bca116c (feat(core,exporters,desktop): end-to-end first demo + HTML export)
-=======
 export type ExportFormat = 'html' | 'pdf' | 'pptx' | 'zip';
 export interface ExportInvokeResponse {
   status: 'saved' | 'cancelled';
@@ -26,7 +23,6 @@ export interface ExportInvokeResponse {
   bytes?: number;
 }
 
->>>>>>> bca116c (feat(core,exporters,desktop): end-to-end first demo + HTML export)
 const api = {
   detectProvider: (key: string) =>
     ipcRenderer.invoke('codesign:detect-provider', key) as Promise<string | null>,
