@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const writeFileMock = vi.fn(async (_path: unknown, _data: unknown, _enc?: unknown) => undefined);
-const openPathMock = vi.fn(async (_p: string) => '');
+const openExternalMock = vi.fn(async (_url: string) => undefined);
 
 vi.mock('node:fs/promises', () => ({
   writeFile: (path: unknown, data: unknown, enc?: unknown) => writeFileMock(path, data, enc),
@@ -18,7 +18,7 @@ vi.mock('./electron-runtime', () => ({
       handlers.set(channel, fn);
     },
   },
-  shell: { openPath: (p: string) => openPathMock(p) },
+  shell: { openExternal: (url: string) => openExternalMock(url) },
   app: { getPath: vi.fn(() => '/tmp/test') },
 }));
 
@@ -130,13 +130,13 @@ describe('share:v1:openInBrowser handler', () => {
     return fn;
   }
 
-  it('writes html to temp file and opens it', async () => {
+  it('writes html to temp file and opens it via shell.openExternal with file:// URL', async () => {
     const fn = getHandler();
     expect(fn).toBeDefined();
 
     writeFileMock.mockClear();
-    openPathMock.mockClear();
-    openPathMock.mockResolvedValueOnce('');
+    openExternalMock.mockClear();
+    openExternalMock.mockResolvedValueOnce(undefined);
 
     const result = (await fn(
       {},
@@ -153,12 +153,15 @@ describe('share:v1:openInBrowser handler', () => {
     const firstCall = writeFileMock.mock.calls[0];
     expect(firstCall?.[0]).toBe(result.filepath);
     expect(firstCall?.[1]).toBe('<p>hi</p>');
-    expect(openPathMock).toHaveBeenCalledWith(result.filepath);
+    expect(openExternalMock).toHaveBeenCalledTimes(1);
+    const openedUrl = openExternalMock.mock.calls[0]?.[0];
+    expect(openedUrl).toBe(`file://${result.filepath}`);
+    expect(openedUrl).toMatch(/^file:\/\//);
   });
 
-  it('throws SHARE_OPEN_FAILED when shell.openPath returns an error', async () => {
+  it('throws SHARE_OPEN_FAILED when shell.openExternal rejects', async () => {
     const fn = getHandler();
-    openPathMock.mockResolvedValueOnce('Bad path');
+    openExternalMock.mockRejectedValueOnce(new Error('Bad path'));
     await expect(fn({}, { schemaVersion: 1, html: '<p/>' })).rejects.toThrowError(
       expect.objectContaining({ code: 'SHARE_OPEN_FAILED' }),
     );

@@ -1,5 +1,6 @@
 import { readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { CodesignError } from '@open-codesign/shared';
 import { app, ipcMain, shell } from './electron-runtime';
 
@@ -110,8 +111,12 @@ export function registerShareIpc(): void {
       const req = parseShareRequest(raw);
       const tempDir = app.getPath('temp');
 
-      // Best-effort cleanup of stale share files; failures must not block sharing.
-      await cleanupOldTempFiles(tempDir, liveCleanupDeps).catch(() => undefined);
+      // Best-effort cleanup of stale share files; failures must not block sharing
+      // but should surface in logs so silent disk-fill regressions stay visible.
+      await cleanupOldTempFiles(tempDir, liveCleanupDeps).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`[share] cleanup of stale temp files failed: ${message}`);
+      });
 
       const filename = buildTempFilename(req.designName, Date.now());
       const filepath = join(tempDir, filename);
@@ -123,10 +128,15 @@ export function registerShareIpc(): void {
         throw new CodesignError(`Failed to write share file: ${message}`, 'SHARE_WRITE_FAILED');
       }
 
-      const openErr = await shell.openPath(filepath);
-      if (openErr.length > 0) {
+      // Use openExternal with a file:// URL so the OS dispatches via the default
+      // browser handler. shell.openPath would honor the .html file association,
+      // which on many machines points to editors (e.g. VS Code) instead of a browser.
+      try {
+        await shell.openExternal(pathToFileURL(filepath).toString());
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         throw new CodesignError(
-          `Failed to open share file in browser: ${openErr}`,
+          `Failed to open share file in browser: ${message}`,
           'SHARE_OPEN_FAILED',
         );
       }
