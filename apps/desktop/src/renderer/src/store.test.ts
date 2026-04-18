@@ -230,7 +230,6 @@ describe('useCodesignStore generation cancellation', () => {
     });
   });
 });
-
 describe('useCodesignStore view navigation', () => {
   it('starts on hub view', () => {
     expect(useCodesignStore.getState().view).toBe('hub');
@@ -434,5 +433,36 @@ describe('useCodesignStore project storage error surfacing', () => {
     expect(state.errorMessage).toBeNull();
     expect(state.lastError).toBeNull();
     expect(state.generationStage).toBe('idle');
+  });
+});
+
+describe('useCodesignStore inline comment apply', () => {
+  it('does not push an "Applied." assistant bubble when the model returns no prose', async () => {
+    const applyComment = vi.fn(() =>
+      Promise.resolve({
+        artifacts: [{ content: '<!doctype html><html><body>x</body></html>' }],
+        message: '   ',
+      }),
+    );
+    vi.stubGlobal('window', {
+      codesign: { applyComment },
+      setTimeout,
+    });
+    useCodesignStore.setState({
+      previewHtml: '<!doctype html><html><body>old</body></html>',
+      selectedElement: {
+        selector: 'h1',
+        tag: 'h1',
+        outerHTML: '<h1>Hi</h1>',
+        rect: { top: 0, left: 0, width: 100, height: 30 },
+      },
+    });
+
+    await useCodesignStore.getState().applyInlineComment('make it bold');
+
+    const state = useCodesignStore.getState();
+    expect(state.messages.some((m) => m.role === 'assistant')).toBe(false);
+    expect(state.previewHtml).toBe('<!doctype html><html><body>x</body></html>');
+    expect(state.toasts.at(-1)?.variant).toBe('success');
   });
 });

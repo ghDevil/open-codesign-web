@@ -49,8 +49,26 @@
     "ready": "预览",
     "noDesign": "还没有设计",
     "clickToComment": "点击预览中的任意元素即可留下局部评论。",
+    "clickToCommentShort": "点击元素留下评论",
     "runtimeError": "预览运行时错误",
-    "dismissErrors": "关闭预览错误"
+    "dismissErrors": "关闭预览错误",
+    "stage": {
+      "idle": "待命",
+      "sending": "发送中",
+      "thinking": "思考中",
+      "streaming": "接收中",
+      "parsing": "解析中",
+      "rendering": "渲染中",
+      "done": "已就绪",
+      "error": "失败"
+    }
+  },
+  "assistantMessage": {
+    "artifactReady": "设计已渲染到画布 →",
+    "regenerate": "重新生成",
+    "copyCode": "复制 HTML",
+    "saveSnapshot": "收藏快照",
+    "snapshotSaved": "已收藏"
   },
   "chat": {
     "placeholder": "想设计什么？",
@@ -278,6 +296,17 @@
     }
   },
   "topbar": {
+    "iterate": {
+      "regenerate": "重新生成",
+      "reuse": "复用提示",
+      "branch": "分支"
+    },
+    "session": {
+      "noProvider": "未配置提供商",
+      "noModel": "未配置模型",
+      "tokens": "{{count}} tok",
+      "tokensPlaceholder": "—"
+    },
     "status": {
       "connected": "已连接",
       "untested": "未测试",
@@ -355,8 +384,13 @@
     "generationFailed": "生成失败",
     "cancellationFailed": "取消失败",
     "inlineCommentFailed": "局部修改失败",
+    "inlineCommentApplied": "修改已应用",
     "noDesignToExport": "当前还没有可导出的设计。",
-    "exportedTo": "已导出到 {{path}}"
+    "exportedTo": "已导出到 {{path}}",
+    "snapshotQueued": "快照已记录",
+    "snapshotQueuedDescription": "持久化快照将在 v0.2 上线 — 当前操作已记录。",
+    "branchQueued": "分支功能即将上线",
+    "branchQueuedDescription": "从当前设计分支将在 v0.2 与快照一起上线。"
   },
   "inlineComment": {
     "title": "评论",

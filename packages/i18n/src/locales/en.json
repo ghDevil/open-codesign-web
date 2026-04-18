@@ -50,8 +50,26 @@
     "ready": "Preview",
     "noDesign": "No design yet",
     "clickToComment": "Click any element in the preview to leave an inline comment.",
+    "clickToCommentShort": "Click any element to comment",
     "runtimeError": "Preview runtime error",
-    "dismissErrors": "Dismiss preview errors"
+    "dismissErrors": "Dismiss preview errors",
+    "stage": {
+      "idle": "Idle",
+      "sending": "Sending",
+      "thinking": "Thinking",
+      "streaming": "Streaming",
+      "parsing": "Parsing",
+      "rendering": "Rendering",
+      "done": "Ready",
+      "error": "Failed"
+    }
+  },
+  "assistantMessage": {
+    "artifactReady": "Design rendered in canvas \u2192",
+    "regenerate": "Regenerate",
+    "copyCode": "Copy HTML",
+    "saveSnapshot": "Save snapshot",
+    "snapshotSaved": "Saved"
   },
   "chat": {
     "placeholder": "Describe what to design…",
@@ -279,6 +297,17 @@
     }
   },
   "topbar": {
+    "iterate": {
+      "regenerate": "Regenerate",
+      "reuse": "Reuse prompt",
+      "branch": "Branch"
+    },
+    "session": {
+      "noProvider": "No provider",
+      "noModel": "No model",
+      "tokens": "{{count}} tok",
+      "tokensPlaceholder": "—"
+    },
     "status": {
       "connected": "Connected",
       "untested": "Not tested",
@@ -356,8 +385,13 @@
     "generationFailed": "Generation failed",
     "cancellationFailed": "Cancellation failed",
     "inlineCommentFailed": "Inline comment failed",
+    "inlineCommentApplied": "Change applied",
     "noDesignToExport": "No design to export yet.",
-    "exportedTo": "Exported to {{path}}"
+    "exportedTo": "Exported to {{path}}",
+    "snapshotQueued": "Snapshot queued",
+    "snapshotQueuedDescription": "Persistent snapshots ship in v0.2 — your action was recorded.",
+    "branchQueued": "New branch coming",
+    "branchQueuedDescription": "Branching from this design ships with snapshots in v0.2."
   },
   "inlineComment": {
     "title": "Comment on",

@@ -617,15 +617,23 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         attachments,
       });
       const firstArtifact = result.artifacts[0];
+      const trimmedMessage = result.message.trim();
+      // System-status text like "Applied." / "已应用。" should not persist in the
+      // chat history — the canvas update IS the confirmation. Only push an
+      // assistant bubble when the model returned real prose (i.e. non-empty
+      // commentary alongside the revised artifact).
+      const shouldPushBubble = trimmedMessage.length > 0 && firstArtifact !== undefined;
       set((s) => ({
-        messages: [
-          ...s.messages,
-          { role: 'assistant', content: result.message || tr('common.applied') },
-        ],
+        messages: shouldPushBubble
+          ? [...s.messages, { role: 'assistant', content: trimmedMessage }]
+          : s.messages,
         previewHtml: firstArtifact?.content ?? s.previewHtml,
         isGenerating: false,
         selectedElement: null,
       }));
+      if (firstArtifact !== undefined) {
+        get().pushToast({ variant: 'success', title: tr('notifications.inlineCommentApplied') });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : tr('errors.unknown');
       set((s) => ({
