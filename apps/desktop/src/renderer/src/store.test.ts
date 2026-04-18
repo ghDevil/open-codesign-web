@@ -229,3 +229,105 @@ describe('useCodesignStore generation cancellation', () => {
     });
   });
 });
+
+describe('useCodesignStore view navigation', () => {
+  it('starts on workspace view', () => {
+    expect(useCodesignStore.getState().view).toBe('workspace');
+  });
+
+  it('setView("settings") switches to settings and closes command palette', () => {
+    useCodesignStore.setState({ commandPaletteOpen: true });
+    useCodesignStore.getState().setView('settings');
+    expect(useCodesignStore.getState().view).toBe('settings');
+    expect(useCodesignStore.getState().commandPaletteOpen).toBe(false);
+  });
+
+  it('setView("workspace") switches back from settings', () => {
+    useCodesignStore.getState().setView('settings');
+    useCodesignStore.getState().setView('workspace');
+    expect(useCodesignStore.getState().view).toBe('workspace');
+  });
+});
+
+// Simulate the escape handler logic from App.tsx to verify priority:
+//   commandPaletteOpen → close palette (view unchanged)
+//   palette closed + view=settings → go to workspace
+function pressEscape(
+  view: ReturnType<typeof useCodesignStore.getState>['view'],
+  commandPaletteOpen: boolean,
+): void {
+  const store = useCodesignStore.getState();
+  if (commandPaletteOpen) {
+    store.closeCommandPalette();
+    return;
+  }
+  if (view === 'settings') {
+    store.setView('workspace');
+  }
+}
+
+describe('ESC key priority: command palette > settings view', () => {
+  it('ESC closes command palette without leaving settings when both are open', () => {
+    useCodesignStore.setState({ view: 'settings', commandPaletteOpen: true });
+    pressEscape('settings', true);
+
+    const s = useCodesignStore.getState();
+    expect(s.commandPaletteOpen).toBe(false);
+    // view must stay on settings — the palette consumed the keypress
+    expect(s.view).toBe('settings');
+  });
+
+  it('ESC navigates back to workspace when palette is closed and view is settings', () => {
+    useCodesignStore.setState({ view: 'settings', commandPaletteOpen: false });
+    pressEscape('settings', false);
+
+    const s = useCodesignStore.getState();
+    expect(s.view).toBe('workspace');
+    expect(s.commandPaletteOpen).toBe(false);
+  });
+
+  it('ESC is a no-op when palette is closed and view is workspace', () => {
+    useCodesignStore.setState({ view: 'workspace', commandPaletteOpen: false });
+    pressEscape('workspace', false);
+
+    const s = useCodesignStore.getState();
+    expect(s.view).toBe('workspace');
+    expect(s.commandPaletteOpen).toBe(false);
+  });
+});
+
+describe('useCodesignStore active provider routing', () => {
+  beforeAll(async () => {
+    await initI18n('en');
+  });
+
+  it('sendPrompt uses the active provider from config after setActiveProvider updates config', async () => {
+    const generate = vi.fn(() =>
+      Promise.resolve({ artifacts: [{ content: '<html></html>' }], message: 'Done.' }),
+    );
+
+    vi.stubGlobal('window', { codesign: { generate }, setTimeout });
+
+    const openaiConfig: OnboardingState = {
+      hasKey: true,
+      provider: 'openai',
+      modelPrimary: 'gpt-4o',
+      modelFast: 'gpt-4o-mini',
+      baseUrl: null,
+      designSystem: null,
+    };
+
+    // Simulate setActiveProvider result updating the store config.
+    useCodesignStore.getState().completeOnboarding(openaiConfig);
+
+    await useCodesignStore.getState().sendPrompt({ prompt: 'make a button' });
+
+    expect(generate).toHaveBeenCalledOnce();
+    const call = generate.mock.calls[0] as unknown as [
+      { model: { provider: string; modelId: string } },
+    ];
+    const payload = call[0];
+    expect(payload.model.provider).toBe('openai');
+    expect(payload.model.modelId).toBe('gpt-4o');
+  });
+});

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { applyValidateResult, canSaveProvider } from './Settings';
+import { describe, expect, it, vi } from 'vitest';
+import { applyLocaleChange, applyValidateResult, canSaveProvider } from './Settings';
+
+vi.mock('@open-codesign/i18n', () => ({
+  setLocale: vi.fn((locale: string) => Promise.resolve(locale)),
+  useT: () => (key: string) => key,
+}));
 
 describe('canSaveProvider', () => {
   it('requires a validated API key before enabling save', () => {
@@ -77,5 +82,34 @@ describe('applyValidateResult', () => {
     const next = applyValidateResult(changedProviderForm, matchingSnapshot, true, undefined);
     expect(next).toBe(changedProviderForm);
     expect(next.validated).toBe(false);
+  });
+});
+
+describe('applyLocaleChange', () => {
+  it('calls locale IPC set, then applies the persisted locale via i18next', async () => {
+    const { setLocale: mockSetLocale } = await import('@open-codesign/i18n');
+    const mockLocaleApi = {
+      set: vi.fn((_locale: string) => Promise.resolve('zh-CN')),
+    };
+
+    const result = await applyLocaleChange('zh-CN', mockLocaleApi);
+
+    expect(mockLocaleApi.set).toHaveBeenCalledWith('zh-CN');
+    expect(mockSetLocale).toHaveBeenCalledWith('zh-CN');
+    expect(result).toBe('zh-CN');
+  });
+
+  it('applies the locale returned by the IPC bridge, not the requested locale', async () => {
+    const { setLocale: mockSetLocale } = await import('@open-codesign/i18n');
+    // Bridge normalises 'zh' → 'zh-CN'
+    const mockLocaleApi = {
+      set: vi.fn((_locale: string) => Promise.resolve('zh-CN')),
+    };
+
+    const result = await applyLocaleChange('zh', mockLocaleApi);
+
+    expect(mockLocaleApi.set).toHaveBeenCalledWith('zh');
+    expect(mockSetLocale).toHaveBeenCalledWith('zh-CN');
+    expect(result).toBe('zh-CN');
   });
 });

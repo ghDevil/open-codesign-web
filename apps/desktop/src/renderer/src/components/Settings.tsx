@@ -1,4 +1,4 @@
-import { setLocale as applyLocale } from '@open-codesign/i18n';
+import { setLocale as applyLocale, useT } from '@open-codesign/i18n';
 import type {
   OnboardingState,
   PROVIDER_SHORTLIST,
@@ -11,6 +11,7 @@ import {
 import { Button } from '@open-codesign/ui';
 import {
   AlertTriangle,
+  ArrowLeft,
   CheckCircle,
   ChevronDown,
   Cpu,
@@ -31,11 +32,11 @@ import { useCodesignStore } from '../store';
 
 type Tab = 'models' | 'appearance' | 'storage' | 'advanced';
 
-const TABS: ReadonlyArray<{ id: Tab; label: string; icon: typeof Cpu }> = [
-  { id: 'models', label: 'Models', icon: Cpu },
-  { id: 'appearance', label: 'Appearance', icon: Palette },
-  { id: 'storage', label: 'Storage', icon: FolderOpen },
-  { id: 'advanced', label: 'Advanced', icon: Sliders },
+const TABS: ReadonlyArray<{ id: Tab; icon: typeof Cpu }> = [
+  { id: 'models', icon: Cpu },
+  { id: 'appearance', icon: Palette },
+  { id: 'storage', icon: FolderOpen },
+  { id: 'advanced', icon: Sliders },
 ];
 
 // ─── Tiny primitives ─────────────────────────────────────────────────────────
@@ -240,6 +241,7 @@ function AddProviderModal({
   onSave: (rows: ProviderRow[]) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const providerOptions: { value: SupportedOnboardingProvider; label: string }[] = [
     { value: 'anthropic', label: 'Anthropic Claude' },
     { value: 'openai', label: 'OpenAI' },
@@ -271,12 +273,10 @@ function AddProviderModal({
         apiKey: snapshot.apiKey,
         ...(snapshot.baseUrl.length > 0 ? { baseUrl: snapshot.baseUrl } : {}),
       });
-      // Discard result if the user changed provider/key/baseUrl while we were waiting.
       setForm((current) =>
         applyValidateResult(current, snapshot, res.ok, res.ok ? undefined : res.message),
       );
     } finally {
-      // Ensure validating spinner clears even if we discarded the result.
       setForm((current) => (current.validating ? { ...current, validating: false } : current));
     }
   }
@@ -296,7 +296,7 @@ function AddProviderModal({
     } catch (err) {
       setForm((prev) => ({
         ...prev,
-        error: err instanceof Error ? err.message : 'Save failed',
+        error: err instanceof Error ? err.message : t('settings.common.unknownError'),
       }));
     }
   }
@@ -311,7 +311,7 @@ function AddProviderModal({
       // biome-ignore lint/a11y/useSemanticElements: native <dialog> top-layer rendering interferes with our overlay stack
       role="dialog"
       aria-modal="true"
-      aria-label="Add provider"
+      aria-label={t('settings.providers.modal.title')}
       className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-[var(--color-overlay)]"
       onClick={onClose}
       onKeyDown={(e) => e.key === 'Escape' && onClose()}
@@ -324,12 +324,13 @@ function AddProviderModal({
       >
         <div className="flex items-center justify-between">
           <h2 className="text-[var(--text-base)] font-semibold text-[var(--color-text-primary)]">
-            Add provider
+            {t('settings.providers.modal.title')}
           </h2>
           <button
             type="button"
             onClick={onClose}
             className="p-1.5 rounded-[var(--radius-md)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
+            aria-label={t('common.close')}
           >
             <X className="w-4 h-4" />
           </button>
@@ -338,7 +339,7 @@ function AddProviderModal({
         <div className="space-y-3">
           <div>
             <p className="block text-[var(--text-xs)] font-medium text-[var(--color-text-secondary)] mb-1.5">
-              Provider
+              {t('settings.providers.modal.provider')}
             </p>
             <NativeSelect
               value={form.provider}
@@ -350,7 +351,7 @@ function AddProviderModal({
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <p className="text-[var(--text-xs)] font-medium text-[var(--color-text-secondary)]">
-                API Key
+                {t('settings.providers.modal.apiKey')}
               </p>
               <a
                 href={sl.keyHelpUrl}
@@ -358,7 +359,7 @@ function AddProviderModal({
                 rel="noreferrer"
                 className="text-[var(--text-xs)] text-[var(--color-accent)] hover:underline"
               >
-                Get key ↗
+                {t('settings.providers.modal.getKey')}
               </a>
             </div>
             <div className="flex gap-2">
@@ -366,7 +367,7 @@ function AddProviderModal({
                 type="password"
                 value={form.apiKey}
                 onChange={(v) => setField('apiKey', v)}
-                placeholder="sk-..."
+                placeholder={t('settings.providers.modal.apiKeyPlaceholder')}
                 className="flex-1"
               />
               <button
@@ -380,7 +381,11 @@ function AddProviderModal({
                 ) : form.validated ? (
                   <CheckCircle className="w-3.5 h-3.5 text-[var(--color-success)]" />
                 ) : null}
-                {form.validated ? 'Valid' : 'Validate'}
+                {form.validating
+                  ? t('settings.providers.modal.validating')
+                  : form.validated
+                    ? t('settings.providers.modal.valid')
+                    : t('settings.providers.modal.validate')}
               </button>
             </div>
             {form.error && (
@@ -390,13 +395,15 @@ function AddProviderModal({
 
           <div>
             <p className="block text-[var(--text-xs)] font-medium text-[var(--color-text-secondary)] mb-1.5">
-              Base URL{' '}
-              <span className="text-[var(--color-text-muted)] font-normal">(optional)</span>
+              {t('settings.providers.modal.baseUrl')}{' '}
+              <span className="text-[var(--color-text-muted)] font-normal">
+                {t('settings.providers.modal.baseUrlOptional')}
+              </span>
             </p>
             <TextInput
               value={form.baseUrl}
               onChange={(v) => setField('baseUrl', v)}
-              placeholder="https://your-proxy.example.com"
+              placeholder={t('settings.providers.modal.baseUrlPlaceholder')}
               className="w-full"
             />
           </div>
@@ -404,7 +411,7 @@ function AddProviderModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <p className="block text-[var(--text-xs)] font-medium text-[var(--color-text-secondary)] mb-1.5">
-                Primary model
+                {t('settings.providers.modal.primaryModel')}
               </p>
               <NativeSelect
                 value={form.modelPrimary}
@@ -414,7 +421,7 @@ function AddProviderModal({
             </div>
             <div>
               <p className="block text-[var(--text-xs)] font-medium text-[var(--color-text-secondary)] mb-1.5">
-                Fast model
+                {t('settings.providers.modal.fastModel')}
               </p>
               <NativeSelect
                 value={form.modelFast}
@@ -427,10 +434,10 @@ function AddProviderModal({
 
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="secondary" size="sm" onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button size="sm" onClick={handleSave} disabled={!canSave}>
-            Save provider
+            {t('settings.providers.modal.save')}
           </Button>
         </div>
       </div>
@@ -451,6 +458,7 @@ function ProviderCard({
   onActivate: (p: SupportedOnboardingProvider) => void;
   onReEnterKey: (p: SupportedOnboardingProvider) => void;
 }) {
+  const t = useT();
   const label = SHORTLIST[row.provider]?.label ?? row.provider;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const hasError = row.error !== undefined;
@@ -473,13 +481,13 @@ function ProviderCard({
             </span>
             {row.isActive && !hasError && (
               <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[var(--font-size-badge)] font-medium leading-none">
-                Active
+                {t('settings.providers.active')}
               </span>
             )}
             {hasError && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[var(--color-error)] text-[var(--color-on-accent)] text-[var(--font-size-badge)] font-medium leading-none">
                 <AlertTriangle className="w-2.5 h-2.5" />
-                Decryption failed
+                {t('settings.providers.decryptionFailed')}
               </span>
             )}
           </div>
@@ -505,7 +513,7 @@ function ProviderCard({
               onClick={() => onActivate(row.provider)}
               className="h-7 px-2.5 rounded-[var(--radius-sm)] text-[var(--text-xs)] text-[var(--color-text-secondary)] border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] transition-colors"
             >
-              Set active
+              {t('settings.providers.setActive')}
             </button>
           )}
           {hasError && (
@@ -514,7 +522,7 @@ function ProviderCard({
               onClick={() => onReEnterKey(row.provider)}
               className="h-7 px-2.5 rounded-[var(--radius-sm)] text-[var(--text-xs)] text-[var(--color-error)] border border-[var(--color-error)] bg-[var(--color-surface)] hover:opacity-80 transition-opacity"
             >
-              Re-enter key
+              {t('settings.providers.reEnterKey')}
             </button>
           )}
           {confirmDelete ? (
@@ -527,14 +535,14 @@ function ProviderCard({
                 }}
                 className="h-7 px-2 rounded-[var(--radius-sm)] text-[var(--text-xs)] text-[var(--color-on-accent)] bg-[var(--color-error)] hover:opacity-90 transition-opacity"
               >
-                Confirm
+                {t('settings.providers.confirm')}
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
                 className="h-7 px-2 rounded-[var(--radius-sm)] text-[var(--text-xs)] text-[var(--color-text-secondary)] border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] transition-colors"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
             </div>
           ) : (
@@ -542,7 +550,7 @@ function ProviderCard({
               type="button"
               onClick={() => setConfirmDelete(true)}
               className="p-1.5 rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-[var(--color-surface-hover)] transition-colors"
-              aria-label={`Delete ${label} provider`}
+              aria-label={t('settings.providers.deleteAria', { label })}
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -564,6 +572,7 @@ function ActiveModelSelector({
   config: OnboardingState;
   provider: SupportedOnboardingProvider;
 }) {
+  const t = useT();
   const sl = SHORTLIST[provider];
   const primaryOptions = sl.primary.map((m) => ({ value: m, label: m }));
   const fastOptions = sl.fast.map((m) => ({ value: m, label: m }));
@@ -573,6 +582,11 @@ function ActiveModelSelector({
   const [primary, setPrimary] = useState(config.modelPrimary ?? sl.defaultPrimary);
   const [fast, setFast] = useState(config.modelFast ?? sl.defaultFast);
   const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setPrimary(config.modelPrimary ?? sl.defaultPrimary);
+    setFast(config.modelFast ?? sl.defaultFast);
+  }, [config.modelPrimary, config.modelFast, sl.defaultPrimary, sl.defaultFast]);
 
   useEffect(() => {
     return () => {
@@ -595,8 +609,8 @@ function ActiveModelSelector({
     } catch (err) {
       pushToast({
         variant: 'error',
-        title: 'Failed to save model selection',
-        description: err instanceof Error ? err.message : 'Unknown error',
+        title: t('settings.providers.toast.modelSaveFailed'),
+        description: err instanceof Error ? err.message : t('settings.common.unknownError'),
       });
     }
   }
@@ -617,13 +631,13 @@ function ActiveModelSelector({
     <div className="mt-3 pt-3 border-t border-[var(--color-border-subtle)] grid grid-cols-2 gap-3">
       <div>
         <p className="flex items-center gap-1 text-[var(--text-xs)] text-[var(--color-text-muted)] mb-1.5">
-          <Cpu className="w-3 h-3" /> Primary
+          <Cpu className="w-3 h-3" /> {t('settings.providers.primary')}
         </p>
         <NativeSelect value={primary} onChange={handlePrimaryChange} options={primaryOptions} />
       </div>
       <div>
         <p className="flex items-center gap-1 text-[var(--text-xs)] text-[var(--color-text-muted)] mb-1.5">
-          <Zap className="w-3 h-3" /> Fast
+          <Zap className="w-3 h-3" /> {t('settings.providers.fast')}
         </p>
         <NativeSelect value={fast} onChange={handleFastChange} options={fastOptions} />
       </div>
@@ -632,6 +646,7 @@ function ActiveModelSelector({
 }
 
 function ModelsTab() {
+  const t = useT();
   const config = useCodesignStore((s) => s.config);
   const setConfig = useCodesignStore((s) => s.completeOnboarding);
   const pushToast = useCodesignStore((s) => s.pushToast);
@@ -648,12 +663,12 @@ function ModelsTab() {
       .catch((err) => {
         pushToast({
           variant: 'error',
-          title: 'Failed to load providers',
-          description: err instanceof Error ? err.message : 'Unknown error',
+          title: t('settings.providers.toast.loadFailed'),
+          description: err instanceof Error ? err.message : t('settings.common.unknownError'),
         });
       })
       .finally(() => setLoading(false));
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   async function handleDelete(provider: SupportedOnboardingProvider) {
     if (!window.codesign) return;
@@ -662,12 +677,12 @@ function ModelsTab() {
       setRows(next);
       const newState = await window.codesign.onboarding.getState();
       setConfig(newState);
-      pushToast({ variant: 'success', title: 'Provider removed' });
+      pushToast({ variant: 'success', title: t('settings.providers.toast.removed') });
     } catch (err) {
       pushToast({
         variant: 'error',
-        title: 'Delete failed',
-        description: err instanceof Error ? err.message : 'Unknown error',
+        title: t('settings.providers.toast.deleteFailed'),
+        description: err instanceof Error ? err.message : t('settings.common.unknownError'),
       });
     }
   }
@@ -684,12 +699,15 @@ function ModelsTab() {
       setConfig(next);
       const updatedRows = await window.codesign.settings.listProviders();
       setRows(updatedRows);
-      pushToast({ variant: 'success', title: `Switched to ${sl.label}` });
+      pushToast({
+        variant: 'success',
+        title: t('settings.providers.toast.switchedTo', { label: sl.label }),
+      });
     } catch (err) {
       pushToast({
         variant: 'error',
-        title: 'Switch failed',
-        description: err instanceof Error ? err.message : 'Unknown error',
+        title: t('settings.providers.toast.switchFailed'),
+        description: err instanceof Error ? err.message : t('settings.common.unknownError'),
       });
     }
   }
@@ -698,7 +716,7 @@ function ModelsTab() {
     setRows(nextRows);
     setShowAdd(false);
     setReEnterProvider(null);
-    pushToast({ variant: 'success', title: 'Provider saved' });
+    pushToast({ variant: 'success', title: t('settings.providers.toast.saved') });
   }
 
   return (
@@ -715,23 +733,23 @@ function ModelsTab() {
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <SectionTitle>API Providers</SectionTitle>
+          <SectionTitle>{t('settings.providers.sectionTitle')}</SectionTitle>
           <Button variant="secondary" size="sm" onClick={() => setShowAdd(true)}>
             <Plus className="w-3.5 h-3.5" />
-            Add provider
+            {t('settings.providers.addProvider')}
           </Button>
         </div>
 
         {loading && (
           <div className="flex items-center gap-2 py-4 text-[var(--text-sm)] text-[var(--color-text-muted)]">
             <Loader2 className="w-4 h-4 animate-spin" />
-            Loading…
+            {t('settings.common.loading')}
           </div>
         )}
 
         {!loading && rows.length === 0 && (
           <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] p-6 text-center text-[var(--text-sm)] text-[var(--color-text-muted)]">
-            No providers configured yet. Add one to start generating.
+            {t('settings.providers.empty')}
           </div>
         )}
 
@@ -756,7 +774,27 @@ function ModelsTab() {
 
 // ─── Appearance tab ───────────────────────────────────────────────────────────
 
+/**
+ * Applies a locale change end-to-end:
+ *   1. Persists it via the IPC bridge (writes to disk on the main process)
+ *   2. Changes the active i18next language so React components re-render
+ *
+ * Requires a connected `localeApi` — callers must guard against a missing
+ * bridge before invoking this function.
+ *
+ * Exported so it can be unit-tested without a DOM.
+ */
+export async function applyLocaleChange(
+  locale: string,
+  localeApi: { set: (locale: string) => Promise<string> },
+): Promise<string> {
+  const persisted = await localeApi.set(locale);
+  const applied = await applyLocale(persisted);
+  return applied;
+}
+
 function AppearanceTab() {
+  const t = useT();
   const theme = useCodesignStore((s) => s.theme);
   const setTheme = useCodesignStore((s) => s.setTheme);
   const pushToast = useCodesignStore((s) => s.pushToast);
@@ -770,49 +808,63 @@ function AppearanceTab() {
       .catch((err) => {
         pushToast({
           variant: 'error',
-          title: 'Failed to load language',
-          description: err instanceof Error ? err.message : 'Unknown error',
+          title: t('settings.appearance.languageLoadFailed'),
+          description: err instanceof Error ? err.message : t('settings.common.unknownError'),
         });
       });
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   async function handleLocaleChange(v: string) {
-    if (!window.codesign) return;
+    if (!window.codesign?.locale) {
+      pushToast({
+        variant: 'error',
+        title: t('errors.localePersistFailed'),
+        description: t('errors.rendererDisconnected'),
+      });
+      return;
+    }
     try {
-      const persisted = await window.codesign.locale.set(v);
-      const applied = await applyLocale(persisted);
+      const applied = await applyLocaleChange(v, window.codesign.locale);
       setLocale(applied);
     } catch (err) {
       pushToast({
         variant: 'error',
-        title: 'Failed to save language',
-        description: err instanceof Error ? err.message : 'Unknown error',
+        title: t('errors.localePersistFailed'),
+        description: err instanceof Error ? err.message : t('errors.unknown'),
       });
     }
   }
 
+  const themeCards = [
+    {
+      value: 'light' as const,
+      label: t('settings.appearance.lightLabel'),
+      desc: t('settings.appearance.lightDesc'),
+    },
+    {
+      value: 'dark' as const,
+      label: t('settings.appearance.darkLabel'),
+      desc: t('settings.appearance.darkDesc'),
+    },
+  ];
+
   return (
     <div className="space-y-5">
       <div>
-        <SectionTitle>Theme</SectionTitle>
+        <SectionTitle>{t('settings.appearance.themeTitle')}</SectionTitle>
         <p className="text-[var(--text-xs)] text-[var(--color-text-muted)] mt-1 leading-[var(--leading-body)]">
-          Choice persists across restarts.
+          {t('settings.appearance.themeHint')}
         </p>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        {(
-          [
-            { value: 'light', label: 'Light', desc: 'Warm beige, soft shadows' },
-            { value: 'dark', label: 'Dark', desc: 'Deep neutral, low glare' },
-          ] as const
-        ).map((t) => {
-          const active = theme === t.value;
+        {themeCards.map((card) => {
+          const active = theme === card.value;
           return (
             <button
-              key={t.value}
+              key={card.value}
               type="button"
-              onClick={() => setTheme(t.value)}
+              onClick={() => setTheme(card.value)}
               className={`text-left p-4 rounded-[var(--radius-lg)] border transition-colors ${
                 active
                   ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
@@ -820,10 +872,10 @@ function AppearanceTab() {
               }`}
             >
               <div className="text-[var(--text-sm)] font-medium text-[var(--color-text-primary)]">
-                {t.label}
+                {card.label}
               </div>
               <div className="text-[var(--text-xs)] text-[var(--color-text-muted)] mt-1">
-                {t.desc}
+                {card.desc}
               </div>
             </button>
           );
@@ -831,13 +883,16 @@ function AppearanceTab() {
       </div>
 
       <div className="pt-2 border-t border-[var(--color-border-subtle)]">
-        <Row label="Language" hint="Language changes take effect immediately.">
+        <Row
+          label={t('settings.appearance.languageLabel')}
+          hint={t('settings.appearance.languageHint')}
+        >
           <NativeSelect
             value={locale}
             onChange={handleLocaleChange}
             options={[
-              { value: 'en', label: 'English' },
-              { value: 'zh-CN', label: '中文 (简体)' },
+              { value: 'en', label: t('settings.appearance.langEn') },
+              { value: 'zh-CN', label: t('settings.appearance.langZhCN') },
             ]}
           />
         </Row>
@@ -849,6 +904,7 @@ function AppearanceTab() {
 // ─── Storage tab ──────────────────────────────────────────────────────────────
 
 function CopyButton({ value }: { value: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   async function handleCopy() {
     await navigator.clipboard.writeText(value);
@@ -861,12 +917,13 @@ function CopyButton({ value }: { value: string }) {
       onClick={handleCopy}
       className="h-7 px-2 rounded-[var(--radius-sm)] text-[var(--text-xs)] text-[var(--color-text-secondary)] border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] transition-colors"
     >
-      {copied ? 'Copied!' : 'Copy'}
+      {copied ? t('settings.common.copied') : t('settings.common.copy')}
     </button>
   );
 }
 
 function PathRow({ label, value, onOpen }: { label: string; value: string; onOpen: () => void }) {
+  const t = useT();
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
@@ -879,7 +936,7 @@ function PathRow({ label, value, onOpen }: { label: string; value: string; onOpe
             className="h-7 px-2 rounded-[var(--radius-sm)] text-[var(--text-xs)] text-[var(--color-text-secondary)] border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] transition-colors inline-flex items-center gap-1"
           >
             <FolderOpen className="w-3 h-3" />
-            Open
+            {t('settings.common.open')}
           </button>
         </div>
       </div>
@@ -891,8 +948,9 @@ function PathRow({ label, value, onOpen }: { label: string; value: string; onOpe
 }
 
 function StorageTab() {
+  const t = useT();
   const pushToast = useCodesignStore((s) => s.pushToast);
-  const closeSettings = useCodesignStore((s) => s.closeSettings);
+  const setView = useCodesignStore((s) => s.setView);
   const completeOnboarding = useCodesignStore((s) => s.completeOnboarding);
   const [paths, setPaths] = useState<AppPaths | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -905,11 +963,11 @@ function StorageTab() {
       .catch((err) => {
         pushToast({
           variant: 'error',
-          title: 'Failed to load app paths',
-          description: err instanceof Error ? err.message : 'Unknown error',
+          title: t('settings.storage.pathsLoadFailed'),
+          description: err instanceof Error ? err.message : t('settings.common.unknownError'),
         });
       });
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   async function openFolder(path: string) {
     try {
@@ -917,8 +975,8 @@ function StorageTab() {
     } catch (err) {
       pushToast({
         variant: 'error',
-        title: 'Could not open folder',
-        description: err instanceof Error ? err.message : 'Unknown error',
+        title: t('settings.storage.openFolderFailed'),
+        description: err instanceof Error ? err.message : t('settings.common.unknownError'),
       });
     }
   }
@@ -928,30 +986,34 @@ function StorageTab() {
     await window.codesign.settings.resetOnboarding();
     const newState = await window.codesign.onboarding.getState();
     completeOnboarding(newState);
-    closeSettings();
-    pushToast({ variant: 'info', title: 'Onboarding reset. Restart the app to re-run setup.' });
+    setView('workspace');
+    pushToast({ variant: 'info', title: t('settings.storage.onboardingResetToast') });
     setConfirmReset(false);
   }
 
   return (
     <div className="space-y-5">
-      <SectionTitle>Paths</SectionTitle>
+      <SectionTitle>{t('settings.storage.pathsTitle')}</SectionTitle>
 
       {paths === null ? (
         <div className="flex items-center gap-2 py-4 text-[var(--text-sm)] text-[var(--color-text-muted)]">
           <Loader2 className="w-4 h-4 animate-spin" />
-          Loading…
+          {t('settings.common.loading')}
         </div>
       ) : (
         <div className="space-y-4">
           <PathRow
-            label="Config"
+            label={t('settings.storage.config')}
             value={paths.config}
             onOpen={() => openFolder(paths.configFolder)}
           />
-          <PathRow label="Logs" value={paths.logs} onOpen={() => openFolder(paths.logsFolder)} />
           <PathRow
-            label="Data directory"
+            label={t('settings.storage.logs')}
+            value={paths.logs}
+            onOpen={() => openFolder(paths.logsFolder)}
+          />
+          <PathRow
+            label={t('settings.storage.data')}
             value={paths.data}
             onOpen={() => openFolder(paths.data)}
           />
@@ -959,29 +1021,29 @@ function StorageTab() {
       )}
 
       <div className="pt-4 border-t border-[var(--color-border-subtle)]">
-        <SectionTitle>Onboarding</SectionTitle>
+        <SectionTitle>{t('settings.storage.onboardingTitle')}</SectionTitle>
         <p className="text-[var(--text-xs)] text-[var(--color-text-muted)] mt-1 mb-3 leading-[var(--leading-body)]">
-          Clear the setup flag so the onboarding wizard runs again on next launch.
+          {t('settings.storage.onboardingHint')}
         </p>
 
         {confirmReset ? (
           <div className="flex items-center gap-2">
             <span className="text-[var(--text-xs)] text-[var(--color-text-secondary)]">
-              This will remove your saved keys. Continue?
+              {t('settings.storage.resetConfirm')}
             </span>
             <button
               type="button"
               onClick={handleReset}
               className="h-7 px-3 rounded-[var(--radius-sm)] bg-[var(--color-error)] text-[var(--color-on-accent)] text-[var(--text-xs)] font-medium hover:opacity-90 transition-opacity"
             >
-              Reset
+              {t('settings.storage.reset')}
             </button>
             <button
               type="button"
               onClick={() => setConfirmReset(false)}
               className="h-7 px-3 rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--text-xs)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         ) : (
@@ -991,7 +1053,7 @@ function StorageTab() {
             className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--radius-md)] border border-[var(--color-error)] text-[var(--text-sm)] text-[var(--color-error)] hover:bg-[var(--color-error)] hover:text-[var(--color-on-accent)] transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            Reset onboarding
+            {t('settings.storage.resetButton')}
           </button>
         )}
       </div>
@@ -1002,6 +1064,7 @@ function StorageTab() {
 // ─── Advanced tab ─────────────────────────────────────────────────────────────
 
 function AdvancedTab() {
+  const t = useT();
   const pushToast = useCodesignStore((s) => s.pushToast);
   const [prefs, setPrefs] = useState<Preferences>({
     updateChannel: 'stable',
@@ -1016,11 +1079,11 @@ function AdvancedTab() {
       .catch((err) => {
         pushToast({
           variant: 'error',
-          title: 'Failed to load preferences',
-          description: err instanceof Error ? err.message : 'Unknown error',
+          title: t('settings.advanced.prefsLoadFailed'),
+          description: err instanceof Error ? err.message : t('settings.common.unknownError'),
         });
       });
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   async function updatePref(patch: Partial<Preferences>) {
     if (!window.codesign) return;
@@ -1030,8 +1093,8 @@ function AdvancedTab() {
     } catch (err) {
       pushToast({
         variant: 'error',
-        title: 'Failed to save preference',
-        description: err instanceof Error ? err.message : 'Unknown error',
+        title: t('settings.advanced.prefsSaveFailed'),
+        description: err instanceof Error ? err.message : t('settings.common.unknownError'),
       });
     }
   }
@@ -1043,8 +1106,8 @@ function AdvancedTab() {
     } catch (err) {
       pushToast({
         variant: 'error',
-        title: 'Could not toggle DevTools',
-        description: err instanceof Error ? err.message : 'Unknown error',
+        title: t('settings.advanced.devtoolsFailed'),
+        description: err instanceof Error ? err.message : t('settings.common.unknownError'),
       });
     }
   }
@@ -1052,39 +1115,39 @@ function AdvancedTab() {
   return (
     <div className="space-y-1">
       <Row
-        label="Update channel"
-        hint="Stable: tested releases. Beta: early access (may have bugs)."
+        label={t('settings.advanced.updateChannel')}
+        hint={t('settings.advanced.updateChannelHint')}
       >
         <SegmentedControl
           options={[
-            { value: 'stable', label: 'Stable' },
-            { value: 'beta', label: 'Beta' },
+            { value: 'stable', label: t('settings.advanced.stable') },
+            { value: 'beta', label: t('settings.advanced.beta') },
           ]}
           value={prefs.updateChannel}
           onChange={(v) => void updatePref({ updateChannel: v })}
         />
       </Row>
 
-      <Row label="Generation timeout" hint="Seconds before a generation request is aborted.">
+      <Row label={t('settings.advanced.timeout')} hint={t('settings.advanced.timeoutHint')}>
         <NativeSelect
           value={String(prefs.generationTimeoutSec)}
           onChange={(v) => void updatePref({ generationTimeoutSec: Number(v) })}
           options={[
-            { value: '60', label: '60 s' },
-            { value: '120', label: '120 s' },
-            { value: '180', label: '180 s' },
-            { value: '300', label: '300 s' },
+            { value: '60', label: t('settings.advanced.timeoutSeconds', { value: 60 }) },
+            { value: '120', label: t('settings.advanced.timeoutSeconds', { value: 120 }) },
+            { value: '180', label: t('settings.advanced.timeoutSeconds', { value: 180 }) },
+            { value: '300', label: t('settings.advanced.timeoutSeconds', { value: 300 }) },
           ]}
         />
       </Row>
 
-      <Row label="Developer tools" hint="Open the Chromium DevTools panel for the renderer.">
+      <Row label={t('settings.advanced.devtools')} hint={t('settings.advanced.devtoolsHint')}>
         <button
           type="button"
           onClick={handleDevtools}
           className="h-7 px-3 rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--text-xs)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
         >
-          Toggle DevTools
+          {t('settings.advanced.toggleDevtools')}
         </button>
       </Row>
     </div>
@@ -1094,46 +1157,45 @@ function AdvancedTab() {
 // ─── Shell ────────────────────────────────────────────────────────────────────
 
 export function Settings() {
-  const open = useCodesignStore((s) => s.settingsOpen);
-  const close = useCodesignStore((s) => s.closeSettings);
+  const t = useT();
+  const setView = useCodesignStore((s) => s.setView);
   const [tab, setTab] = useState<Tab>('models');
 
-  if (!open) return null;
-
   return (
-    <div
-      // biome-ignore lint/a11y/useSemanticElements: native <dialog> top-layer rendering interferes with our overlay stack
-      role="dialog"
-      aria-modal="true"
-      aria-label="Settings"
-      className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-[var(--color-overlay)] animate-[overlay-in_120ms_ease-out]"
-      onClick={close}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') close();
-      }}
-    >
-      <div
-        className="w-full max-w-3xl h-[36rem] rounded-[var(--radius-2xl)] bg-[var(--color-background)] border border-[var(--color-border)] shadow-[var(--shadow-elevated)] grid grid-cols-[11rem_1fr] overflow-hidden animate-[panel-in_160ms_ease-out]"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
-        role="document"
-      >
+    <div className="h-full flex flex-col bg-[var(--color-background)]">
+      <header className="flex items-center gap-3 px-5 h-12 border-b border-[var(--color-border)] shrink-0">
+        <button
+          type="button"
+          onClick={() => setView('workspace')}
+          className="inline-flex items-center gap-1.5 text-[var(--text-sm)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+          aria-label={t('settings.shell.backAria')}
+        >
+          <ArrowLeft className="w-4 h-4" />
+          {t('settings.shell.back')}
+        </button>
+        <span className="text-[var(--color-text-muted)]">/</span>
+        <span className="text-[var(--text-sm)] font-semibold text-[var(--color-text-primary)]">
+          {t(`settings.tabs.${tab}`)}
+        </span>
+      </header>
+
+      <div className="flex-1 grid grid-cols-[11rem_1fr] min-h-0">
         <aside className="bg-[var(--color-background-secondary)] border-r border-[var(--color-border)] p-3">
           <div className="flex items-center gap-2 px-2 py-2 mb-2">
             <Sliders className="w-4 h-4 text-[var(--color-text-secondary)]" />
             <span className="text-[var(--text-sm)] font-semibold text-[var(--color-text-primary)]">
-              Settings
+              {t('settings.title')}
             </span>
           </div>
           <nav className="space-y-0.5">
-            {TABS.map((t) => {
-              const Icon = t.icon;
-              const active = tab === t.id;
+            {TABS.map((entry) => {
+              const Icon = entry.icon;
+              const active = tab === entry.id;
               return (
                 <button
-                  key={t.id}
+                  key={entry.id}
                   type="button"
-                  onClick={() => setTab(t.id)}
+                  onClick={() => setTab(entry.id)}
                   className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-md)] text-[var(--text-sm)] transition-colors ${
                     active
                       ? 'bg-[var(--color-surface-active)] text-[var(--color-text-primary)] font-medium'
@@ -1141,28 +1203,18 @@ export function Settings() {
                   }`}
                 >
                   <Icon className="w-4 h-4 shrink-0" />
-                  {t.label}
+                  {t(`settings.tabs.${entry.id}`)}
                 </button>
               );
             })}
           </nav>
         </aside>
 
-        <section className="flex flex-col min-w-0">
-          <header className="flex items-center justify-between px-5 h-12 border-b border-[var(--color-border)] shrink-0">
-            <h2 className="text-[var(--text-sm)] font-semibold text-[var(--color-text-primary)] capitalize">
-              {tab}
-            </h2>
-            <Button variant="ghost" size="sm" onClick={close} aria-label="Close settings">
-              <X className="w-4 h-4" />
-            </Button>
-          </header>
-          <div className="flex-1 overflow-y-auto p-5">
-            {tab === 'models' ? <ModelsTab /> : null}
-            {tab === 'appearance' ? <AppearanceTab /> : null}
-            {tab === 'storage' ? <StorageTab /> : null}
-            {tab === 'advanced' ? <AdvancedTab /> : null}
-          </div>
+        <section className="flex flex-col min-h-0 overflow-y-auto p-5">
+          {tab === 'models' ? <ModelsTab /> : null}
+          {tab === 'appearance' ? <AppearanceTab /> : null}
+          {tab === 'storage' ? <StorageTab /> : null}
+          {tab === 'advanced' ? <AdvancedTab /> : null}
         </section>
       </div>
     </div>
