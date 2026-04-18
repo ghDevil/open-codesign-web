@@ -45,7 +45,8 @@ export const RULES = [
   {
     id: 'tw-raw-shorthand',
     classStringScan: true,
-    pattern: /\b(p|m|gap|text|rounded|w|h)-(xs|sm|md|lg|xl|\d{1,2})\b/g,
+    pattern:
+      /\b(p[xytrbl]?|m[xytrbl]?|gap|space-[xy]|text|rounded|w|h)-(xs|sm|md|lg|xl|\d{1,2})\b/g,
     allowMarker: 'token-ok:',
     allowOn: ['same'],
     skipFile: (file) => TEST_FILE_RE.test(file),
