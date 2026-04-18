@@ -1,3 +1,4 @@
+// check-blockers-disable: tw-raw-shorthand — TODO(token-sweep): migrate to bracketed CSS-var utilities (text-[var(--text-sm)], p-[var(--space-4)], etc.)
 import { useT } from '@open-codesign/i18n';
 import { IconButton, Tooltip } from '@open-codesign/ui';
 import { ArrowUp, FolderOpen, Link2, Paperclip, Square, X } from 'lucide-react';

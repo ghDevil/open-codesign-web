@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Lint guard for the recurring codex review blockers.
-// Three banned patterns; each accepts a per-line allow-list comment.
+// Four banned patterns; each accepts a per-line allow-list comment.
 //
 // Usage:
 //   node scripts/check-blockers.mjs            # check staged .ts/.tsx files (pre-commit)
@@ -14,6 +14,8 @@ import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
+
+const TEST_FILE_RE = /(?:\.(?:test|spec)\.[tj]sx?$|\/__tests__\/|\/tests?\/)/;
 
 export const RULES = [
   {
@@ -40,6 +42,16 @@ export const RULES = [
     message:
       "Hardcoded English string in user-facing attribute. Use t('...'). Allow with `// i18n-ok: <reason>`",
   },
+  {
+    id: 'tw-raw-shorthand',
+    classStringScan: true,
+    pattern: /\b(p|m|gap|text|rounded|w|h)-(xs|sm|md|lg|xl|\d{1,2})\b/g,
+    allowMarker: 'token-ok:',
+    allowOn: ['same'],
+    skipFile: (file) => TEST_FILE_RE.test(file),
+    message:
+      'Unbracketed Tailwind shorthand bypasses tokens. Use bracketed token (e.g. text-[var(--text-sm)], p-[var(--space-4)]). Allow with `// token-ok: <reason>`',
+  },
 ];
 
 function lineFromIndex(text, index) {
@@ -58,6 +70,85 @@ function hasAllowComment(lines, lineNumber, marker, scopes) {
   return false;
 }
 
+function readStringLiteral(source, start) {
+  const quote = source[start];
+  if (quote !== '"' && quote !== "'" && quote !== '`') return null;
+  let i = start + 1;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === '\\') {
+      i += 2;
+      continue;
+    }
+    if (ch === quote) {
+      return { start: start + 1, end: i, content: source.slice(start + 1, i) };
+    }
+    if (quote === '`' && ch === '$' && source[i + 1] === '{') {
+      let depth = 1;
+      i += 2;
+      while (i < source.length && depth > 0) {
+        if (source[i] === '{') depth++;
+        else if (source[i] === '}') depth--;
+        i++;
+      }
+      continue;
+    }
+    i++;
+  }
+  return null;
+}
+
+// Extract string literals appearing inside `className=...` attributes or `cn(...)` calls.
+// Returns array of { start, content } where start is the absolute offset in source of the
+// first character INSIDE the quotes.
+export function extractClassStrings(source) {
+  const ranges = [];
+  const triggerRe = /\bclassName\s*=|\bcn\s*\(/g;
+  let m = triggerRe.exec(source);
+  while (m !== null) {
+    let i = m.index + m[0].length;
+    let depth = m[0].endsWith('(') ? 1 : 0;
+    if (depth === 0) {
+      while (i < source.length && /\s/.test(source[i])) i++;
+      if (source[i] === '{') {
+        depth = 1;
+        i++;
+      } else {
+        const str = readStringLiteral(source, i);
+        if (str) ranges.push({ start: str.start, content: str.content });
+        triggerRe.lastIndex = Math.max(triggerRe.lastIndex, i + 1);
+        m = triggerRe.exec(source);
+        continue;
+      }
+    }
+    while (i < source.length && depth > 0) {
+      const ch = source[i];
+      if (ch === '(' || ch === '{') {
+        depth++;
+        i++;
+        continue;
+      }
+      if (ch === ')' || ch === '}') {
+        depth--;
+        i++;
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === '`') {
+        const str = readStringLiteral(source, i);
+        if (str) {
+          ranges.push({ start: str.start, content: str.content });
+          i = str.end + 1;
+          continue;
+        }
+      }
+      i++;
+    }
+    triggerRe.lastIndex = Math.max(triggerRe.lastIndex, i);
+    m = triggerRe.exec(source);
+  }
+  return ranges;
+}
+
 export function checkSource(filename, source) {
   const lines = source.split('\n');
   const fileDisabled = new Set();
@@ -71,6 +162,29 @@ export function checkSource(filename, source) {
   const violations = [];
   for (const rule of RULES) {
     if (fileDisabled.has(rule.id)) continue;
+    if (rule.skipFile?.(filename)) continue;
+    if (rule.classStringScan) {
+      const ranges = extractClassStrings(source);
+      for (const range of ranges) {
+        rule.pattern.lastIndex = 0;
+        let match = rule.pattern.exec(range.content);
+        while (match !== null) {
+          const absoluteIndex = range.start + match.index;
+          const line = lineFromIndex(source, absoluteIndex);
+          if (!hasAllowComment(lines, line, rule.allowMarker, rule.allowOn)) {
+            violations.push({
+              rule: rule.id,
+              file: filename,
+              line,
+              snippet: (lines[line - 1] ?? '').trim().slice(0, 160),
+              message: rule.message,
+            });
+          }
+          match = rule.pattern.exec(range.content);
+        }
+      }
+      continue;
+    }
     rule.pattern.lastIndex = 0;
     let match = rule.pattern.exec(source);
     while (match !== null) {

@@ -1,4 +1,4 @@
-// check-blockers-disable: hardcoded-px
+// check-blockers-disable: hardcoded-px, tw-raw-shorthand
 // Reason: provider-pick step relies on pixel-tuned chip rhythm (10/11/12/14/18px) for typography hierarchy;
 // each value lands deliberately between existing text-xs/text-sm tokens.
 import { useT } from '@open-codesign/i18n';

@@ -1,4 +1,4 @@
-// check-blockers-disable: hardcoded-px
+// check-blockers-disable: hardcoded-px, tw-raw-shorthand
 // Reason: onboarding shell uses pixel-precise stepper/progress bar (3px, 6px, 14px) and 11px caption track that
 // don't map to existing tokens; replacing with tokens would coarsen the visual rhythm.
 import { PROVIDER_SHORTLIST, type SupportedOnboardingProvider } from '@open-codesign/shared';
