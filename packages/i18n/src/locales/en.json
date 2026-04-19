@@ -393,7 +393,8 @@
     "snapshotQueued": "Snapshot queued",
     "snapshotQueuedDescription": "Persistent snapshots ship in v0.2 — your action was recorded.",
     "branchQueued": "New branch coming",
-    "branchQueuedDescription": "Branching from this design ships with snapshots in v0.2."
+    "branchQueuedDescription": "Branching from this design ships with snapshots in v0.2.",
+    "copyFailed": "Copy failed"
   },
   "inlineComment": {
     "title": "Comment on",

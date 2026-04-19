@@ -392,7 +392,8 @@
     "snapshotQueued": "快照已记录",
     "snapshotQueuedDescription": "持久化快照将在 v0.2 上线 — 当前操作已记录。",
     "branchQueued": "分支功能即将上线",
-    "branchQueuedDescription": "从当前设计分支将在 v0.2 与快照一起上线。"
+    "branchQueuedDescription": "从当前设计分支将在 v0.2 与快照一起上线。",
+    "copyFailed": "复制失败"
   },
   "inlineComment": {
     "title": "评论",

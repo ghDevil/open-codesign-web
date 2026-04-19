@@ -19,6 +19,7 @@ export function AssistantMessage({ message, index }: AssistantMessageProps) {
   const regenerate = useCodesignStore((s) => s.regenerateLast);
   const saveSnapshot = useCodesignStore((s) => s.saveSnapshot);
   const appliedComments = useCodesignStore((s) => s.appliedComments);
+  const pushToast = useCodesignStore((s) => s.pushToast);
   const [copied, setCopied] = useState(false);
   const [snapped, setSnapped] = useState(false);
 
@@ -34,8 +35,13 @@ export function AssistantMessage({ message, index }: AssistantMessageProps) {
       await navigator.clipboard.writeText(previewHtml);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard unavailable
+    } catch (err) {
+      const description = err instanceof Error ? err.message : String(err);
+      pushToast({
+        variant: 'error',
+        title: t('notifications.copyFailed'),
+        description,
+      });
     }
   }
 
