@@ -13,6 +13,7 @@ export const SkillFrontmatterV1 = z.object({
   disable_model_invocation: z.boolean().default(false),
   user_invocable: z.boolean().default(true),
   allowed_tools: z.array(z.string()).optional(),
+  templates: z.array(z.string()).optional(),
 });
 
 export type SkillFrontmatterV1 = z.infer<typeof SkillFrontmatterV1>;

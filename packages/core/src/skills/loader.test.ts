@@ -2,7 +2,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CodesignError } from '@open-codesign/shared';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadAllSkills, loadSkillsFromDir } from './loader.js';
 
 // ---------------------------------------------------------------------------
@@ -291,5 +291,76 @@ Body without description.
         err.code === 'SKILL_LOAD_FAILED' &&
         err.message.includes('broken-skill.md'),
     );
+  });
+});
+
+describe('starter templates', () => {
+  it('appends referenced starter file content to the skill body', async () => {
+    const skillDir = join(testDir, 'skills');
+    const startersDir = join(testDir, 'starters');
+    await writeSkill(
+      skillDir,
+      'with-template.md',
+      `---
+schemaVersion: 1
+name: with-template
+description: Skill that pulls in a starter file.
+templates:
+  - sample.jsx
+---
+Original body.
+`,
+    );
+    await mkdir(startersDir, { recursive: true });
+    await writeFile(join(startersDir, 'sample.jsx'), 'export const X = 1;\n', 'utf-8');
+
+    const [skill] = await loadSkillsFromDir(skillDir, 'builtin', startersDir);
+    if (!skill) throw new Error('expected skill');
+    expect(skill.frontmatter.templates).toEqual(['sample.jsx']);
+    expect(skill.body).toContain('Original body.');
+    expect(skill.body).toContain('## Available starter templates');
+    expect(skill.body).toContain('### `sample.jsx`');
+    expect(skill.body).toContain('```jsx');
+    expect(skill.body).toContain('export const X = 1;');
+  });
+
+  it('warns and skips when a referenced starter file is missing', async () => {
+    const skillDir = join(testDir, 'skills');
+    const startersDir = join(testDir, 'starters');
+    await mkdir(startersDir, { recursive: true });
+    await writeSkill(
+      skillDir,
+      'missing.md',
+      `---
+schemaVersion: 1
+name: missing
+description: Skill that references a missing starter.
+templates:
+  - does-not-exist.jsx
+---
+Body.
+`,
+    );
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const [skill] = await loadSkillsFromDir(skillDir, 'builtin', startersDir);
+      if (!skill) throw new Error('expected skill');
+      expect(warnSpy).toHaveBeenCalled();
+      expect(warnSpy.mock.calls[0]?.[0]).toContain('does-not-exist.jsx');
+      expect(skill.body).toBe('Body.');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('mobile-mock builtin skill body includes ios-frame.jsx contents', async () => {
+    const builtinDir = new URL('./builtin', import.meta.url).pathname;
+    const skills = await loadSkillsFromDir(builtinDir, 'builtin');
+    const mobile = skills.find((s) => s.id === 'mobile-mock');
+    if (!mobile) throw new Error('expected mobile-mock skill');
+    expect(mobile.frontmatter.templates).toEqual(['ios-frame.jsx']);
+    expect(mobile.body).toContain('### `ios-frame.jsx`');
+    expect(mobile.body).toContain('IOSDevice');
   });
 });

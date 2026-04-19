@@ -11,9 +11,13 @@ trigger:
   scope: system
 disable_model_invocation: false
 user_invocable: true
+templates:
+  - ios-frame.jsx
 ---
 
 ## Mobile Mock Design Standards
+
+**Available starter**: `ios-frame.jsx` — copy this React component verbatim and use it as the device frame. Render your screen content as children of `<IOSDevice>`.
 
 ### Viewport and Frame
 Render mobile screens at **375×812px** (iPhone SE / standard size baseline) or **390×844px** (iPhone 14 standard) inside a device frame when showing a standalone mock. For scrollable content mocks, use `max-width: 390px; margin: 0 auto`. Do not render at desktop width and then scale down — it produces wrong touch target proportions.

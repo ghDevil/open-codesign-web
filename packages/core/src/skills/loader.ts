@@ -188,9 +188,50 @@ function parseFrontmatter(content: string): ParsedMd {
 // Loader
 // ---------------------------------------------------------------------------
 
+/** Default location of bundled starter templates referenced by skill frontmatter. */
+export const STARTERS_DIR = new URL('../../../templates/starters/', import.meta.url).pathname;
+
+const EXT_TO_LANG: Record<string, string> = {
+  '.jsx': 'jsx',
+  '.tsx': 'tsx',
+  '.js': 'js',
+  '.ts': 'ts',
+  '.html': 'html',
+  '.css': 'css',
+  '.json': 'json',
+  '.md': 'md',
+};
+
+async function appendStarterTemplates(
+  body: string,
+  templates: string[],
+  startersDir: string,
+  skillFile: string,
+): Promise<string> {
+  const blocks: string[] = [];
+  for (const file of templates) {
+    const path = join(startersDir, file);
+    let content: string;
+    try {
+      content = await readFile(path, 'utf-8');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[skills] starter template "${file}" referenced by ${skillFile} not found: ${msg}`,
+      );
+      continue;
+    }
+    const lang = EXT_TO_LANG[extname(file).toLowerCase()] ?? '';
+    blocks.push(`### \`${file}\`\n\n\`\`\`${lang}\n${content.trimEnd()}\n\`\`\``);
+  }
+  if (blocks.length === 0) return body;
+  return `${body.trimEnd()}\n\n## Available starter templates\n\n${blocks.join('\n\n')}\n`;
+}
+
 export async function loadSkillsFromDir(
   dir: string,
   source: LoadedSkill['source'],
+  startersDir: string = STARTERS_DIR,
 ): Promise<LoadedSkill[]> {
   let entries: string[];
   try {
@@ -245,7 +286,15 @@ export async function loadSkillsFromDir(
       id,
       source,
       frontmatter: result.data,
-      body: parsed.body.trim(),
+      body:
+        result.data.templates && result.data.templates.length > 0
+          ? await appendStarterTemplates(
+              parsed.body.trim(),
+              result.data.templates,
+              startersDir,
+              filePath,
+            )
+          : parsed.body.trim(),
     });
   }
 
@@ -262,6 +311,8 @@ export interface LoadAllSkillsOptions {
   userDir?: string | undefined;
   /** <project>/.codesign/skills */
   projectDir?: string | undefined;
+  /** Directory containing starter template files referenced by frontmatter `templates`. */
+  startersDir?: string | undefined;
 }
 
 /**
@@ -270,10 +321,13 @@ export interface LoadAllSkillsOptions {
  * When two skills share the same id, the higher-priority one wins.
  */
 export async function loadAllSkills(opts: LoadAllSkillsOptions): Promise<LoadedSkill[]> {
+  const startersDir = opts.startersDir ?? STARTERS_DIR;
   const [builtin, user, project] = await Promise.all([
-    loadSkillsFromDir(opts.builtinDir, 'builtin'),
-    opts.userDir ? loadSkillsFromDir(opts.userDir, 'user') : Promise.resolve([]),
-    opts.projectDir ? loadSkillsFromDir(opts.projectDir, 'project') : Promise.resolve([]),
+    loadSkillsFromDir(opts.builtinDir, 'builtin', startersDir),
+    opts.userDir ? loadSkillsFromDir(opts.userDir, 'user', startersDir) : Promise.resolve([]),
+    opts.projectDir
+      ? loadSkillsFromDir(opts.projectDir, 'project', startersDir)
+      : Promise.resolve([]),
   ]);
 
   // Merge with priority: project overrides user overrides builtin

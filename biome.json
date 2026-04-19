@@ -12,7 +12,8 @@
       "**/.next/**",
       "**/node_modules/**",
       "**/coverage/**",
-      "**/.turbo/**"
+      "**/.turbo/**",
+      "packages/templates/starters/**"
     ]
   },
   "formatter": {
