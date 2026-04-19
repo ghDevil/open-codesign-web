@@ -1,5 +1,6 @@
 import { readFile, readdir } from 'node:fs/promises';
-import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CodesignError } from '@open-codesign/shared';
 import { type LoadedSkill, SkillFrontmatterV1 } from './types.js';
 
@@ -189,7 +190,10 @@ function parseFrontmatter(content: string): ParsedMd {
 // ---------------------------------------------------------------------------
 
 /** Default location of bundled starter templates referenced by skill frontmatter. */
-export const STARTERS_DIR = new URL('../../../templates/starters/', import.meta.url).pathname;
+export const STARTERS_DIR = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../templates/starters',
+);
 
 const EXT_TO_LANG: Record<string, string> = {
   '.jsx': 'jsx',
