@@ -304,6 +304,67 @@ describe('generate()', () => {
     expect(opts.reasoning).toBeUndefined();
   });
 
+  // Upstream returns 400 "Reasoning is mandatory for this endpoint and cannot
+  // be disabled." for openai/gpt-oss-* served via OpenRouter. The whitelist
+  // here must keep that path working without re-opening the silent-fallback
+  // problem on other pass-through ids.
+  it('passes reasoning=high for OpenRouter openai/gpt-oss-120b:free (mandates reasoning upstream)', async () => {
+    completeMock.mockResolvedValueOnce({
+      content: RESPONSE,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    });
+
+    await generate({
+      prompt: 'design a meditation app',
+      history: [],
+      model: { provider: 'openrouter', modelId: 'openai/gpt-oss-120b:free' },
+      apiKey: 'sk-test',
+    });
+
+    const opts = completeMock.mock.calls[0]?.[2] as { reasoning?: string };
+    expect(opts.reasoning).toBe('high');
+  });
+
+  it('passes reasoning=high for OpenRouter openai/gpt-oss-20b (mandates reasoning upstream)', async () => {
+    completeMock.mockResolvedValueOnce({
+      content: RESPONSE,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    });
+
+    await generate({
+      prompt: 'design a meditation app',
+      history: [],
+      model: { provider: 'openrouter', modelId: 'openai/gpt-oss-20b' },
+      apiKey: 'sk-test',
+    });
+
+    const opts = completeMock.mock.calls[0]?.[2] as { reasoning?: string };
+    expect(opts.reasoning).toBe('high');
+  });
+
+  it('omits reasoning for OpenRouter meta-llama/llama-3-70b (not on mandate-reasoning list)', async () => {
+    completeMock.mockResolvedValueOnce({
+      content: RESPONSE,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    });
+
+    await generate({
+      prompt: 'design a meditation app',
+      history: [],
+      model: { provider: 'openrouter', modelId: 'meta-llama/llama-3-70b' },
+      apiKey: 'sk-test',
+    });
+
+    const opts = completeMock.mock.calls[0]?.[2] as { reasoning?: string };
+    expect(opts.reasoning).toBeUndefined();
+  });
+
   it('omits reasoning for older Anthropic Claude models (avoids accidental extended thinking)', async () => {
     completeMock.mockResolvedValueOnce({
       content: RESPONSE,

@@ -411,6 +411,13 @@ const CLAUDE_4_MODEL_RE = /claude-(?:opus|sonnet)-4/i;
 /** OpenAI reasoning families (o-series and gpt-5). Anchored to the start of
  *  the modelId so a tenant prefix or pass-through path can't sneak through. */
 const OPENAI_REASONING_MODEL_RE = /^(?:o1|o3|o4|gpt-5)(?:[-.].*)?$/i;
+/** OpenRouter pass-through ids that *mandate* reasoning at the upstream
+ *  endpoint — sending the request without `reasoning` returns HTTP 400
+ *  ("Reasoning is mandatory for this endpoint and cannot be disabled.").
+ *  This is a strict whitelist on the namespaced id OpenRouter exposes; we do
+ *  NOT trust substring matches across other pass-through providers. Add new
+ *  entries only after observing the mandate-reasoning 400 in the wild. */
+const OPENROUTER_MANDATORY_REASONING_RE = /^openai\/gpt-oss(?:[-/].*)?$/i;
 
 function reasoningForModel(model: ModelRef): ReasoningLevel | undefined {
   // Whitelist by (provider, modelId) pair. Substring matches across providers
@@ -424,8 +431,14 @@ function reasoningForModel(model: ModelRef): ReasoningLevel | undefined {
       return CLAUDE_4_MODEL_RE.test(model.modelId) ? 'high' : undefined;
     case 'openai':
       return OPENAI_REASONING_MODEL_RE.test(model.modelId) ? 'high' : undefined;
+    case 'openrouter':
+      // Narrow whitelist: only models whose upstream endpoint *requires*
+      // reasoning (sending `reasoning: undefined` returns HTTP 400). Other
+      // pass-through ids stay undefined — we trust the namespaced prefix
+      // OpenRouter publishes, but not arbitrary substring matches.
+      return OPENROUTER_MANDATORY_REASONING_RE.test(model.modelId) ? 'high' : undefined;
     default:
-      // openrouter, groq, cerebras, xai, mistral, bedrock, azure, vercel-ai-gateway:
+      // groq, cerebras, xai, mistral, bedrock, azure, vercel-ai-gateway:
       // all pass-through or multi-tenant. Even if they serve a reasoning model,
       // we cannot trust the model id alone, and pi-ai will silently drop or
       // mistranslate the reasoning knob. Stay conservative.
