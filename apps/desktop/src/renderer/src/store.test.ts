@@ -220,7 +220,7 @@ describe('useCodesignStore generation cancellation', () => {
     expect(state.activeGenerationId).toBeNull();
     expect(state.errorMessage).toBe('Upstream proxy aborted the response');
     expect(state.lastError).toBe('Upstream proxy aborted the response');
-    expect(state.messages.at(-1)).toEqual({
+    expect(state.messages.at(-1)).toMatchObject({
       role: 'assistant',
       content: 'Error: Upstream proxy aborted the response',
     });
@@ -464,5 +464,48 @@ describe('useCodesignStore inline comment apply', () => {
     expect(state.messages.some((m) => m.role === 'assistant')).toBe(false);
     expect(state.previewHtml).toBe('<!doctype html><html><body>x</body></html>');
     expect(state.toasts.at(-1)?.variant).toBe('success');
+  });
+
+  it('anchors applied chips to the originating assistant message id, not its index or content', async () => {
+    const applyComment = vi.fn(() =>
+      Promise.resolve({
+        artifacts: [{ content: '<!doctype html><html><body>v2</body></html>' }],
+        message: '',
+      }),
+    );
+    vi.stubGlobal('window', {
+      codesign: { applyComment },
+      setTimeout,
+    });
+    // Two assistant bubbles with identical content but distinct ids.
+    useCodesignStore.setState({
+      messages: [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'same body', id: 'msg-1' },
+        { role: 'user', content: 'hi again' },
+        { role: 'assistant', content: 'same body', id: 'msg-2' },
+      ],
+      previewHtml: '<!doctype html><html><body>v1</body></html>',
+      selectedElement: {
+        selector: 'h1',
+        tag: 'h1',
+        outerHTML: '<h1>x</h1>',
+        rect: { top: 0, left: 0, width: 10, height: 10 },
+      },
+    });
+
+    await useCodesignStore.getState().applyInlineComment('tighten copy');
+
+    const { appliedComments } = useCodesignStore.getState();
+    expect(appliedComments).toHaveLength(1);
+    const chip = appliedComments[0];
+    expect(chip).toBeDefined();
+    if (!chip) throw new Error('expected chip');
+    // Chip must anchor to the *latest* assistant id (msg-2), not msg-1, and
+    // not by position. Filtering chips for msg-1 must yield zero results
+    // even though both bubbles have identical content.
+    expect(chip.targetMessageId).toBe('msg-2');
+    expect(appliedComments.filter((c) => c.targetMessageId === 'msg-1')).toHaveLength(0);
+    expect(appliedComments.filter((c) => c.targetMessageId === 'msg-2')).toHaveLength(1);
   });
 });

@@ -31,14 +31,22 @@ export type GenerationStage =
   | 'done'
   | 'error';
 
+/**
+ * Renderer-side chat message. Carries a stable `id` for assistant bubbles so
+ * applied-comment chips can anchor to a specific bubble across regenerations
+ * and across bubbles that share identical content. The `id` is stripped when
+ * the history is sent over IPC to the model layer.
+ */
+export type RendererChatMessage = ChatMessage & { id?: string };
+
 export interface AppliedComment {
   id: string;
   /**
-   * Index into `messages` of the assistant bubble this edit was applied to.
-   * `-1` means the comment was applied before any assistant message existed
-   * (e.g. on the initial generation while it was streaming).
+   * Stable id of the assistant bubble this edit was applied to. `null` means
+   * the comment was applied before any assistant message existed (e.g. on the
+   * initial generation while it was streaming).
    */
-  assistantMessageIndex: number;
+  targetMessageId: string | null;
   label: ElementLabel;
   comment: string;
   appliedAt: number;
@@ -72,7 +80,7 @@ interface PromptRequest {
 }
 
 interface CodesignState {
-  messages: ChatMessage[];
+  messages: RendererChatMessage[];
   previewHtml: string | null;
   isGenerating: boolean;
   activeGenerationId: string | null;
@@ -290,7 +298,7 @@ function applyGenerateSuccess(
     messages:
       bubbleText === null
         ? state.messages
-        : [...state.messages, { role: 'assistant', content: bubbleText }],
+        : [...state.messages, { role: 'assistant', content: bubbleText, id: newId() }],
     previewHtml: firstArtifact?.content ?? state.previewHtml,
     isGenerating: false,
     activeGenerationId: null,
@@ -308,7 +316,7 @@ function applyGenerateError(
   if (get().activeGenerationId !== generationId) return;
 
   finishIfCurrent(set, generationId, (state) => ({
-    messages: [...state.messages, { role: 'assistant', content: `Error: ${msg}` }],
+    messages: [...state.messages, { role: 'assistant', content: `Error: ${msg}`, id: newId() }],
     isGenerating: false,
     activeGenerationId: null,
     errorMessage: msg,
@@ -534,7 +542,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     if (!request) return;
 
     const generationId = newId();
-    const history = get().messages;
+    const history: ChatMessage[] = get().messages.map(({ role, content }) => ({ role, content }));
     set((s) => ({
       messages: [...s.messages, { role: 'user', content: request.prompt }],
       isGenerating: true,
@@ -620,7 +628,16 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     if (messages.at(-1)?.role === 'user' && messages.at(-1)?.content === lastPromptInput.prompt) {
       messages.pop();
     }
-    set({ messages, errorMessage: null });
+    const survivingIds = new Set(
+      messages.filter((m) => m.role === 'assistant' && m.id).map((m) => m.id as string),
+    );
+    set((s) => ({
+      messages,
+      appliedComments: s.appliedComments.filter(
+        (c) => c.targetMessageId === null || survivingIds.has(c.targetMessageId),
+      ),
+      errorMessage: null,
+    }));
     await get().sendPrompt(lastPromptInput);
   },
 
@@ -650,20 +667,21 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
 
     const referenceUrl = normalizeReferenceUrl(get().referenceUrl);
     const attachments = uniqueFiles(get().inputFiles);
-    // Anchor the comment to the latest assistant bubble. The chip renders
-    // inline with that bubble in the chat history — it does NOT pollute the
-    // main user/assistant stream with synthesized prompts.
-    const lastAssistantIndex = (() => {
+    // Anchor the comment to the latest assistant bubble by stable id. The chip
+    // renders inline with that bubble in the chat history — it does NOT
+    // pollute the main user/assistant stream with synthesized prompts.
+    const lastAssistantId = (() => {
       const msgs = get().messages;
       for (let i = msgs.length - 1; i >= 0; i--) {
-        if (msgs[i]?.role === 'assistant') return i;
+        const m = msgs[i];
+        if (m?.role === 'assistant') return m.id ?? null;
       }
-      return -1;
+      return null;
     })();
     const label = getElementLabel(selection);
     const pendingComment: AppliedComment = {
       id: newId(),
-      assistantMessageIndex: lastAssistantIndex,
+      targetMessageId: lastAssistantId,
       label,
       comment: trimmed,
       appliedAt: Date.now(),
@@ -693,7 +711,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       const shouldPushBubble = trimmedMessage.length > 0 && firstArtifact !== undefined;
       set((s) => ({
         messages: shouldPushBubble
-          ? [...s.messages, { role: 'assistant', content: trimmedMessage }]
+          ? [...s.messages, { role: 'assistant', content: trimmedMessage, id: newId() }]
           : s.messages,
         previewHtml: firstArtifact?.content ?? s.previewHtml,
         isGenerating: false,

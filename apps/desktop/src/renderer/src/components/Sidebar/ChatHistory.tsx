@@ -1,7 +1,6 @@
 import { useT } from '@open-codesign/i18n';
-import type { ChatMessage } from '@open-codesign/shared';
 import { useEffect, useRef } from 'react';
-import { useCodesignStore } from '../../store';
+import { type RendererChatMessage, useCodesignStore } from '../../store';
 import { AssistantMessage } from './AssistantMessage';
 
 export function ChatHistory() {
@@ -31,7 +30,7 @@ export function ChatHistory() {
   );
 }
 
-function Bubble({ message, index }: { message: ChatMessage; index: number }) {
+function Bubble({ message, index }: { message: RendererChatMessage; index: number }) {
   if (message.role === 'user') {
     return (
       <div className="px-[var(--space-4)] py-[var(--space-3)] rounded-[var(--radius-lg)] text-[var(--text-sm)] leading-[var(--leading-body)] whitespace-pre-wrap break-words bg-[var(--color-accent-soft)] text-[var(--color-text-primary)] border border-[var(--color-accent-muted)]">

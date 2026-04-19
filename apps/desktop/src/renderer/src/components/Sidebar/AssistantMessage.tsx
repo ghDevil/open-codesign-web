@@ -1,11 +1,10 @@
 import { useT } from '@open-codesign/i18n';
-import type { ChatMessage } from '@open-codesign/shared';
 import { Check, Copy, MessageSquareText, RefreshCcw, Star } from 'lucide-react';
 import { useState } from 'react';
-import { useCodesignStore } from '../../store';
+import { type RendererChatMessage, useCodesignStore } from '../../store';
 
 export interface AssistantMessageProps {
-  message: ChatMessage;
+  message: RendererChatMessage;
   index: number;
 }
 
@@ -25,7 +24,9 @@ export function AssistantMessage({ message, index }: AssistantMessageProps) {
 
   const isLast = index === messages.length - 1;
   const hasArtifact = isLast && previewHtml !== null && !isError;
-  const ownComments = appliedComments.filter((c) => c.assistantMessageIndex === index);
+  const ownComments = message.id
+    ? appliedComments.filter((c) => c.targetMessageId === message.id)
+    : [];
 
   async function copyArtifact(): Promise<void> {
     if (!previewHtml) return;
