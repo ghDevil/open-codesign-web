@@ -13,7 +13,8 @@
       "**/node_modules/**",
       "**/coverage/**",
       "**/.turbo/**",
-      "**/vendor/**"
+      "**/vendor/**",
+      "packaging/**"
     ]
   },
   "formatter": {

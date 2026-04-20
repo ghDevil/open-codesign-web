@@ -51,18 +51,33 @@ _Demo video coming soon._
 
 ## Quickstart
 
-### 1. Download
+### 1. Install
 
-Get the latest installer from [GitHub Releases](https://github.com/OpenCoworkAI/open-codesign/releases):
+**Package managers** (recommended):
+
+```sh
+# macOS — Homebrew
+brew tap OpenCoworkAI/tap
+brew install --cask open-codesign
+
+# Windows — winget
+winget install OpenCoworkAI.open-codesign
+
+# Windows — Scoop
+scoop bucket add opencowork https://github.com/OpenCoworkAI/scoop-bucket
+scoop install opencowork/open-codesign
+```
+
+**Direct download** from [GitHub Releases](https://github.com/OpenCoworkAI/open-codesign/releases):
 
 | Platform | File |
 |---|---|
 | macOS (Apple Silicon) | `open-codesign-*-arm64.dmg` |
-| macOS (Intel) | `open-codesign-*-x64.dmg` |
-| Windows | `open-codesign-*-Setup.exe` |
+| macOS (Intel) | `open-codesign-*.dmg` |
+| Windows (x64 / arm64) | `open-codesign-*-setup.exe` |
 | Linux | `open-codesign-*.AppImage` |
 
-> **v0.1 note:** installers are unsigned. macOS: right-click → Open. Windows: More info → Run anyway.
+> **v0.1 note:** installers are unsigned. macOS: right-click → Open, or run `xattr -d com.apple.quarantine /Applications/open-codesign.app` after install. Windows: SmartScreen → More info → Run anyway.
 > Want a verified build? Compile from source — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ### 2. Add your API key

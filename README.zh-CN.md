@@ -51,18 +51,33 @@ _演示视频即将上线。_
 
 ## 快速开始
 
-### 1. 下载安装包
+### 1. 安装
 
-从 [GitHub Releases](https://github.com/OpenCoworkAI/open-codesign/releases) 下载：
+**包管理器**（推荐）：
+
+```sh
+# macOS — Homebrew
+brew tap OpenCoworkAI/tap
+brew install --cask open-codesign
+
+# Windows — winget
+winget install OpenCoworkAI.open-codesign
+
+# Windows — Scoop
+scoop bucket add opencowork https://github.com/OpenCoworkAI/scoop-bucket
+scoop install opencowork/open-codesign
+```
+
+**直接下载** 从 [GitHub Releases](https://github.com/OpenCoworkAI/open-codesign/releases)：
 
 | 平台 | 文件 |
 |---|---|
 | macOS（Apple Silicon）| `open-codesign-*-arm64.dmg` |
-| macOS（Intel）| `open-codesign-*-x64.dmg` |
-| Windows | `open-codesign-*-Setup.exe` |
+| macOS（Intel）| `open-codesign-*.dmg` |
+| Windows（x64 / arm64）| `open-codesign-*-setup.exe` |
 | Linux | `open-codesign-*.AppImage` |
 
-> **v0.1 说明：** 安装包暂未签名。macOS：右键 → 打开。Windows：更多信息 → 仍要运行。
+> **v0.1 说明：** 安装包暂未签名。macOS：右键 → 打开，或安装后在终端执行 `xattr -d com.apple.quarantine /Applications/open-codesign.app`。Windows：SmartScreen → 更多信息 → 仍要运行。
 > 需要已验证的构建？请从源码自行编译，参见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 ### 2. 添加 API Key
