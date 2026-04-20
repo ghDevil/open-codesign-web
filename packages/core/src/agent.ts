@@ -218,6 +218,7 @@ interface PiModel {
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
   contextWindow: number;
   maxTokens: number;
+  headers?: Record<string, string>;
 }
 
 function apiForWire(wire: 'openai-chat' | 'openai-responses' | 'anthropic' | undefined): string {
@@ -238,6 +239,7 @@ function buildPiModel(
   model: ModelRef,
   wire: 'openai-chat' | 'openai-responses' | 'anthropic' | undefined,
   baseUrl: string | undefined,
+  httpHeaders?: Record<string, string> | undefined,
 ): PiModel {
   // Fall through to the canonical public endpoint for the 3 first-party
   // BYOK providers when the caller omitted baseUrl. This is a fact about
@@ -254,7 +256,7 @@ function buildPiModel(
       'PROVIDER_BASE_URL_MISSING',
     );
   }
-  return {
+  const out: PiModel = {
     id: model.modelId,
     name: model.modelId,
     api: apiForWire(wire),
@@ -266,6 +268,8 @@ function buildPiModel(
     contextWindow: 200000,
     maxTokens: 32000,
   };
+  if (httpHeaders !== undefined) out.headers = httpHeaders;
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -614,20 +618,6 @@ export async function generateViaAgent(
   if (!input.prompt.trim()) {
     throw new CodesignError('Prompt cannot be empty', 'INPUT_EMPTY_PROMPT');
   }
-  // Empty apiKey reaches pi-ai's openai-completions provider as `apiKey: ""`
-  // and surfaces as the opaque "OpenAI API key is required" Error. Surface our
-  // own typed CodesignError instead so callers (and the renderer) get the same
-  // PROVIDER_AUTH_MISSING contract as the canonical codesign:v1:generate IPC.
-  // TODO(agent-http-headers): When `input.httpHeaders` carries a non-empty
-  // `x-api-key` / `Authorization`, the IP-auth coproxy use case should be
-  // supported here. Today httpHeaders is NOT threaded into pi-agent-core, so
-  // the safe behaviour is to refuse empty apiKey rather than silently fail.
-  if (input.apiKey.length === 0) {
-    throw new CodesignError(
-      `No API key configured for provider "${input.model.provider}". Open Settings to add one.`,
-      'PROVIDER_AUTH_MISSING',
-    );
-  }
   if (!input.systemPrompt && input.mode && input.mode !== 'create') {
     throw new CodesignError(
       'generateViaAgent() built-in prompt only supports mode "create".',
@@ -637,7 +627,7 @@ export async function generateViaAgent(
 
   log.info('[generate] step=resolve_model', ctx);
   const resolveStart = Date.now();
-  const piModel = buildPiModel(input.model, input.wire, input.baseUrl);
+  const piModel = buildPiModel(input.model, input.wire, input.baseUrl, input.httpHeaders);
   log.info('[generate] step=resolve_model.ok', { ...ctx, ms: Date.now() - resolveStart });
 
   log.info('[generate] step=build_request', ctx);
@@ -725,7 +715,7 @@ export async function generateViaAgent(
     // in LLM-facing size across a long tool-using run and blow past 1 M
     // tokens. See context-prune.ts for the full strategy.
     transformContext: buildTransformContext(),
-    getApiKey: () => input.apiKey,
+    getApiKey: () => input.apiKey || 'open-codesign-keyless',
   });
 
   if (deps.onEvent) {

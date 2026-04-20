@@ -25,6 +25,7 @@ import {
   assertProviderHasStoredSecret,
   computeDeleteProviderResult,
   getAddProviderDefaults,
+  isKeylessProviderAllowed,
   toProviderRows,
 } from './provider-settings';
 import { buildAppPaths } from './storage-settings';
@@ -94,7 +95,7 @@ function toState(cfg: Config | null): OnboardingState {
   }
   const active = cfg.activeProvider;
   const ref = cfg.secrets[active];
-  if (ref === undefined) {
+  if (ref === undefined && !isKeylessProviderAllowed(active)) {
     return {
       hasKey: false,
       provider: active,
@@ -617,14 +618,7 @@ async function runImportCodex(imported: CodexImport): Promise<OnboardingState> {
       const envValue = process.env[entry.envKey];
       if (envValue !== undefined && envValue.length > 0) {
         nextSecrets[entry.id] = { ciphertext: encryptSecret(envValue) };
-      } else if (nextSecrets[entry.id] === undefined) {
-        // env var not exported — store empty key so the provider is
-        // usable for keyless endpoints (IP-whitelisted proxies).
-        nextSecrets[entry.id] = { ciphertext: encryptSecret('') };
       }
-    } else if (nextSecrets[entry.id] === undefined) {
-      // No env_key at all — likely a keyless proxy.
-      nextSecrets[entry.id] = { ciphertext: encryptSecret('') };
     }
   }
   const fallbackActive = imported.providers[0];

@@ -158,4 +158,43 @@ describe('complete', () => {
     ).rejects.toMatchObject({ code: 'PROVIDER_MODEL_UNKNOWN' });
     expect(completeSimpleMock).not.toHaveBeenCalled();
   });
+
+  it('allows keyless custom gateways by passing a local placeholder key and extra headers', async () => {
+    getModelMock.mockReturnValue(undefined);
+    completeSimpleMock.mockImplementationOnce(async (_model, _context, opts) => {
+      expect(opts.apiKey).toBe('open-codesign-keyless');
+      expect(opts.headers).toEqual({ 'x-proxy-auth': 'local' });
+      return {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'ok' }],
+        api: 'openai-completions',
+        provider: 'codex-proxy',
+        model: 'gpt-5.3-codex',
+        usage: {
+          input: 1,
+          output: 1,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 2,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: 'stop',
+        timestamp: Date.now(),
+      };
+    });
+
+    const result = await complete(
+      { provider: 'codex-proxy', modelId: 'gpt-5.3-codex' },
+      [{ role: 'user', content: 'hi' }],
+      {
+        apiKey: '',
+        allowKeyless: true,
+        wire: 'openai-chat',
+        baseUrl: 'https://proxy.example.test/v1',
+        httpHeaders: { 'x-proxy-auth': 'local' },
+      },
+    );
+
+    expect(result.content).toBe('ok');
+  });
 });

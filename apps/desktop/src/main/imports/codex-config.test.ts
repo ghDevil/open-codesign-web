@@ -43,6 +43,25 @@ wire_api = "responses"
     const out = await parseCodexConfig(toml);
     expect(out.providers[0]?.wire).toBe('openai-responses');
     expect(out.providers[0]?.queryParams?.['api-version']).toBe('2025-04-01-preview');
+    expect(out.providers[0]?.defaultModel).toBe('gpt-4o');
+  });
+
+  it('uses provider-local model when a non-active provider declares one', async () => {
+    const toml = `
+model = "deepseek-chat"
+model_provider = "deepseek"
+
+[model_providers.deepseek]
+base_url = "https://api.deepseek.com/v1"
+
+[model_providers.local_proxy]
+base_url = "https://proxy.example.test/v1"
+model = "qwen3-coder"
+`;
+    const out = await parseCodexConfig(toml);
+    expect(out.providers.find((p) => p.id === 'codex-local_proxy')?.defaultModel).toBe(
+      'qwen3-coder',
+    );
   });
 
   it('skips provider blocks missing base_url with a warning', async () => {

@@ -13,6 +13,7 @@ function makeCfg(input: {
   modelPrimary: string;
   secrets?: Record<string, { ciphertext: string }>;
   baseUrls?: Record<string, string>;
+  providers?: Record<string, import('@open-codesign/shared').ProviderEntry>;
 }): Config {
   const providers: Record<string, import('@open-codesign/shared').ProviderEntry> = {
     anthropic: {
@@ -39,6 +40,7 @@ function makeCfg(input: {
       baseUrl: input.baseUrls?.['openrouter'] ?? 'https://openrouter.ai/api/v1',
       defaultModel: 'anthropic/claude-sonnet-4.6',
     },
+    ...(input.providers ?? {}),
   };
   return hydrateConfig({
     version: 3,
@@ -125,6 +127,25 @@ describe('assertProviderHasStoredSecret', () => {
     });
 
     expect(() => assertProviderHasStoredSecret(cfg, 'anthropic')).toThrow(CodesignError);
+  });
+
+  it('allows imported Codex providers without a stored API key', () => {
+    const cfg = makeCfg({
+      provider: 'codex-proxy',
+      modelPrimary: 'gpt-5.3-codex',
+      providers: {
+        'codex-proxy': {
+          id: 'codex-proxy',
+          name: 'Codex (imported)',
+          builtin: false,
+          wire: 'openai-responses',
+          baseUrl: 'https://proxy.example.com/v1',
+          defaultModel: 'gpt-5.3-codex',
+        },
+      },
+    });
+
+    expect(() => assertProviderHasStoredSecret(cfg, 'codex-proxy')).not.toThrow();
   });
 });
 
@@ -271,5 +292,30 @@ describe('resolveActiveModel', () => {
     expect(() =>
       resolveActiveModel(cfg, { provider: 'anthropic', modelId: 'claude-sonnet-4-6' }),
     ).toThrowError(CodesignError);
+  });
+
+  it('allows active imported Codex providers without a stored secret', () => {
+    const cfg = makeCfg({
+      provider: 'codex-proxy',
+      modelPrimary: 'gpt-5.3-codex',
+      providers: {
+        'codex-proxy': {
+          id: 'codex-proxy',
+          name: 'Codex (imported)',
+          builtin: false,
+          wire: 'openai-responses',
+          baseUrl: 'https://proxy.example.com/v1',
+          defaultModel: 'gpt-5.3-codex',
+        },
+      },
+    });
+
+    const result = resolveActiveModel(cfg, {
+      provider: 'codex-proxy',
+      modelId: 'gpt-5.3-codex',
+    });
+
+    expect(result.model).toEqual({ provider: 'codex-proxy', modelId: 'gpt-5.3-codex' });
+    expect(result.baseUrl).toBe('https://proxy.example.com/v1');
   });
 });

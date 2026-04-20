@@ -23,10 +23,13 @@ type CodexProviderBlock = {
   name?: string;
   base_url?: string;
   env_key?: string;
+  model?: string;
   wire_api?: string;
   http_headers?: Record<string, string>;
   query_params?: Record<string, string>;
 };
+
+const FALLBACK_IMPORTED_MODEL = 'gpt-4o';
 
 /**
  * Parse a Codex `config.toml` string and translate each `[model_providers.X]`
@@ -62,6 +65,14 @@ export async function parseCodexConfig(toml: string): Promise<CodexImport> {
 
   const root = parsed as Record<string, unknown>;
   const modelProviders = root['model_providers'];
+  const activeProviderRaw = root['model_provider'];
+  const activeModelRaw = root['model'];
+  const activeProviderId =
+    typeof activeProviderRaw === 'string' && activeProviderRaw.length > 0
+      ? `codex-${activeProviderRaw}`
+      : null;
+  const activeModel =
+    typeof activeModelRaw === 'string' && activeModelRaw.length > 0 ? activeModelRaw : null;
   const providers: ProviderEntry[] = [];
   const envKeyMap: Record<string, string> = {};
 
@@ -82,13 +93,17 @@ export async function parseCodexConfig(toml: string): Promise<CodexImport> {
             : block.wire_api === 'chat'
               ? 'openai-chat'
               : detectWireFromBaseUrl(block.base_url);
+        const blockModel = typeof block.model === 'string' ? block.model.trim() : '';
+        const activeModelForProvider =
+          activeProviderId === `codex-${id}` && activeModel !== null ? activeModel : null;
+        const defaultModel = (activeModelForProvider ?? blockModel) || FALLBACK_IMPORTED_MODEL;
         const entry: ProviderEntry = {
           id: `codex-${id}`,
           name: 'Codex (imported)',
           builtin: false,
           wire,
           baseUrl: block.base_url,
-          defaultModel: '', // caller fills in via active model if this provider wins
+          defaultModel,
         };
         if (typeof block.env_key === 'string' && block.env_key.length > 0) {
           entry.envKey = block.env_key;
@@ -113,18 +128,8 @@ export async function parseCodexConfig(toml: string): Promise<CodexImport> {
     }
   }
 
-  const activeProviderRaw = root['model_provider'];
-  const activeModelRaw = root['model'];
-  const activeProviderId =
-    typeof activeProviderRaw === 'string' && activeProviderRaw.length > 0
-      ? `codex-${activeProviderRaw}`
-      : null;
-  const activeModel =
-    typeof activeModelRaw === 'string' && activeModelRaw.length > 0 ? activeModelRaw : null;
-
   // Backfill defaultModel for the active provider so the UI has something to
-  // offer by default. Non-active providers keep an empty defaultModel and
-  // the user picks one on first activation.
+  // offer by default even if the provider block did not declare a model.
   if (activeProviderId !== null && activeModel !== null) {
     const entry = providers.find((p) => p.id === activeProviderId);
     if (entry !== undefined) entry.defaultModel = activeModel;

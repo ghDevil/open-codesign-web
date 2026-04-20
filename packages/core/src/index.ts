@@ -80,6 +80,7 @@ export interface GenerateInput {
   wire?: 'openai-chat' | 'openai-responses' | 'anthropic' | undefined;
   /** v3 extra HTTP headers merged into the outbound request (gateway auth). */
   httpHeaders?: Record<string, string> | undefined;
+  allowKeyless?: boolean | undefined;
   designSystem?: StoredDesignSystem | null | undefined;
   attachments?: AttachmentContext[] | undefined;
   referenceUrl?: ReferenceUrlContext | null | undefined;
@@ -104,6 +105,7 @@ export interface ApplyCommentInput {
   baseUrl?: string | undefined;
   wire?: 'openai-chat' | 'openai-responses' | 'anthropic' | undefined;
   httpHeaders?: Record<string, string> | undefined;
+  allowKeyless?: boolean | undefined;
   designSystem?: StoredDesignSystem | null | undefined;
   attachments?: AttachmentContext[] | undefined;
   referenceUrl?: ReferenceUrlContext | null | undefined;
@@ -137,6 +139,7 @@ interface ModelRunInput {
   baseUrl?: string | undefined;
   wire?: 'openai-chat' | 'openai-responses' | 'anthropic' | undefined;
   httpHeaders?: Record<string, string> | undefined;
+  allowKeyless?: boolean | undefined;
   signal?: AbortSignal | undefined;
   onRetry?: ((info: RetryReason) => void) | undefined;
   messages: ChatMessage[];
@@ -314,6 +317,7 @@ async function runModel(input: ModelRunInput): Promise<GenerateOutput> {
           ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl } : {}),
           ...(input.wire !== undefined ? { wire: input.wire } : {}),
           ...(input.httpHeaders !== undefined ? { httpHeaders: input.httpHeaders } : {}),
+          ...(input.allowKeyless === true ? { allowKeyless: true } : {}),
           ...(input.signal !== undefined ? { signal: input.signal } : {}),
           maxTokens: MAX_OUTPUT_TOKENS,
           ...(reasoning !== undefined ? { reasoning } : {}),
@@ -608,6 +612,7 @@ export async function generate(input: GenerateInput): Promise<GenerateOutput> {
     baseUrl: input.baseUrl,
     wire: input.wire,
     httpHeaders: input.httpHeaders,
+    allowKeyless: input.allowKeyless,
     signal: input.signal,
     onRetry: input.onRetry,
     messages,
@@ -659,6 +664,7 @@ export async function applyComment(input: ApplyCommentInput): Promise<GenerateOu
     baseUrl: input.baseUrl,
     wire: input.wire,
     httpHeaders: input.httpHeaders,
+    allowKeyless: input.allowKeyless,
     signal: input.signal,
     onRetry: input.onRetry,
     messages,
@@ -681,6 +687,7 @@ export interface GenerateTitleInput {
   baseUrl?: string | undefined;
   wire?: 'openai-chat' | 'openai-responses' | 'anthropic' | undefined;
   httpHeaders?: Record<string, string> | undefined;
+  allowKeyless?: boolean | undefined;
   signal?: AbortSignal | undefined;
   logger?: CoreLogger | undefined;
 }
@@ -730,6 +737,7 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string> 
       ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl } : {}),
       ...(input.wire !== undefined ? { wire: input.wire } : {}),
       ...(input.httpHeaders !== undefined ? { httpHeaders: input.httpHeaders } : {}),
+      ...(input.allowKeyless === true ? { allowKeyless: true } : {}),
       ...(input.signal !== undefined ? { signal: input.signal } : {}),
       maxTokens: 60,
     });

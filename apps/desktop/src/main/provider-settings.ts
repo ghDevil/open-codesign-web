@@ -53,7 +53,12 @@ export function getAddProviderDefaults(
 
 export function assertProviderHasStoredSecret(cfg: Config, provider: string): void {
   if (cfg.secrets[provider] !== undefined) return;
+  if (provider.startsWith('codex-')) return;
   throw new CodesignError(`No API key stored for provider "${provider}".`, 'PROVIDER_KEY_MISSING');
+}
+
+export function isKeylessProviderAllowed(provider: string): boolean {
+  return provider.startsWith('codex-');
 }
 
 function resolveEntryFor(cfg: Config, id: string): ProviderEntry | null {
@@ -133,7 +138,9 @@ export interface DeleteProviderResult {
  * what the next active provider and model values should be.
  */
 export function computeDeleteProviderResult(cfg: Config, toDelete: string): DeleteProviderResult {
-  const remaining = Object.keys(cfg.secrets).filter((p) => p !== toDelete);
+  const remaining = Object.keys(cfg.providers).filter(
+    (p) => p !== toDelete && (cfg.secrets[p] !== undefined || isKeylessProviderAllowed(p)),
+  );
 
   if (remaining.length === 0) {
     return { nextActive: null, modelPrimary: '' };
@@ -175,7 +182,7 @@ export function resolveActiveModel(
   hint: { provider: string; modelId: string },
 ): ActiveModelResolution {
   const activeId = cfg.activeProvider;
-  if (cfg.secrets[activeId] === undefined) {
+  if (cfg.secrets[activeId] === undefined && !isKeylessProviderAllowed(activeId)) {
     throw new CodesignError(
       `No API key stored for active provider "${activeId}". Re-run onboarding to add one.`,
       'PROVIDER_KEY_MISSING',

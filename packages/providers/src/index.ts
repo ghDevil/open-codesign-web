@@ -36,6 +36,12 @@ export interface GenerateOptions {
   /** Extra HTTP headers (merged last). Supports Codex-style static headers
    *  for gateways that require custom auth keys. */
   httpHeaders?: Record<string, string>;
+  /**
+   * Allow OpenAI-compatible keyless gateways. The upstream SDK still requires
+   * a non-empty apiKey string to instantiate its client, so this uses a local
+   * placeholder while auth is supplied by `httpHeaders` or by the gateway.
+   */
+  allowKeyless?: boolean;
 }
 
 export interface GenerateResult {
@@ -187,9 +193,10 @@ export async function complete(
   messages: ChatMessage[],
   opts: GenerateOptions,
 ): Promise<GenerateResult> {
-  if (!opts.apiKey) {
+  if (!opts.apiKey && opts.allowKeyless !== true) {
     throw new CodesignError('Missing API key', 'PROVIDER_AUTH_MISSING');
   }
+  const apiKey = opts.apiKey || 'open-codesign-keyless';
 
   const pi = (await import('@mariozechner/pi-ai')) as unknown as {
     getModel: (provider: string, modelId: string) => PiModel | undefined;
@@ -202,7 +209,7 @@ export async function complete(
         signal?: AbortSignal;
         maxTokens?: number;
         reasoning?: ReasoningLevel;
-        httpHeaders?: Record<string, string>;
+        headers?: Record<string, string>;
       },
     ) => Promise<PiAssistantMessage>;
   };
@@ -227,15 +234,15 @@ export async function complete(
     signal?: AbortSignal;
     maxTokens?: number;
     reasoning?: ReasoningLevel;
-    httpHeaders?: Record<string, string>;
+    headers?: Record<string, string>;
   } = {
-    apiKey: opts.apiKey,
+    apiKey,
   };
   if (opts.baseUrl !== undefined) piOpts.baseUrl = opts.baseUrl;
   if (opts.signal !== undefined) piOpts.signal = opts.signal;
   if (opts.maxTokens !== undefined) piOpts.maxTokens = opts.maxTokens;
   if (opts.reasoning !== undefined) piOpts.reasoning = opts.reasoning;
-  if (opts.httpHeaders !== undefined) piOpts.httpHeaders = opts.httpHeaders;
+  if (opts.httpHeaders !== undefined) piOpts.headers = opts.httpHeaders;
 
   const result = await pi.completeSimple(piModel, toPiContext(messages, piModel), piOpts);
 

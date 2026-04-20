@@ -43,7 +43,7 @@ import {
 } from './onboarding-ipc';
 import { readPersisted as readPreferences, registerPreferencesIpc } from './preferences-ipc';
 import { preparePromptContext } from './prompt-context';
-import { resolveActiveModel } from './provider-settings';
+import { isKeylessProviderAllowed, resolveActiveModel } from './provider-settings';
 import { safeInitSnapshotsDb } from './snapshots-db';
 import { registerSnapshotsIpc, registerSnapshotsUnavailableIpc } from './snapshots-ipc';
 
@@ -437,6 +437,7 @@ function registerIpcHandlers(): void {
     } catch {
       apiKey = '';
     }
+    const allowKeyless = isKeylessProviderAllowed(active.model.provider);
     // Once we've snapped to the canonical active provider, the renderer-supplied
     // baseUrl can no longer be trusted — it may belong to a different (stale)
     // provider and would route the active provider's API key to the wrong host.
@@ -468,7 +469,7 @@ function registerIpcHandlers(): void {
       modelId: active.model.modelId,
     };
     coreLogger.info('[generate] step=validate_provider', stepCtx);
-    if (apiKey.length === 0) {
+    if (apiKey.length === 0 && !allowKeyless) {
       coreLogger.error('[generate] step=validate_provider.fail', {
         provider: active.model.provider,
         reason: 'missing_api_key',
@@ -518,6 +519,7 @@ function registerIpcHandlers(): void {
           ...(baseUrl !== undefined ? { baseUrl } : {}),
           wire: active.wire,
           ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
+          ...(allowKeyless ? { allowKeyless: true } : {}),
           signal: controller.signal,
           logger: coreLogger,
         },
@@ -575,6 +577,7 @@ function registerIpcHandlers(): void {
     } catch {
       apiKey = '';
     }
+    const allowKeyless = isKeylessProviderAllowed(active.model.provider);
     // See codesign:v1:generate above — renderer baseUrl is ignored post-snap.
     const baseUrl = active.baseUrl ?? undefined;
     if (active.overridden) {
@@ -617,6 +620,7 @@ function registerIpcHandlers(): void {
           ...(baseUrl !== undefined ? { baseUrl } : {}),
           wire: active.wire,
           ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
+          ...(allowKeyless ? { allowKeyless: true } : {}),
           signal: controller.signal,
         },
         id,
@@ -672,6 +676,7 @@ function registerIpcHandlers(): void {
     } catch {
       apiKey = '';
     }
+    const allowKeyless = isKeylessProviderAllowed(active.model.provider);
     const baseUrl = active.baseUrl ?? undefined;
     const promptContext = await preparePromptContext({
       attachments: payload.attachments,
@@ -706,6 +711,7 @@ function registerIpcHandlers(): void {
         ...(baseUrl !== undefined ? { baseUrl } : {}),
         wire: active.wire,
         ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
+        ...(allowKeyless ? { allowKeyless: true } : {}),
       });
       logIpc.info('applyComment.ok', {
         ms: Date.now() - t0,
@@ -740,7 +746,13 @@ function registerIpcHandlers(): void {
       provider: cfg.activeProvider,
       modelId: cfg.activeModel,
     });
-    const apiKey = getApiKeyForProvider(active.model.provider);
+    let apiKey: string;
+    try {
+      apiKey = getApiKeyForProvider(active.model.provider);
+    } catch {
+      apiKey = '';
+    }
+    const allowKeyless = isKeylessProviderAllowed(active.model.provider);
     const baseUrl = active.baseUrl ?? undefined;
     return generateTitle({
       prompt,
@@ -749,6 +761,7 @@ function registerIpcHandlers(): void {
       ...(baseUrl !== undefined ? { baseUrl } : {}),
       wire: active.wire,
       ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
+      ...(allowKeyless ? { allowKeyless: true } : {}),
     });
   });
 

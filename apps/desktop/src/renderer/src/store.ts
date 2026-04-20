@@ -13,7 +13,6 @@ import type {
   ModelRef,
   OnboardingState,
   SelectedElement,
-  SupportedOnboardingProvider,
 } from '@open-codesign/shared';
 import { create } from 'zustand';
 import type { StoreApi } from 'zustand';
@@ -396,7 +395,7 @@ function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function modelRef(provider: SupportedOnboardingProvider, modelId: string): ModelRef {
+function modelRef(provider: string, modelId: string): ModelRef {
   return { provider, modelId };
 }
 
@@ -605,7 +604,7 @@ function triggerAutoRenameIfFirst(get: GetState, isFirstPrompt: boolean, prompt:
 
 interface ReadyConfig extends OnboardingState {
   hasKey: true;
-  provider: SupportedOnboardingProvider;
+  provider: string;
   modelPrimary: string;
 }
 
