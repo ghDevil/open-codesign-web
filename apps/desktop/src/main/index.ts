@@ -1,6 +1,12 @@
 import { stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { type CoreLogger, applyComment, generate } from '@open-codesign/core';
+import {
+  type AgentEvent,
+  type CoreLogger,
+  applyComment,
+  generate,
+  generateViaAgent,
+} from '@open-codesign/core';
 import { detectProviderFromKey } from '@open-codesign/providers';
 import {
   ApplyCommentPayload,
@@ -35,6 +41,19 @@ import { safeInitSnapshotsDb } from './snapshots-db';
 import { registerSnapshotsIpc, registerSnapshotsUnavailableIpc } from './snapshots-ipc';
 
 let mainWindow: ElectronBrowserWindow | null = null;
+
+/**
+ * Workstream B Phase 1 feature flag. When truthy, `codesign:*:generate` routes
+ * through `generateViaAgent()` (pi-agent-core, zero tools). Default off — any
+ * other value (including unset / empty) keeps the legacy `generate()` path.
+ *
+ * Read once at module init: changing the env var mid-session requires an app
+ * restart, which matches every other flag we expose today.
+ */
+const USE_AGENT_RUNTIME = (() => {
+  const raw = process.env['USE_AGENT_RUNTIME'];
+  return raw === '1' || raw === 'true';
+})();
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -71,6 +90,13 @@ function createWindow(): void {
 function registerIpcHandlers(): void {
   const logIpc = getLogger('main:ipc');
 
+  if (USE_AGENT_RUNTIME) {
+    logIpc.info('generate.runtime.agent_enabled', {
+      env: 'USE_AGENT_RUNTIME',
+      phase: 1,
+    });
+  }
+
   /** Adapter so `core` can log step events through the same scoped electron-log
    * sink the IPC handler uses. Keeps a single timeline per generation in the
    * log file without forcing `core` to depend on electron-log. */
@@ -78,6 +104,24 @@ function registerIpcHandlers(): void {
     info: (event, data) => logIpc.info(event, { id, ...(data ?? {}) }),
     error: (event, data) => logIpc.error(event, { id, ...(data ?? {}) }),
   });
+
+  /**
+   * Phase 1 flag dispatcher. When `USE_AGENT_RUNTIME` is off, passes through
+   * to `generate()` unchanged. When on, routes through `generateViaAgent()`
+   * and forwards each `AgentEvent` to the per-request log for now — Workstream C
+   * will tap the same onEvent signature to persist events into `chat_messages`.
+   */
+  const runGenerate = (
+    input: Parameters<typeof generate>[0],
+    id: string,
+  ): ReturnType<typeof generate> => {
+    if (!USE_AGENT_RUNTIME) return generate(input);
+    return generateViaAgent(input, {
+      onEvent: (event: AgentEvent) => {
+        logIpc.info('generate.agent.event', { id, type: event.type });
+      },
+    });
+  };
 
   /** In-flight requests: generationId → AbortController */
   const inFlight = new Map<string, AbortController>();
@@ -238,18 +282,21 @@ function registerIpcHandlers(): void {
     let clearTimeoutGuard: () => void = () => {};
     try {
       clearTimeoutGuard = await armTimeout(id, controller);
-      const result = await generate({
-        prompt: payload.prompt,
-        history: payload.history,
-        model: active.model,
-        apiKey,
-        attachments: promptContext.attachments,
-        referenceUrl: promptContext.referenceUrl,
-        designSystem: promptContext.designSystem ?? null,
-        ...(baseUrl !== undefined ? { baseUrl } : {}),
-        signal: controller.signal,
-        logger: coreLogger,
-      });
+      const result = await runGenerate(
+        {
+          prompt: payload.prompt,
+          history: payload.history,
+          model: active.model,
+          apiKey,
+          attachments: promptContext.attachments,
+          referenceUrl: promptContext.referenceUrl,
+          designSystem: promptContext.designSystem ?? null,
+          ...(baseUrl !== undefined ? { baseUrl } : {}),
+          signal: controller.signal,
+          logger: coreLogger,
+        },
+        id,
+      );
       logIpc.info('generate.ok', {
         id,
         ms: Date.now() - t0,
@@ -325,17 +372,20 @@ function registerIpcHandlers(): void {
     let clearTimeoutGuard: () => void = () => {};
     try {
       clearTimeoutGuard = await armTimeout(id, controller);
-      const result = await generate({
-        prompt: payload.prompt,
-        history: payload.history,
-        model: active.model,
-        apiKey,
-        attachments: promptContext.attachments,
-        referenceUrl: promptContext.referenceUrl,
-        designSystem: promptContext.designSystem ?? null,
-        ...(baseUrl !== undefined ? { baseUrl } : {}),
-        signal: controller.signal,
-      });
+      const result = await runGenerate(
+        {
+          prompt: payload.prompt,
+          history: payload.history,
+          model: active.model,
+          apiKey,
+          attachments: promptContext.attachments,
+          referenceUrl: promptContext.referenceUrl,
+          designSystem: promptContext.designSystem ?? null,
+          ...(baseUrl !== undefined ? { baseUrl } : {}),
+          signal: controller.signal,
+        },
+        id,
+      );
       logIpc.info('generate.ok', {
         id,
         ms: Date.now() - t0,
