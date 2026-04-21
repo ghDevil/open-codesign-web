@@ -22,11 +22,11 @@ const DEFAULT_PORT = 1455;
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 
 function successPage(): string {
-  return '<html><body style="font-family:system-ui;padding:40px"><h1>✅ 登录成功</h1><p>你可以关闭此窗口回到 open-codesign。</p></body></html>';
+  return '<html><body style="font-family:system-ui;padding:40px;max-width:560px;margin:0 auto"><h1 style="color:#0f766e;margin-bottom:8px">登录成功</h1><p style="color:#475569">你可以关闭此窗口回到 open-codesign。</p></body></html>';
 }
 
 function errorPage(title: string, detail: string): string {
-  return `<html><body style="font-family:system-ui;padding:40px"><h1>❌ ${title}</h1><p>${detail}</p></body></html>`;
+  return `<html><body style="font-family:system-ui;padding:40px;max-width:560px;margin:0 auto"><h1 style="color:#b91c1c;margin-bottom:8px">${title}</h1><p style="color:#475569">${detail}</p></body></html>`;
 }
 
 function listen(port: number): Promise<Server> {
