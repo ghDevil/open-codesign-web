@@ -1,4 +1,5 @@
 import type { DesignToken } from '@open-codesign/shared';
+import type { CoreLogger } from '../logger.js';
 
 // W3C Design Tokens Community Group spec (2025.10 stable) defines leaf tokens
 // as JSON objects containing a `$value` key and an optional `$type` key.
@@ -108,14 +109,19 @@ function walk(
   }
 }
 
-export function importDtcgJson(json: unknown): DesignToken[] {
+export interface ImportDtcgJsonOptions {
+  logger?: CoreLogger;
+}
+
+export function importDtcgJson(json: unknown, opts: ImportDtcgJsonOptions = {}): DesignToken[] {
   const tokens: DesignToken[] = [];
   const unresolved: string[] = [];
   walk(json, [], undefined, tokens, unresolved);
-  if (unresolved.length > 0) {
-    console.warn(
-      `[dtcgImporter] ${unresolved.length} token(s) imported as type "unknown" (could not infer DTCG type from $type or path): ${unresolved.join(', ')}`,
-    );
+  if (unresolved.length > 0 && opts.logger) {
+    opts.logger.warn('[dtcg] step=import.unresolved_tokens', {
+      unresolvedCount: unresolved.length,
+      tokens: unresolved,
+    });
   }
   return tokens;
 }

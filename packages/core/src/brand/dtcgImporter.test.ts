@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import type { CoreLogger } from '../logger.js';
 import { importDtcgJson } from './dtcgImporter.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -142,17 +143,26 @@ describe('importDtcgJson()', () => {
   });
 
   describe('unresolved type inference', () => {
-    let warnSpy: ReturnType<typeof vi.spyOn>;
+    function makeLogger(): {
+      logger: CoreLogger;
+      calls: Array<{ event: string; data?: Record<string, unknown> }>;
+    } {
+      const calls: Array<{ event: string; data?: Record<string, unknown> }> = [];
+      const logger: CoreLogger = {
+        info: () => {},
+        warn: (event, data) => {
+          if (data === undefined) {
+            calls.push({ event });
+          } else {
+            calls.push({ event, data });
+          }
+        },
+        error: () => {},
+      };
+      return { logger, calls };
+    }
 
-    beforeEach(() => {
-      warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    });
-
-    afterEach(() => {
-      warnSpy.mockRestore();
-    });
-
-    it('preserves tokens with unresolvable type as `unknown` and warns with token name', () => {
+    it('preserves tokens with unresolvable type as `unknown`', () => {
       const tokens = importDtcgJson({
         misc: {
           mystery: { $value: '42deg', $type: 'angle' },
@@ -163,18 +173,44 @@ describe('importDtcgJson()', () => {
       expect(mystery).toBeDefined();
       expect(mystery?.type).toBe('unknown');
       expect(mystery?.value).toBe('42deg');
+    });
 
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      const message = String(warnSpy.mock.calls[0]?.[0] ?? '');
-      expect(message).toContain('misc.mystery');
-      expect(message).toContain('unknown');
+    it('routes unresolved-token warnings through the injected logger', () => {
+      const { logger, calls } = makeLogger();
+      importDtcgJson(
+        {
+          misc: {
+            mystery: { $value: '42deg', $type: 'angle' },
+          },
+        },
+        { logger },
+      );
+
+      expect(calls.length).toBe(1);
+      expect(calls[0]?.event).toContain('dtcg');
+      expect(calls[0]?.data).toMatchObject({
+        unresolvedCount: 1,
+        tokens: ['misc.mystery'],
+      });
+    });
+
+    it('drops the warning silently when no logger is injected', () => {
+      expect(() =>
+        importDtcgJson({
+          misc: { mystery: { $value: '42deg', $type: 'angle' } },
+        }),
+      ).not.toThrow();
     });
 
     it('does not warn when every token resolves to a known type', () => {
-      importDtcgJson({
-        color: { brand: { $value: '#fff', $type: 'color' } },
-      });
-      expect(warnSpy).not.toHaveBeenCalled();
+      const { logger, calls } = makeLogger();
+      importDtcgJson(
+        {
+          color: { brand: { $value: '#fff', $type: 'color' } },
+        },
+        { logger },
+      );
+      expect(calls.length).toBe(0);
     });
   });
 });
