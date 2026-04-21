@@ -49,6 +49,14 @@ describe('update-store', () => {
     expect(store.getState().shouldShowBanner()).toBe(false);
   });
 
+  it('shows banner when a newer version arrives before prefs resolve', () => {
+    const store = createUpdateStore({ dismissedVersion: '' });
+    store.getState().setAvailable({ version: '0.3.0', releaseUrl: 'https://x/y' });
+    expect(store.getState().shouldShowBanner()).toBe(false);
+    store.getState().markDismissedVersionReady('0.2.0');
+    expect(store.getState().shouldShowBanner()).toBe(true);
+  });
+
   it('markDismissedVersionReady also updates dismissedVersion', () => {
     const store = createUpdateStore({ dismissedVersion: '' });
     store.getState().markDismissedVersionReady('0.1.9');

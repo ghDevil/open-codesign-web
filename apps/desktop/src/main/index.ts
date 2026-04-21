@@ -61,6 +61,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 let mainWindow: ElectronBrowserWindow | null = null;
+// Cached update-available payload so a window opened after the event still
+// shows the banner. Cleared only on app quit (matching the one-shot nature
+// of autoUpdater — a new check will re-emit if still applicable).
+let pendingUpdateAvailable: unknown = null;
 
 const defaultUserDataDir = app.getPath('userData');
 const storageLocations = initStorageSettings(defaultUserDataDir);
@@ -107,10 +111,25 @@ function createWindow(): void {
   });
 
   mainWindow.on('ready-to-show', () => mainWindow?.show());
+  // Null the reference on close so stale IPC sends from async emitters
+  // (autoUpdater, long-running generate runs) become clean no-ops rather
+  // than throwing "Object has been destroyed" on a discarded webContents.
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }: { url: string }) => {
     void shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // Replay any update event that fired before this window was ready
+  // (macOS: user closed window, triggered a manual Check for Updates from
+  // the app menu, then reopened — the event would otherwise be lost).
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (pendingUpdateAvailable !== null) {
+      mainWindow?.webContents.send('codesign:update-available', pendingUpdateAvailable);
+    }
   });
 
   if (process.env['ELECTRON_RENDERER_URL']) {
@@ -860,6 +879,7 @@ function setupAutoUpdater(): void {
   if (!app.isPackaged) return;
   autoUpdater.autoDownload = false;
   autoUpdater.on('update-available', (info) => {
+    pendingUpdateAvailable = info;
     mainWindow?.webContents.send('codesign:update-available', info);
   });
   autoUpdater.on('update-not-available', (info) => {
