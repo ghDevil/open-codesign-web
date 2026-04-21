@@ -85,10 +85,18 @@ export function ChatgptLoginCard({ onStatusChange }: ChatgptLoginCardProps) {
 
   useEffect(() => {
     if (!window.codesign) return;
+    let cancelled = false;
     void window.codesign.codexOAuth
       .status()
-      .then(setStatus)
-      .catch(() => setStatus(null));
+      .then((s) => {
+        if (!cancelled) setStatus(s);
+      })
+      .catch(() => {
+        if (!cancelled) setStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleLogin = useCallback(async () => {
