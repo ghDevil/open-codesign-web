@@ -113,4 +113,41 @@ describe('pingProvider', () => {
     const result = await pingProvider('openai', 'sk-test', 'https://proxy.duckcoding.com/v1/');
     expect(result).toEqual({ ok: true, modelCount: 1 });
   });
+
+  it('strips /v1/chat/completions suffix when user pastes the full endpoint', async () => {
+    mockFetch(async (url) => {
+      expect(url).toBe('https://proxy.example.com/v1/models');
+      return new Response(JSON.stringify({ data: [{ id: 'x' }] }), { status: 200 });
+    });
+    const result = await pingProvider(
+      'openai',
+      'sk-test',
+      'https://proxy.example.com/v1/chat/completions',
+    );
+    expect(result).toEqual({ ok: true, modelCount: 1 });
+  });
+
+  it('strips /chat/completions (no /v1 prefix) suffix', async () => {
+    mockFetch(async (url) => {
+      expect(url).toBe('https://proxy.example.com/v1/models');
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    });
+    await pingProvider('openai', 'sk-test', 'https://proxy.example.com/chat/completions');
+  });
+
+  it('strips /v1/messages suffix for Anthropic', async () => {
+    mockFetch(async (url) => {
+      expect(url).toBe('https://api.anthropic.com/v1/models');
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    });
+    await pingProvider('anthropic', 'sk-ant-test', 'https://api.anthropic.com/v1/messages');
+  });
+
+  it('strips /v1/responses suffix', async () => {
+    mockFetch(async (url) => {
+      expect(url).toBe('https://api.example.com/v1/models');
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    });
+    await pingProvider('openai', 'sk-test', 'https://api.example.com/v1/responses');
+  });
 });

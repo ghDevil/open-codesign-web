@@ -1,5 +1,5 @@
 import { useT } from '@open-codesign/i18n';
-import { type WireApi, detectWireFromBaseUrl } from '@open-codesign/shared';
+import { type WireApi, canonicalBaseUrl, detectWireFromBaseUrl } from '@open-codesign/shared';
 import { Button } from '@open-codesign/ui';
 import { AlertCircle, CheckCircle, Loader2, X } from 'lucide-react';
 import { useState } from 'react';
@@ -69,11 +69,15 @@ export function AddCustomProviderModal({ onSave, onClose, initialSetAsActive = t
     try {
       const slug = slugify(name);
       const id = `custom-${slug}-${Date.now().toString(36).slice(-4)}`;
+      // Canonicalize before persisting so pi-ai / Anthropic SDK always see
+      // the root they expect. Without this, a user pasting /v1/chat/completions
+      // would have it stored verbatim and then pi-ai would append another
+      // /chat/completions at inference time.
       await window.codesign.config.addProvider({
         id,
         name: name.trim() || id,
         wire,
-        baseUrl: baseUrl.trim(),
+        baseUrl: canonicalBaseUrl(baseUrl.trim(), wire),
         apiKey: apiKey.trim(),
         defaultModel: defaultModel.trim(),
         setAsActive: initialSetAsActive,

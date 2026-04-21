@@ -15,6 +15,7 @@ import {
   WireApiSchema,
   hydrateConfig,
   isSupportedOnboardingProvider,
+  modelsEndpointUrl,
 } from '@open-codesign/shared';
 import { defaultConfigDir, readConfig, writeConfig } from './config';
 import { dialog, ipcMain, shell } from './electron-runtime';
@@ -874,13 +875,7 @@ async function runListEndpointModels(raw: unknown): Promise<ListEndpointModelsRe
   if (typeof apiKey !== 'string' || apiKey.trim().length === 0) {
     return { ok: false, error: 'apiKey required' };
   }
-  const cleaned = baseUrl
-    .replace(/\/+$/, '')
-    .replace(/\/(chat\/completions|completions|responses|messages|models)$/, '');
-  const url =
-    parsedWire.data === 'anthropic'
-      ? `${cleaned.replace(/\/v1$/, '')}/v1/models`
-      : `${cleaned.endsWith('/v1') ? cleaned : `${cleaned}/v1`}/models`;
+  const url = modelsEndpointUrl(baseUrl, parsedWire.data);
   const headers: Record<string, string> =
     parsedWire.data === 'anthropic'
       ? { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }

@@ -596,6 +596,47 @@ describe('normalizeBaseUrl', () => {
       'https://generativelanguage.googleapis.com',
     );
   });
+
+  // Users often paste the full inference endpoint URL instead of the API root.
+  // Regression: without suffix stripping we'd build .../v1/chat/completions/v1/models,
+  // which many OpenAI-compatible gateways black-hole → "connection timeout".
+  describe('strips endpoint path suffixes', () => {
+    it('openai: /v1/chat/completions → /v1', () => {
+      expect(normalizeBaseUrl('https://api.example.com/v1/chat/completions', 'openai')).toBe(
+        'https://api.example.com/v1',
+      );
+    });
+
+    it('openai: /chat/completions (no /v1 prefix) → /v1', () => {
+      expect(normalizeBaseUrl('https://api.example.com/chat/completions', 'openai')).toBe(
+        'https://api.example.com/v1',
+      );
+    });
+
+    it('openai: /v1/responses → /v1', () => {
+      expect(normalizeBaseUrl('https://api.example.com/v1/responses', 'openai')).toBe(
+        'https://api.example.com/v1',
+      );
+    });
+
+    it('openai: /v1/models → /v1', () => {
+      expect(normalizeBaseUrl('https://api.example.com/v1/models', 'openai')).toBe(
+        'https://api.example.com/v1',
+      );
+    });
+
+    it('anthropic: /v1/messages → root', () => {
+      expect(normalizeBaseUrl('https://api.anthropic.com/v1/messages', 'anthropic')).toBe(
+        'https://api.anthropic.com',
+      );
+    });
+
+    it('openrouter: /v1/chat/completions with trailing slash → /v1', () => {
+      expect(normalizeBaseUrl('https://openrouter.ai/api/v1/chat/completions/', 'openrouter')).toBe(
+        'https://openrouter.ai/api/v1',
+      );
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

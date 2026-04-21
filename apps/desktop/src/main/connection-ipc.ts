@@ -5,7 +5,10 @@ import {
   ERROR_CODES,
   type SupportedOnboardingProvider,
   type WireApi,
+  canonicalBaseUrl,
+  ensureVersionedBase,
   isSupportedOnboardingProvider,
+  stripInferenceEndpointSuffix,
 } from '@open-codesign/shared';
 import { ipcMain } from './electron-runtime';
 import { getApiKeyForProvider, getCachedConfig } from './onboarding-ipc';
@@ -114,16 +117,19 @@ interface ProviderEndpoint {
  * so downstream path concatenation never produces duplicate segments.
  *
  * - anthropic: strip trailing /v1 — we append /v1/models internally
- * - openai / openrouter: ensure /v1 suffix — the API lives at <root>/v1/models
+ * - openai / openrouter: ensure a version segment exists — the API lives at
+ *   <root>/<version>/models (usually /v1, but Zhipu uses /v4, Volcengine
+ *   uses /v3, Google AI Studio uses /v1beta/openai). If the user already
+ *   encoded a version we trust it; otherwise we default to /v1.
  * - google: strip trailing /v1 or /v1beta — we append the full path internally
  */
 export function normalizeBaseUrl(
   baseUrl: string,
   provider: 'openai' | 'anthropic' | 'google' | 'openrouter',
 ): string {
-  const cleaned = baseUrl.replace(/\/+$/, ''); // strip trailing slashes
+  const cleaned = stripInferenceEndpointSuffix(baseUrl);
   if (provider === 'openai' || provider === 'openrouter') {
-    return cleaned.endsWith('/v1') ? cleaned : `${cleaned}/v1`;
+    return ensureVersionedBase(cleaned);
   }
   if (provider === 'anthropic') {
     return cleaned.replace(/\/v1$/, '');
@@ -144,14 +150,10 @@ function buildEndpointForWire(
   wire: WireApi,
   baseUrl: string,
 ): { url: string; normalizedBaseUrl: string } {
-  if (wire === 'anthropic') {
-    const cleaned = baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
-    return { url: `${cleaned}/v1/models`, normalizedBaseUrl: cleaned };
-  }
-  // openai-chat and openai-responses both expose /models at the v1 root.
-  const cleaned = baseUrl.replace(/\/+$/, '');
-  const withV1 = cleaned.endsWith('/v1') ? cleaned : `${cleaned}/v1`;
-  return { url: `${withV1}/models`, normalizedBaseUrl: withV1 };
+  const normalizedBaseUrl = canonicalBaseUrl(baseUrl, wire);
+  const url =
+    wire === 'anthropic' ? `${normalizedBaseUrl}/v1/models` : `${normalizedBaseUrl}/models`;
+  return { url, normalizedBaseUrl };
 }
 
 export function buildAuthHeadersForWire(

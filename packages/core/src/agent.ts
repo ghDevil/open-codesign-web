@@ -38,6 +38,7 @@ import {
   ERROR_CODES,
   type ModelRef,
   type StoredDesignSystem,
+  canonicalBaseUrl,
 } from '@open-codesign/shared';
 import type { TSchema } from '@sinclair/typebox';
 import { buildTransformContext } from './context-prune.js';
@@ -258,12 +259,16 @@ function buildPiModel(
       ERROR_CODES.PROVIDER_BASE_URL_MISSING,
     );
   }
+  // Defensive: canonicalize stored baseUrl before handing to pi-ai. Rescues
+  // legacy configs that persisted pre-normalization (e.g. raw `/v1/chat/completions`
+  // pasted in an older build). No-op for configs saved post-fix.
+  const canonicalBase = wire ? canonicalBaseUrl(resolvedBaseUrl, wire) : resolvedBaseUrl;
   const out: PiModel = {
     id: model.modelId,
     name: model.modelId,
     api: apiForWire(wire),
     provider: model.provider,
-    baseUrl: resolvedBaseUrl,
+    baseUrl: canonicalBase,
     reasoning: true,
     input: ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

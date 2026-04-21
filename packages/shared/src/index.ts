@@ -260,6 +260,14 @@ export {
 } from './proxy-presets';
 export type { ProxyPresetId } from './proxy-presets';
 
+export {
+  canonicalBaseUrl,
+  ensureVersionedBase,
+  modelsEndpointUrl,
+  stripInferenceEndpointSuffix,
+} from './base-url';
+export type { CanonicalWire } from './base-url';
+
 export { DesignTokenV1, DesignTokenSet } from './design-token';
 export type { DesignToken } from './design-token';
 

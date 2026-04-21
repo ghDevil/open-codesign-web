@@ -3,6 +3,7 @@ import {
   ERROR_CODES,
   type SupportedOnboardingProvider,
   isSupportedOnboardingProvider,
+  stripInferenceEndpointSuffix,
 } from '@open-codesign/shared';
 
 export type ValidateResult =
@@ -16,13 +17,14 @@ interface ProviderEndpoint {
 
 /**
  * Normalize a user-supplied baseUrl so that appending /v1/models never
- * produces a double /v1/ segment.
+ * produces a double /v1/ segment, and so that pasting the full inference
+ * endpoint (e.g. /v1/chat/completions) still resolves to the API root.
  *
  * - openai / openrouter: strip trailing /v1 — we append /v1/models below
  * - anthropic: strip trailing /v1 — we append /v1/models below
  */
 function normalizeValidateBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+  return stripInferenceEndpointSuffix(baseUrl).replace(/\/v1$/, '');
 }
 
 function endpoint(provider: SupportedOnboardingProvider, baseUrl?: string): ProviderEndpoint {
