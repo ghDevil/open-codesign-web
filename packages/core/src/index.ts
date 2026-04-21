@@ -487,8 +487,7 @@ async function collectAllSkillBlobs(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const errorClass = err instanceof Error ? err.constructor.name : typeof err;
-    log.error('[generate] step=load_skills.fail', { errorClass, message });
-    console.warn(`[open-codesign] builtin skills failed to load (${errorClass}): ${message}`);
+    log.warn('[generate] step=load_skills.fail', { errorClass, message });
     return {
       blobs: [],
       warnings: [`Builtin skills unavailable: ${message}`],

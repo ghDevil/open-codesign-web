@@ -921,13 +921,13 @@ describe('generate() skills injection', () => {
     });
     loadBuiltinSkillsMock.mockRejectedValue(new Error('disk read failed'));
 
-    const errorLogs: Array<{ msg: string; meta?: unknown }> = [];
+    const warnLogs: Array<{ msg: string; meta?: unknown }> = [];
     const logger = {
       info: () => {},
-      warn: () => {},
-      error: (msg: string, meta?: unknown) => {
-        errorLogs.push({ msg, meta });
+      warn: (msg: string, meta?: unknown) => {
+        warnLogs.push({ msg, meta });
       },
+      error: () => {},
     };
 
     const result = await generate({
@@ -946,7 +946,12 @@ describe('generate() skills injection', () => {
     expect(result.warnings).toEqual([
       expect.stringContaining('Builtin skills unavailable: disk read failed'),
     ]);
-    expect(errorLogs.some((entry) => entry.msg.includes('step=load_skills.fail'))).toBe(true);
+    const warnEntry = warnLogs.find((entry) => entry.msg.includes('step=load_skills.fail'));
+    expect(warnEntry).toBeDefined();
+    expect(warnEntry?.meta).toMatchObject({
+      errorClass: 'Error',
+      message: 'disk read failed',
+    });
   });
 
   it('drops skills with disable_model_invocation: true', async () => {

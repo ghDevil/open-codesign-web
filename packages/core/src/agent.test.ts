@@ -321,16 +321,31 @@ describe('generateViaAgent() — Phase 1 pass-through', () => {
   it('reports skill-loader failure via warnings without blocking the artifact', async () => {
     scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT };
     loadBuiltinSkillsMock.mockRejectedValue(new Error('disk read failed'));
+    const warnLogs: Array<{ msg: string; meta?: unknown }> = [];
+    const logger = {
+      info: () => {},
+      warn: (msg: string, meta?: unknown) => {
+        warnLogs.push({ msg, meta });
+      },
+      error: () => {},
+    };
     const result = await generateViaAgent({
       prompt: 'make a dashboard',
       history: [],
       model: MODEL,
       apiKey: 'sk-test',
+      logger,
     });
     expect(result.artifacts).toHaveLength(1);
     expect(result.warnings).toEqual([
       expect.stringContaining('Builtin skills unavailable: disk read failed'),
     ]);
+    const warnEntry = warnLogs.find((entry) => entry.msg.includes('step=load_skills.fail'));
+    expect(warnEntry).toBeDefined();
+    expect(warnEntry?.meta).toMatchObject({
+      errorClass: 'Error',
+      message: 'disk read failed',
+    });
   });
 
   it('returns no artifacts when prose contains a fenced ```html block but no <artifact> wrapper and no fs is provided', async () => {
