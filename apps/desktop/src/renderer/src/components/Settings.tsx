@@ -1,5 +1,5 @@
 import { setLocale as applyLocale, useT } from '@open-codesign/i18n';
-import type { OnboardingState } from '@open-codesign/shared';
+import type { OnboardingState, ReasoningLevel } from '@open-codesign/shared';
 import {
   PROVIDER_SHORTLIST as SHORTLIST,
   isSupportedOnboardingProvider,
@@ -355,6 +355,18 @@ function ProviderCard({
       {row.isActive && !hasError && config !== null && (
         <ActiveModelSelector config={config} provider={row.provider} />
       )}
+      {!hasError && row.hasKey !== false && (
+        <ReasoningDepthSelector
+          provider={row.provider}
+          value={row.reasoningLevel}
+          onUpdated={(nextRow) => {
+            // Fire-and-forget refresh of parent rows list is handled by the
+            // callback set in ProvidersList; this component just needs to
+            // let the parent know a write succeeded.
+            void nextRow;
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -440,6 +452,70 @@ function ActiveModelSelector({
           {primary || t('settings.providers.noModel')}
         </span>
       )}
+    </div>
+  );
+}
+
+type ReasoningOption = '' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
+function ReasoningDepthSelector({
+  provider,
+  value,
+  onUpdated,
+}: {
+  provider: string;
+  value: ReasoningLevel | undefined;
+  onUpdated: (row: ProviderRow) => void;
+}) {
+  const t = useT();
+  const pushToast = useCodesignStore((s) => s.pushToast);
+  const [saving, setSaving] = useState(false);
+
+  async function handleChange(next: ReasoningOption) {
+    if (!window.codesign?.config?.updateProvider) return;
+    setSaving(true);
+    try {
+      // '' means "clear the per-provider override and fall back to the
+      // model-family default"; any other string is an explicit set.
+      const payload = { id: provider, reasoningLevel: next === '' ? null : next } as const;
+      await window.codesign.config.updateProvider(payload);
+      pushToast({ variant: 'success', title: t('settings.providers.toast.reasoningSaved') });
+      if (window.codesign?.settings?.listProviders) {
+        const rows = await window.codesign.settings.listProviders();
+        const row = rows.find((r) => r.provider === provider);
+        if (row) onUpdated(row);
+      }
+    } catch (err) {
+      pushToast({
+        variant: 'error',
+        title: t('settings.providers.toast.reasoningSaveFailed'),
+        description: err instanceof Error ? err.message : t('settings.common.unknownError'),
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const current: ReasoningOption = value ?? '';
+  const options: Array<{ value: ReasoningOption; label: string }> = [
+    { value: '', label: t('settings.providers.reasoning.default') },
+    { value: 'minimal', label: t('settings.providers.reasoning.minimal') },
+    { value: 'low', label: t('settings.providers.reasoning.low') },
+    { value: 'medium', label: t('settings.providers.reasoning.medium') },
+    { value: 'high', label: t('settings.providers.reasoning.high') },
+    { value: 'xhigh', label: t('settings.providers.reasoning.xhigh') },
+  ];
+
+  return (
+    <div className="mt-[var(--space-2)] flex items-center gap-[var(--space-2)] text-[var(--text-xs)] text-[var(--color-text-muted)]">
+      <Sliders className="w-3 h-3 shrink-0" />
+      <span>{t('settings.providers.reasoning.label')}</span>
+      <NativeSelect
+        value={current}
+        onChange={(v) => void handleChange(v as ReasoningOption)}
+        options={options}
+        disabled={saving}
+      />
     </div>
   );
 }

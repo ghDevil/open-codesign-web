@@ -39,7 +39,6 @@
     "previewHint": "缩略预览 · 双击文件名或点击「在新标签打开」可在独立标签查看",
     "tabsAriaLabel": "已打开文件",
     "closeTab": "关闭 {{name}}",
-    "closeTab": "关闭 {{name}}",
     "files": {
       "sectionTitle": "设计文件",
       "sectionSubtitle": "共 {{count}} 个文件",
@@ -64,7 +63,9 @@
     "error": {
       "title": "生成失败",
       "body": "生成过程中出错了。",
-      "copyError": "复制错误详情"
+      "copyError": "复制错误详情",
+      "brokenJsx": "此设计的代码有语法错误，可能是早期版本保存的不完整内容。重新生成或编辑修复即可。",
+      "undefinedRef": "设计引用了未定义的变量或组件。可能是生成中途中断——尝试重新生成。"
     },
     "ready": "预览",
     "noDesign": "还没有设计",
@@ -72,10 +73,6 @@
     "commentMode": "评论模式",
     "commentModeHint": "点击任意元素留评",
     "runtimeError": "预览运行时错误",
-    "error": {
-      "brokenJsx": "此设计的代码有语法错误，可能是早期版本保存的不完整内容。重新生成或编辑修复即可。",
-      "undefinedRef": "设计引用了未定义的变量或组件。可能是生成中途中断——尝试重新生成。"
-    },
     "dismissErrors": "关闭预览错误",
     "zoom": "缩放"
   },
@@ -238,8 +235,19 @@
         "switchFailed": "切换失败",
         "saved": "服务已保存",
         "modelSaveFailed": "保存模型选择失败",
+        "reasoningSaved": "已保存推理深度",
+        "reasoningSaveFailed": "保存推理深度失败",
         "connectionOk": "连接正常",
         "connectionFailed": "连接失败"
+      },
+      "reasoning": {
+        "label": "推理深度",
+        "default": "默认（自动）",
+        "minimal": "极低",
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "xhigh": "最高"
       }
     },
     "appearance": {

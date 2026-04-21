@@ -290,6 +290,9 @@ const api = {
       wire?: WireApi;
       httpHeaders?: Record<string, string>;
       queryParams?: Record<string, string>;
+      /** `null` explicitly clears the override and falls back to the model
+       *  default; a level string sets it; omit to leave untouched. */
+      reasoningLevel?: ReasoningLevel | null;
     }) => ipcRenderer.invoke('config:v1:update-provider', input) as Promise<OnboardingState>,
     removeProvider: (id: string) =>
       ipcRenderer.invoke('config:v1:remove-provider', id) as Promise<OnboardingState>,

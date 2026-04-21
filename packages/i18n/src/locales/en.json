@@ -62,7 +62,9 @@
     "error": {
       "title": "Generation failed",
       "body": "Something went wrong while generating your design.",
-      "copyError": "Copy error details"
+      "copyError": "Copy error details",
+      "brokenJsx": "This design has a syntax error, likely an incomplete early save. Regenerate or edit to fix.",
+      "undefinedRef": "The design references an undefined variable or component. Likely a mid-run abort — try regenerating."
     },
     "ready": "Preview",
     "noDesign": "No design yet",
@@ -70,10 +72,6 @@
     "commentMode": "Comment mode",
     "commentModeHint": "Click any element to comment",
     "runtimeError": "Preview runtime error",
-    "error": {
-      "brokenJsx": "This design has a syntax error, likely an incomplete early save. Regenerate or edit to fix.",
-      "undefinedRef": "The design references an undefined variable or component. Likely a mid-run abort — try regenerating."
-    },
     "dismissErrors": "Dismiss preview errors",
     "zoom": "Zoom"
   },
@@ -234,8 +232,19 @@
         "switchFailed": "Switch failed",
         "saved": "Provider saved",
         "modelSaveFailed": "Failed to save model selection",
+        "reasoningSaved": "Reasoning depth saved",
+        "reasoningSaveFailed": "Failed to save reasoning depth",
         "connectionOk": "Connection OK",
         "connectionFailed": "Connection failed"
+      },
+      "reasoning": {
+        "label": "Reasoning depth",
+        "default": "Default (auto)",
+        "minimal": "Minimal",
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra high"
       }
     },
     "appearance": {
