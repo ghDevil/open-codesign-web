@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
+const capturedFiles = new Map<string, string>();
 
 vi.mock('./electron-runtime', () => ({
   ipcMain: {
@@ -21,20 +22,30 @@ vi.mock('./electron-runtime', () => ({
 
 vi.mock('./logger', () => ({
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-  getLogPath: vi.fn(() => '/tmp/main.log'),
+  getLogPath: vi.fn(() => '/tmp/__codesign-test-main.log'),
   logsDir: vi.fn(() => '/tmp/logs'),
 }));
 
 vi.mock('./config', () => ({
-  configPath: vi.fn(() => '/tmp/config.toml'),
+  configPath: vi.fn(() => '/tmp/__codesign-test-config.toml'),
+  configDir: vi.fn(() => '/tmp'),
 }));
 
-vi.mock('zip-lib', () => ({
-  Zip: class {
-    addFile(): void {}
-    async archive(): Promise<void> {}
-  },
-}));
+vi.mock('zip-lib', async () => {
+  const { readFileSync } = await import('node:fs');
+  return {
+    Zip: class {
+      addFile(src: string, name: string): void {
+        try {
+          capturedFiles.set(name, readFileSync(src, 'utf8'));
+        } catch {
+          // ignore
+        }
+      }
+      async archive(): Promise<void> {}
+    },
+  };
+});
 
 import { registerDiagnosticsIpc } from './diagnostics-ipc';
 import { initInMemoryDb, listDiagnosticEvents, recordDiagnosticEvent } from './snapshots-db';
@@ -47,10 +58,12 @@ function invoke(channel: string, payload: unknown): unknown {
 
 beforeEach(() => {
   handlers.clear();
+  capturedFiles.clear();
 });
 
 afterEach(() => {
   handlers.clear();
+  capturedFiles.clear();
   vi.restoreAllMocks();
 });
 
@@ -290,5 +303,82 @@ describe('diagnostics:v1:reportEvent', () => {
 
     const decodedBody = decodeURIComponent(new URL(result.issueUrl).searchParams.get('body') ?? '');
     expect(decodedBody).toMatch(/truncated/);
+  });
+});
+
+describe('diagnostics bundle main.log scrubbing', () => {
+  async function writeTestLog(content: string): Promise<void> {
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile('/tmp/__codesign-test-main.log', content, 'utf8');
+  }
+
+  async function recordAndReport(overrides: Record<string, unknown>): Promise<{ mainLog: string }> {
+    const db = initInMemoryDb();
+    recordDiagnosticEvent(db, {
+      level: 'error',
+      code: 'BUNDLE_TEST',
+      scope: 'renderer:app',
+      fingerprint: 'fp-bundle',
+      message: 'bundle check',
+      runId: undefined,
+      stack: undefined,
+      transient: false,
+    });
+    const rows = listDiagnosticEvents(db, { includeTransient: true });
+    const eventId = rows[0]?.id ?? 0;
+
+    registerDiagnosticsIpc(db);
+    await invoke('diagnostics:v1:reportEvent', {
+      schemaVersion: 1,
+      eventId,
+      includePromptText: false,
+      includePaths: false,
+      includeUrls: false,
+      includeTimeline: true,
+      notes: '',
+      timeline: [],
+      ...overrides,
+    });
+    const mainLog = capturedFiles.get('main.log');
+    if (mainLog === undefined) throw new Error('main.log not captured');
+    return { mainLog };
+  }
+
+  it('bundle main.log is scrubbed for paths when includePaths=false', async () => {
+    await writeTestLog(
+      [
+        '[00:00] open /Users/alice/secret/file.ts',
+        '[00:01] tmp path /var/folders/xy/abc/T/cache',
+        '[00:02] hit https://example.com/api',
+      ].join('\n'),
+    );
+    const { mainLog } = await recordAndReport({ includePaths: false, includeUrls: false });
+    expect(mainLog).not.toContain('/Users/alice');
+    expect(mainLog).not.toContain('/var/folders');
+    expect(mainLog).not.toContain('https://example.com');
+    expect(mainLog).toContain('<path omitted>');
+    expect(mainLog).toContain('<url omitted>');
+  });
+
+  it('bundle main.log preserves prompt JSON when includePromptText=true', async () => {
+    await writeTestLog('[00:00] generate.request data={"prompt":"build me a rocket"}');
+    const { mainLog } = await recordAndReport({
+      includePromptText: true,
+      includePaths: true,
+      includeUrls: true,
+    });
+    expect(mainLog).toContain('"prompt":"build me a rocket"');
+    expect(mainLog).not.toContain('<prompt omitted>');
+  });
+
+  it('bundle main.log scrubs prompt JSON when includePromptText=false', async () => {
+    await writeTestLog('[00:00] generate.request data={"prompt":"build me a rocket"}');
+    const { mainLog } = await recordAndReport({
+      includePromptText: false,
+      includePaths: true,
+      includeUrls: true,
+    });
+    expect(mainLog).not.toContain('build me a rocket');
+    expect(mainLog).toContain('<prompt omitted>');
   });
 });

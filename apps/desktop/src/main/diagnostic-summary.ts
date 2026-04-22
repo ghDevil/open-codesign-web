@@ -121,7 +121,15 @@ function renderUpstream(event: DiagnosticEventRow, input: SummaryInput): string 
         ? bodyHead
         : scrubPromptInLine(bodyHead);
   const redactedBody =
-    scrubbedBody === undefined ? undefined : truncate(redactPathsAndUrls(scrubbedBody, input), 400);
+    scrubbedBody === undefined
+      ? undefined
+      : truncate(
+          redactPathsAndUrls(scrubbedBody, {
+            includePaths: input.includePaths,
+            includeUrls: input.includeUrls,
+          }),
+          400,
+        );
   const rows: string[] = [];
   if (provider !== undefined) rows.push(`- Provider: ${provider}`);
   if (status !== undefined) rows.push(`- Status: ${status}`);
@@ -169,13 +177,16 @@ function formatValue(value: unknown): string {
 function renderLogTail(input: SummaryInput): string {
   const lines = input.recentLogTail.map((line) => {
     const scrubbed = input.includePromptText ? line : scrubPromptInLine(line);
-    return redactPathsAndUrls(scrubbed, input);
+    return redactPathsAndUrls(scrubbed, {
+      includePaths: input.includePaths,
+      includeUrls: input.includeUrls,
+    });
   });
   if (lines.length === 0) return '```\n(no log tail)\n```';
   return ['```', ...lines, '```'].join('\n');
 }
 
-function scrubPromptInLine(line: string): string {
+export function scrubPromptInLine(line: string): string {
   return line
     .replace(/("prompt"\s*:\s*)"(?:[^"\\]|\\.)*"/g, '$1"<prompt omitted>"')
     .replace(/(\bprompt\s*[:=]\s*)"(?:[^"\\]|\\.)*"/g, '$1"<prompt omitted>"')
@@ -191,13 +202,19 @@ function redact(text: string, input: SummaryInput): string {
   if (!input.includePromptText && looksLikePrompt(out)) {
     out = PROMPT_OMITTED;
   }
-  return redactPathsAndUrls(out, input);
+  return redactPathsAndUrls(out, {
+    includePaths: input.includePaths,
+    includeUrls: input.includeUrls,
+  });
 }
 
-function redactPathsAndUrls(text: string, input: SummaryInput): string {
+export function redactPathsAndUrls(
+  text: string,
+  opts: { includePaths: boolean; includeUrls: boolean },
+): string {
   let out = text;
-  if (!input.includePaths) out = out.replace(PATH_REGEX, PATH_OMITTED);
-  if (!input.includeUrls) out = out.replace(URL_REGEX, URL_OMITTED);
+  if (!opts.includePaths) out = out.replace(PATH_REGEX, PATH_OMITTED);
+  if (!opts.includeUrls) out = out.replace(URL_REGEX, URL_OMITTED);
   return out;
 }
 

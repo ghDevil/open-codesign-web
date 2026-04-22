@@ -27,7 +27,11 @@ import {
 import { computeFingerprint } from '@open-codesign/shared/fingerprint';
 import type BetterSqlite3 from 'better-sqlite3';
 import { configDir, configPath } from './config';
-import { composeSummaryMarkdown } from './diagnostic-summary';
+import {
+  composeSummaryMarkdown,
+  redactPathsAndUrls,
+  scrubPromptInLine,
+} from './diagnostic-summary';
 import { app, ipcMain, shell } from './electron-runtime';
 import { getLogPath, getLogger, logsDir } from './logger';
 import { findRecent, recordReported } from './reported-fingerprints';
@@ -214,8 +218,19 @@ async function readLogTail(maxLines: number): Promise<string[]> {
 /**
  * Build the diagnostics zip bundle. Always writes `summary.md` at the root
  * alongside `main.log`, `config-redacted.toml`, and `metadata.json`.
+ *
+ * The redaction toggles apply not only to `summary.md` (composed upstream)
+ * but also to the raw `main.log` contents staged into the zip. Callers that
+ * have no user-chosen toggles (e.g. the standalone Export Diagnostics
+ * action) should pass all three flags as `false` to default to the safest
+ * redaction.
  */
-export async function buildBundle(opts: { summaryMarkdown: string }): Promise<string> {
+export async function buildBundle(opts: {
+  summaryMarkdown: string;
+  includePromptText: boolean;
+  includePaths: boolean;
+  includeUrls: boolean;
+}): Promise<string> {
   const fs = await import('node:fs/promises');
   const os = await import('node:os');
   const path = await import('node:path');
@@ -231,6 +246,21 @@ export async function buildBundle(opts: { summaryMarkdown: string }): Promise<st
   } catch {
     logContent = '(log file not readable)';
   }
+
+  const scrubbedLog = logContent
+    .split('\n')
+    .map((line) => {
+      let l = line;
+      if (!opts.includePromptText) l = scrubPromptInLine(l);
+      if (!opts.includePaths || !opts.includeUrls) {
+        l = redactPathsAndUrls(l, {
+          includePaths: opts.includePaths,
+          includeUrls: opts.includeUrls,
+        });
+      }
+      return l;
+    })
+    .join('\n');
 
   const configContent = await readConfigRedacted();
 
@@ -255,7 +285,7 @@ export async function buildBundle(opts: { summaryMarkdown: string }): Promise<st
     const summaryStagePath = path.join(stagingDir, 'summary.md');
 
     await Promise.all([
-      fs.writeFile(logStagePath, logContent, 'utf8'),
+      fs.writeFile(logStagePath, scrubbedLog, 'utf8'),
       fs.writeFile(configStagePath, configContent, 'utf8'),
       fs.writeFile(metaStagePath, meta, 'utf8'),
       fs.writeFile(summaryStagePath, opts.summaryMarkdown, 'utf8'),
@@ -287,7 +317,12 @@ async function buildDiagnosticsZip(): Promise<string> {
     'This bundle contains recent logs, redacted config, and environment metadata.',
     '',
   ].join('\n');
-  return buildBundle({ summaryMarkdown: summary });
+  return buildBundle({
+    summaryMarkdown: summary,
+    includePromptText: false,
+    includePaths: false,
+    includeUrls: false,
+  });
 }
 
 function buildIssueUrl(params: {
@@ -426,7 +461,12 @@ export function registerDiagnosticsIpc(db: Database | null): void {
         includeTimeline: input.includeTimeline,
       });
 
-      const bundlePath = await buildBundle({ summaryMarkdown });
+      const bundlePath = await buildBundle({
+        summaryMarkdown,
+        includePromptText: input.includePromptText,
+        includePaths: input.includePaths,
+        includeUrls: input.includeUrls,
+      });
       const issueUrl = buildIssueUrl({ event, summaryMarkdown, bundlePath });
 
       try {

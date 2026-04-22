@@ -1,6 +1,10 @@
 import type { ActionTimelineEntry, DiagnosticEventRow } from '@open-codesign/shared';
 import { describe, expect, it } from 'vitest';
-import { type SummaryInput, composeSummaryMarkdown } from './diagnostic-summary';
+import {
+  type SummaryInput,
+  composeSummaryMarkdown,
+  redactPathsAndUrls,
+} from './diagnostic-summary';
 
 function baseEvent(overrides: Partial<DiagnosticEventRow> = {}): DiagnosticEventRow {
   return {
@@ -357,5 +361,33 @@ describe('composeSummaryMarkdown', () => {
       expect(md).toContain('10/30 ratio');
       expect(md).not.toContain('<path omitted>');
     });
+  });
+});
+
+describe('redactPathsAndUrls granular toggles', () => {
+  const sample = 'see /Users/alice/x.ts and https://example.com/y';
+
+  it('redacts neither when both flags are true', () => {
+    expect(redactPathsAndUrls(sample, { includePaths: true, includeUrls: true })).toBe(sample);
+  });
+
+  it('redacts only paths when includePaths=false, includeUrls=true', () => {
+    const out = redactPathsAndUrls(sample, { includePaths: false, includeUrls: true });
+    expect(out).not.toContain('/Users/alice');
+    expect(out).toContain('https://example.com/y');
+    expect(out).toContain('<path omitted>');
+  });
+
+  it('redacts only urls when includePaths=true, includeUrls=false', () => {
+    const out = redactPathsAndUrls(sample, { includePaths: true, includeUrls: false });
+    expect(out).toContain('/Users/alice/x.ts');
+    expect(out).not.toContain('https://example.com');
+    expect(out).toContain('<url omitted>');
+  });
+
+  it('redacts both when both flags are false', () => {
+    const out = redactPathsAndUrls(sample, { includePaths: false, includeUrls: false });
+    expect(out).toContain('<path omitted>');
+    expect(out).toContain('<url omitted>');
   });
 });
