@@ -591,11 +591,7 @@ describe('redactSensitiveTomlFields', () => {
   });
 
   it('masks auth_token and credential field aliases', () => {
-    expect(redactSensitiveTomlFields('auth_token = "x"')).toBe(
-      'auth_token = "***REDACTED***"',
-    );
-    expect(redactSensitiveTomlFields('credential = "y"')).toBe(
-      'credential = "***REDACTED***"',
-    );
+    expect(redactSensitiveTomlFields('auth_token = "x"')).toBe('auth_token = "***REDACTED***"');
+    expect(redactSensitiveTomlFields('credential = "y"')).toBe('credential = "***REDACTED***"');
   });
 });

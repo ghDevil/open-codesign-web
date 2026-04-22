@@ -72,6 +72,7 @@ describe('readOpencodeConfig', () => {
     expect(out?.providers).toHaveLength(1);
     const entry = out?.providers[0];
     expect(entry?.id).toBe('opencode-anthropic');
+    expect(entry?.name).toBe('OpenCode · Anthropic');
     expect(entry?.wire).toBe('anthropic');
     expect(entry?.baseUrl).toBe('https://api.anthropic.com');
     expect(entry?.defaultModel).toBe('claude-sonnet-4-6');
@@ -136,11 +137,34 @@ describe('readOpencodeConfig', () => {
 
   it('skips unknown providers with a warning', async () => {
     const home = await makeHome();
-    await writeAuth(home, { mistral: { type: 'api', key: 'sk-mist' } });
+    await writeAuth(home, { weirdai: { type: 'api', key: 'sk-w' } });
     const out = await readOpencodeConfig(home, {});
     expect(out?.providers).toEqual([]);
-    expect(out?.warnings.join('\n')).toMatch(/mistral.*isn't supported/);
+    expect(out?.warnings.join('\n')).toMatch(/weirdai.*isn't supported/);
   });
+
+  it.each([
+    ['mistral', 'https://api.mistral.ai/v1', 'Mistral'],
+    ['groq', 'https://api.groq.com/openai/v1', 'Groq'],
+    ['deepseek', 'https://api.deepseek.com/v1', 'DeepSeek'],
+    ['xai', 'https://api.x.ai/v1', 'xAI'],
+    ['together', 'https://api.together.xyz/v1', 'Together'],
+    ['fireworks', 'https://api.fireworks.ai/inference/v1', 'Fireworks'],
+    ['cerebras', 'https://api.cerebras.ai/v1', 'Cerebras'],
+    ['vercel-ai-gateway', 'https://gateway.ai.vercel.app/v1', 'Vercel AI Gateway'],
+  ])(
+    'maps extended provider %s to the correct OpenAI-compatible endpoint',
+    async (providerId, baseUrl, label) => {
+      const home = await makeHome();
+      await writeAuth(home, { [providerId]: { type: 'api', key: 'sk-test' } });
+      const out = await readOpencodeConfig(home, {});
+      expect(out?.providers).toHaveLength(1);
+      expect(out?.providers[0]?.id).toBe(`opencode-${providerId}`);
+      expect(out?.providers[0]?.name).toBe(`OpenCode · ${label}`);
+      expect(out?.providers[0]?.baseUrl).toBe(baseUrl);
+      expect(out?.providers[0]?.wire).toBe('openai-chat');
+    },
+  );
 
   it('emits a warning on malformed auth.json and returns no providers', async () => {
     const home = await makeHome();

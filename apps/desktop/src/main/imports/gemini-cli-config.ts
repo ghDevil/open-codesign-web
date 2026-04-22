@@ -132,13 +132,18 @@ async function readEnvFileIfPresent(path: string): Promise<Record<string, string
  * the caller can show a helpful "configure Vertex manually" message instead
  * of silently failing on a bogus provider entry.
  */
+/** Matches the gemini-cli's own truthiness semantics for
+ *  `GOOGLE_GENAI_USE_VERTEXAI`: any of true/1/yes/on in any case counts. */
+const VERTEX_TRUTHY = new Set(['true', '1', 'yes', 'on']);
+
 export async function readGeminiCliConfig(
   home: string = homedir(),
   options: ReadGeminiCliOptions = {},
 ): Promise<GeminiImport | null> {
   const env = options.env ?? process.env;
 
-  if (env['GOOGLE_GENAI_USE_VERTEXAI'] === 'true' || env['GOOGLE_GENAI_USE_VERTEXAI'] === '1') {
+  const vertexFlag = env['GOOGLE_GENAI_USE_VERTEXAI']?.trim().toLowerCase();
+  if (vertexFlag !== undefined && VERTEX_TRUTHY.has(vertexFlag)) {
     return {
       provider: null,
       apiKey: null,

@@ -771,11 +771,29 @@ interface ClaudeCodeDetectionMeta {
   warnings: string[];
 }
 
+interface CodexDetectionMeta {
+  /** Provider ids + basic metadata the banner needs. Does NOT include keys;
+   *  `apiKeyMap` stays in the main process and is re-read from disk at
+   *  import time. */
+  providers: ProviderEntry[];
+  activeProvider: string | null;
+  activeModel: string | null;
+  warnings: string[];
+}
+
+interface OpencodeDetectionMeta {
+  /** Same contract as CodexDetectionMeta: provider metadata only, no keys. */
+  providers: ProviderEntry[];
+  activeProvider: string | null;
+  activeModel: string | null;
+  warnings: string[];
+}
+
 interface ExternalConfigsDetection {
-  codex?: CodexImport;
+  codex?: CodexDetectionMeta;
   claudeCode?: ClaudeCodeDetectionMeta;
   gemini?: GeminiDetectionMeta;
-  opencode?: OpencodeImport;
+  opencode?: OpencodeDetectionMeta;
 }
 
 interface GeminiDetectionMeta {
@@ -1145,7 +1163,17 @@ export function registerOnboardingIpc(): void {
       const alreadyHasGemini = providerIds.includes('gemini-import');
       const alreadyHasOpencode = providerIds.some((id) => id.startsWith('opencode-'));
       const out: ExternalConfigsDetection = {};
-      if (codex !== null && codex.providers.length > 0 && !alreadyHasCodex) out.codex = codex;
+      if (codex !== null && codex.providers.length > 0 && !alreadyHasCodex) {
+        // Project to CodexDetectionMeta — strip `apiKeyMap` and `envKeyMap`
+        // so plaintext keys never cross the IPC boundary. The import IPC
+        // (`config:v1:import-codex-config`) re-reads the file at use time.
+        out.codex = {
+          providers: codex.providers,
+          activeProvider: codex.activeProvider,
+          activeModel: codex.activeModel,
+          warnings: codex.warnings,
+        };
+      }
       // Surface Claude Code unless we already imported it. We still surface
       // `oauth-only` users (provider === null) because they need the
       // "subscription can't be shared" banner too — `alreadyHasClaudeCode`
@@ -1183,7 +1211,13 @@ export function registerOnboardingIpc(): void {
         }
       }
       if (opencode !== null && opencode.providers.length > 0 && !alreadyHasOpencode) {
-        out.opencode = opencode;
+        // Same key-stripping projection as Codex above.
+        out.opencode = {
+          providers: opencode.providers,
+          activeProvider: opencode.activeProvider,
+          activeModel: opencode.activeModel,
+          warnings: opencode.warnings,
+        };
       }
       return out;
     },

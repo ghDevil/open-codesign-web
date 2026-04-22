@@ -29,12 +29,28 @@ import type { ProviderEntry, WireApi } from '@open-codesign/shared';
  * with the user's OpenCode session.
  */
 
-type OpencodeProviderKey = 'anthropic' | 'openai' | 'google' | 'openrouter';
+type OpencodeProviderKey =
+  | 'anthropic'
+  | 'openai'
+  | 'google'
+  | 'openrouter'
+  | 'mistral'
+  | 'groq'
+  | 'deepseek'
+  | 'xai'
+  | 'together'
+  | 'fireworks'
+  | 'cerebras'
+  | 'vercel-ai-gateway';
 
 interface ProviderMapping {
   wire: WireApi;
   baseUrl: string;
   defaultModel: string;
+  /** Display name used in the Settings list. Falls back to the capitalized
+   *  providerId if missing — but we set it explicitly for the common ones
+   *  so users see "OpenCode · Anthropic" rather than "OpenCode · anthropic". */
+  label: string;
 }
 
 const PROVIDER_MAP: Record<OpencodeProviderKey, ProviderMapping> = {
@@ -42,21 +58,73 @@ const PROVIDER_MAP: Record<OpencodeProviderKey, ProviderMapping> = {
     wire: 'anthropic',
     baseUrl: 'https://api.anthropic.com',
     defaultModel: 'claude-sonnet-4-6',
+    label: 'Anthropic',
   },
   openai: {
     wire: 'openai-chat',
     baseUrl: 'https://api.openai.com/v1',
     defaultModel: 'gpt-4o',
+    label: 'OpenAI',
   },
   google: {
     wire: 'openai-chat',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     defaultModel: 'gemini-2.5-flash',
+    label: 'Google',
   },
   openrouter: {
     wire: 'openai-chat',
     baseUrl: 'https://openrouter.ai/api/v1',
     defaultModel: 'anthropic/claude-sonnet-4.6',
+    label: 'OpenRouter',
+  },
+  mistral: {
+    wire: 'openai-chat',
+    baseUrl: 'https://api.mistral.ai/v1',
+    defaultModel: 'mistral-large-latest',
+    label: 'Mistral',
+  },
+  groq: {
+    wire: 'openai-chat',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    defaultModel: 'llama-3.3-70b-versatile',
+    label: 'Groq',
+  },
+  deepseek: {
+    wire: 'openai-chat',
+    baseUrl: 'https://api.deepseek.com/v1',
+    defaultModel: 'deepseek-chat',
+    label: 'DeepSeek',
+  },
+  xai: {
+    wire: 'openai-chat',
+    baseUrl: 'https://api.x.ai/v1',
+    defaultModel: 'grok-2',
+    label: 'xAI',
+  },
+  together: {
+    wire: 'openai-chat',
+    baseUrl: 'https://api.together.xyz/v1',
+    defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+    label: 'Together',
+  },
+  fireworks: {
+    wire: 'openai-chat',
+    baseUrl: 'https://api.fireworks.ai/inference/v1',
+    defaultModel: 'accounts/fireworks/models/llama-v3p3-70b-instruct',
+    label: 'Fireworks',
+  },
+  cerebras: {
+    wire: 'openai-chat',
+    baseUrl: 'https://api.cerebras.ai/v1',
+    defaultModel: 'llama-3.3-70b',
+    label: 'Cerebras',
+  },
+  'vercel-ai-gateway': {
+    wire: 'openai-chat',
+    baseUrl: 'https://gateway.ai.vercel.app/v1',
+    defaultModel: 'openai/gpt-4o',
+    label: 'Vercel AI Gateway',
   },
 };
 
@@ -101,7 +169,7 @@ interface AuthEntry {
 }
 
 function isKnownProvider(id: string): id is OpencodeProviderKey {
-  return id === 'anthropic' || id === 'openai' || id === 'google' || id === 'openrouter';
+  return Object.hasOwn(PROVIDER_MAP, id);
 }
 
 async function readAuthJson(path: string): Promise<{
@@ -248,7 +316,7 @@ export async function readOpencodeConfig(
       const importedId = `opencode-${providerId}`;
       providers.push({
         id: importedId,
-        name: 'OpenCode (imported)',
+        name: `OpenCode · ${mapping.label}`,
         builtin: false,
         wire: mapping.wire,
         baseUrl: mapping.baseUrl,

@@ -109,7 +109,6 @@ export interface ExternalConfigsDetection {
   };
   opencode?: {
     providers: ProviderEntry[];
-    apiKeyMap: Record<string, string>;
     activeProvider: string | null;
     activeModel: string | null;
     warnings: string[];
