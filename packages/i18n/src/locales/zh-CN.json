@@ -738,7 +738,10 @@
     "mostLikelyCause": "最可能的原因：",
     "toast": {
       "resolving": "诊断信息加载中…",
-      "noEvent": "找不到对应的诊断事件"
+      "noEvent": "找不到对应的诊断事件",
+      "noEventFallbackTitle": "无法自动上报",
+      "noEventFallbackDescription": "此错误未记录到诊断库。请打开日志文件夹，手动提 issue 附上相关日志。",
+      "openLogFolder": "打开日志文件夹"
     },
     "cause": {
       "keyInvalid": "API Key 无效或已被撤销。",

@@ -66,6 +66,19 @@ function ToastItem({ toast }: { toast: ToastModel }) {
       const id = await resolveToastEventId(toast);
       if (id === null) {
         setResolved('none');
+        // Give the user concrete feedback + a way to recover — without this,
+        // the button appears to do nothing and the app looks frozen.
+        useCodesignStore.getState().pushToast({
+          variant: 'info',
+          title: t('diagnostics.toast.noEventFallbackTitle'),
+          description: t('diagnostics.toast.noEventFallbackDescription'),
+          action: {
+            label: t('diagnostics.toast.openLogFolder'),
+            onClick: () => {
+              void window.codesign?.diagnostics?.openLogFolder?.();
+            },
+          },
+        });
         return;
       }
       setResolved(id);

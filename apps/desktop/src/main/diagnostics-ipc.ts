@@ -491,12 +491,12 @@ export function registerDiagnosticsIpc(db: Database | null): void {
         level: 'error',
         code: input.code,
         scope: input.scope,
+        runId: input.runId,
         fingerprint,
         message: input.message,
+        stack: input.stack,
         transient: false,
       };
-      if (input.runId !== undefined) recordInput.runId = input.runId;
-      if (input.stack !== undefined) recordInput.stack = input.stack;
       if (input.context !== undefined) recordInput.context = input.context;
       const eventId = recordDiagnosticEvent(db, recordInput);
       return { schemaVersion: 1, eventId };

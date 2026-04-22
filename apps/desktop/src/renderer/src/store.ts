@@ -1962,9 +1962,10 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         .recordRendererError(payload)
         .then((res) => {
           if (res.eventId === null) return;
+          const eventId = res.eventId;
           set((s) => ({
             toasts: s.toasts.map((existing) =>
-              existing.id === id ? { ...existing, eventId: res.eventId ?? undefined } : existing,
+              existing.id === id ? { ...existing, eventId } : existing,
             ),
           }));
         })

@@ -739,7 +739,10 @@
     "mostLikelyCause": "Most likely cause:",
     "toast": {
       "resolving": "Preparing report…",
-      "noEvent": "No matching diagnostic event"
+      "noEvent": "No matching diagnostic event",
+      "noEventFallbackTitle": "Can't auto-report",
+      "noEventFallbackDescription": "This error wasn't recorded to the diagnostic store. Open the log folder and attach relevant lines to a new GitHub issue.",
+      "openLogFolder": "Open log folder"
     },
     "cause": {
       "keyInvalid": "API key invalid or revoked.",
