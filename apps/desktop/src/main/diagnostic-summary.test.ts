@@ -211,4 +211,85 @@ describe('composeSummaryMarkdown', () => {
     const md = composeSummaryMarkdown(baseInput({ notes: '   \n  ' }));
     expect(md).toContain('## Reporter notes\n(none)');
   });
+
+  describe('path and URL redaction edge cases', () => {
+    it('redacts Windows drive-letter paths', () => {
+      const md = composeSummaryMarkdown(
+        baseInput({
+          event: baseEvent({ message: 'fail at C:\\Users\\alice\\project\\foo.ts line 10' }),
+          includePaths: false,
+        }),
+      );
+      expect(md).not.toContain('C:\\Users\\alice');
+      expect(md).toContain('<path omitted>');
+    });
+
+    it('redacts UNC paths', () => {
+      const md = composeSummaryMarkdown(
+        baseInput({
+          event: baseEvent({ message: 'read \\\\server\\share\\file.txt bad' }),
+          includePaths: false,
+        }),
+      );
+      expect(md).not.toContain('\\\\server\\share');
+      expect(md).toContain('<path omitted>');
+    });
+
+    it('redacts ~/ home-relative paths', () => {
+      const md = composeSummaryMarkdown(
+        baseInput({
+          event: baseEvent({ message: 'missing ~/foo/bar config' }),
+          includePaths: false,
+        }),
+      );
+      expect(md).not.toContain('~/foo/bar');
+      expect(md).toContain('<path omitted>');
+    });
+
+    it('redacts /opt/homebrew and /root paths', () => {
+      const md = composeSummaryMarkdown(
+        baseInput({
+          event: baseEvent({ message: 'install /opt/homebrew/bin/x then /root/cfg fails' }),
+          includePaths: false,
+        }),
+      );
+      expect(md).not.toContain('/opt/homebrew');
+      expect(md).not.toContain('/root/cfg');
+    });
+
+    it('redacts file:// URLs when includeUrls=false', () => {
+      const md = composeSummaryMarkdown(
+        baseInput({
+          event: baseEvent({ message: 'load file:///Users/x/data.json failed' }),
+          includePaths: true,
+          includeUrls: false,
+        }),
+      );
+      expect(md).not.toContain('file:///Users/x');
+      expect(md).toContain('<url omitted>');
+    });
+
+    it('redacts ws:// and wss:// URLs when includeUrls=false', () => {
+      const md = composeSummaryMarkdown(
+        baseInput({
+          event: baseEvent({ message: 'ws://localhost:3000 down, wss://api.x.io/stream' }),
+          includeUrls: false,
+        }),
+      );
+      expect(md).not.toContain('ws://localhost');
+      expect(md).not.toContain('wss://api.x.io');
+    });
+
+    it('does NOT redact dates or simple ratios as paths', () => {
+      const md = composeSummaryMarkdown(
+        baseInput({
+          event: baseEvent({ message: 'on 2026/04/22 got 1/2/3 reasons' }),
+          includePaths: false,
+        }),
+      );
+      expect(md).toContain('2026/04/22');
+      expect(md).toContain('1/2/3');
+      expect(md).not.toContain('<path omitted>');
+    });
+  });
 });
