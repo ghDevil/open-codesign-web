@@ -61,7 +61,7 @@ export function FilesTabView() {
               {t('canvas.files.sectionTitle')}
             </h2>
             <span
-              className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-[5px] rounded-[var(--radius-sm)] bg-[var(--color-background-secondary)] text-[10px] text-[var(--color-text-muted)]"
+              className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-[5px] rounded-[var(--radius-sm)] bg-[var(--color-background-secondary)] text-[var(--text-2xs)] text-[var(--color-text-muted)]"
               style={{ fontFamily: 'var(--font-mono)', fontFeatureSettings: "'tnum'" }}
             >
               {files.length}
@@ -106,7 +106,7 @@ export function FilesTabView() {
                         {name}
                       </span>
                       <span
-                        className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-[var(--tracking-label)]"
+                        className="text-[var(--text-2xs)] text-[var(--color-text-muted)] uppercase tracking-[var(--tracking-label)]"
                         style={{ fontFamily: 'var(--font-mono)', fontFeatureSettings: "'tnum'" }}
                       >
                         {formatBytes(f.size)}
@@ -139,7 +139,7 @@ export function FilesTabView() {
             {t('canvas.openInTab')}
           </button>
         </div>
-        <div className="flex-1 min-h-0 bg-white">
+        <div className="flex-1 min-h-0 bg-[var(--color-background-canvas,white)]">
           {srcDoc ? (
             <iframe
               ref={iframeRef}
@@ -159,7 +159,7 @@ export function FilesTabView() {
                   pushIframeError(`SET_MODE postMessage failed: ${reason}`);
                 }
               }}
-              className="w-full h-full bg-white border-0 block"
+              className="w-full h-full bg-[var(--color-background-canvas,white)] border-0 block"
             />
           ) : (
             <div className="h-full flex items-center justify-center text-[var(--text-sm)] text-[var(--color-text-muted)]">
