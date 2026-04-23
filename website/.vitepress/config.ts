@@ -283,6 +283,7 @@ export default defineConfig({
           { text: '首页', link: '/zh/' },
           { text: '快速开始', link: '/zh/quickstart' },
           { text: '对比 Claude Design', link: '/zh/claude-design-alternative' },
+          { text: '常见问题', link: '/zh/faq' },
           { text: 'GitHub', link: 'https://github.com/OpenCoworkAI/open-codesign' },
         ],
         sidebar: [
@@ -292,6 +293,7 @@ export default defineConfig({
               { text: '简介', link: '/zh/' },
               { text: '快速开始', link: '/zh/quickstart' },
               { text: '对比 Claude Design', link: '/zh/claude-design-alternative' },
+              { text: '常见问题', link: '/zh/faq' },
             ],
           },
         ],
