@@ -164,6 +164,17 @@ export interface AgentStreamEvent {
   code?: string;
 }
 
+// T2.4: stubs for the deleted snapshots / chat / comments IPC channels.
+// The `crypto.randomUUID()` global is available in the Electron renderer
+// preload context (Chromium 128+). See snapshots / chat / comments stubs
+// below — kept top-level so each stub stays a one-liner.
+function stubId(): string {
+  return crypto.randomUUID();
+}
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
 const api = {
   detectProvider: (key: string) =>
     ipcRenderer.invoke('codesign:detect-provider', key) as Promise<string | null>,
@@ -389,83 +400,101 @@ const api = {
       >,
   },
   snapshots: {
-    listDesigns: () =>
-      ipcRenderer.invoke('snapshots:v1:list-designs', { schemaVersion: 1 }) as Promise<Design[]>,
+    // TODO(v0.2): re-route through session JSONL — see T2.5 / T2.6.
+    // Stubs returning empty/synthetic values: the legacy SQLite snapshot
+    // / chat / comment tables were deleted in T2.4. The renderer keeps the
+    // window.codesign.{snapshots,chat,comments} surface so it still
+    // typechecks and runs without throwing; T2.5 / T2.6 will swap each
+    // method for its JSONL-backed equivalent.
+    listDesigns: () => Promise.resolve([] as Design[]),
     createDesign: (name: string) =>
-      ipcRenderer.invoke('snapshots:v1:create-design', {
+      Promise.resolve({
         schemaVersion: 1,
+        id: stubId(),
         name,
-      }) as Promise<Design>,
-    getDesign: (id: string) =>
-      ipcRenderer.invoke('snapshots:v1:get-design', {
-        schemaVersion: 1,
-        id,
-      }) as Promise<Design | null>,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        thumbnailText: null,
+        deletedAt: null,
+      } satisfies Design),
+    getDesign: (_id: string) => Promise.resolve(null as Design | null),
     renameDesign: (id: string, name: string) =>
-      ipcRenderer.invoke('snapshots:v1:rename-design', {
+      Promise.resolve({
         schemaVersion: 1,
         id,
         name,
-      }) as Promise<Design>,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        thumbnailText: null,
+        deletedAt: null,
+      } satisfies Design),
     setThumbnail: (id: string, thumbnailText: string | null) =>
-      ipcRenderer.invoke('snapshots:v1:set-thumbnail', {
+      Promise.resolve({
         schemaVersion: 1,
         id,
+        name: '',
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
         thumbnailText,
-      }) as Promise<Design>,
+        deletedAt: null,
+      } satisfies Design),
     softDeleteDesign: (id: string) =>
-      ipcRenderer.invoke('snapshots:v1:soft-delete-design', {
+      Promise.resolve({
         schemaVersion: 1,
         id,
-      }) as Promise<Design>,
-    duplicateDesign: (id: string, name: string) =>
-      ipcRenderer.invoke('snapshots:v1:duplicate-design', {
+        name: '',
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        thumbnailText: null,
+        deletedAt: nowIso(),
+      } satisfies Design),
+    duplicateDesign: (_id: string, name: string) =>
+      Promise.resolve({
         schemaVersion: 1,
-        id,
+        id: stubId(),
         name,
-      }) as Promise<Design>,
-    list: (designId: string) =>
-      ipcRenderer.invoke('snapshots:v1:list', { schemaVersion: 1, designId }) as Promise<
-        DesignSnapshot[]
-      >,
-    get: (id: string) =>
-      ipcRenderer.invoke('snapshots:v1:get', {
-        schemaVersion: 1,
-        id,
-      }) as Promise<DesignSnapshot | null>,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        thumbnailText: null,
+        deletedAt: null,
+      } satisfies Design),
+    list: (_designId: string) => Promise.resolve([] as DesignSnapshot[]),
+    get: (_id: string) => Promise.resolve(null as DesignSnapshot | null),
     create: (input: SnapshotCreateInput) =>
-      ipcRenderer.invoke('snapshots:v1:create', {
+      Promise.resolve({
         schemaVersion: 1,
-        ...input,
-      }) as Promise<DesignSnapshot>,
-    delete: (id: string) =>
-      ipcRenderer.invoke('snapshots:v1:delete', { schemaVersion: 1, id }) as Promise<void>,
+        id: stubId(),
+        designId: input.designId,
+        parentId: input.parentId ?? null,
+        type: input.type,
+        prompt: input.prompt ?? null,
+        artifactType: input.artifactType,
+        artifactSource: input.artifactSource,
+        createdAt: nowIso(),
+      } satisfies DesignSnapshot),
+    delete: (_id: string) => Promise.resolve(),
   },
   chat: {
-    list: (designId: string) =>
-      ipcRenderer.invoke('chat:v1:list', { schemaVersion: 1, designId }) as Promise<
-        ChatMessageRow[]
-      >,
+    // TODO(v0.2): re-route through session JSONL — see T2.5.
+    list: (_designId: string) => Promise.resolve([] as ChatMessageRow[]),
     append: (input: ChatAppendInput) =>
-      ipcRenderer.invoke('chat:v1:append', {
+      Promise.resolve({
         schemaVersion: 1,
-        ...input,
-      }) as Promise<ChatMessageRow>,
-    seedFromSnapshots: (designId: string) =>
-      ipcRenderer.invoke('chat:v1:seed-from-snapshots', {
-        schemaVersion: 1,
-        designId,
-      }) as Promise<{ inserted: number }>,
-    updateToolStatus: (input: {
+        id: 0,
+        designId: input.designId,
+        seq: 0,
+        kind: input.kind,
+        payload: input.payload ?? {},
+        snapshotId: input.snapshotId ?? null,
+        createdAt: nowIso(),
+      } satisfies ChatMessageRow),
+    seedFromSnapshots: (_designId: string) => Promise.resolve({ inserted: 0 }),
+    updateToolStatus: (_input: {
       designId: string;
       seq: number;
       status: 'done' | 'error';
       errorMessage?: string;
-    }) =>
-      ipcRenderer.invoke('chat:update-tool-status:v1', {
-        schemaVersion: 1,
-        ...input,
-      }) as Promise<{ ok: true }>,
+    }) => Promise.resolve({ ok: true } as const),
     onAgentEvent: (cb: (event: AgentStreamEvent) => void) => {
       const listener = (_e: unknown, event: AgentStreamEvent) => cb(event);
       ipcRenderer.on('agent:event:v1', listener);
@@ -473,39 +502,14 @@ const api = {
     },
   },
   comments: {
-    add: (input: CommentCreateInput) =>
-      ipcRenderer.invoke('comments:v1:add', {
-        schemaVersion: 1,
-        ...input,
-      }) as Promise<CommentRow>,
-    list: (designId: string, snapshotId?: string) =>
-      ipcRenderer.invoke('comments:v1:list', {
-        schemaVersion: 1,
-        designId,
-        ...(snapshotId !== undefined ? { snapshotId } : {}),
-      }) as Promise<CommentRow[]>,
-    listPendingEdits: (designId: string) =>
-      ipcRenderer.invoke('comments:v1:list-pending-edits', {
-        schemaVersion: 1,
-        designId,
-      }) as Promise<CommentRow[]>,
-    update: (id: string, patch: { text?: string; status?: CommentStatus }) =>
-      ipcRenderer.invoke('comments:v1:update', {
-        schemaVersion: 1,
-        id,
-        ...patch,
-      }) as Promise<CommentRow | null>,
-    remove: (id: string) =>
-      ipcRenderer.invoke('comments:v1:remove', {
-        schemaVersion: 1,
-        id,
-      }) as Promise<{ removed: boolean }>,
-    markApplied: (ids: string[], snapshotId: string) =>
-      ipcRenderer.invoke('comments:v1:mark-applied', {
-        schemaVersion: 1,
-        ids,
-        snapshotId,
-      }) as Promise<CommentRow[]>,
+    // TODO(v0.2): re-route through session JSONL — see T2.6.
+    add: (_input: CommentCreateInput) => Promise.resolve(null as unknown as CommentRow),
+    list: (_designId: string, _snapshotId?: string) => Promise.resolve([] as CommentRow[]),
+    listPendingEdits: (_designId: string) => Promise.resolve([] as CommentRow[]),
+    update: (_id: string, _patch: { text?: string; status?: CommentStatus }) =>
+      Promise.resolve(null as CommentRow | null),
+    remove: (_id: string) => Promise.resolve({ removed: false }),
+    markApplied: (_ids: string[], _snapshotId: string) => Promise.resolve([] as CommentRow[]),
   },
   diagnostics: {
     log: (entry: {

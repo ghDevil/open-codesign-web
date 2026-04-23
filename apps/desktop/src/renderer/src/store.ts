@@ -671,6 +671,8 @@ async function persistArtifactSnapshot(
   const prior = snapshotPersistLocks.get(designId) ?? Promise.resolve();
   const run = prior.then(async () => {
     if (!window.codesign) return null;
+    // TODO(v0.2/T2.4): re-route through session JSONL — see T2.5 / T2.6.
+    // window.codesign.snapshots.* is currently a no-op stub (see preload).
     const existing = await window.codesign.snapshots.list(designId);
     const parent = existing[0] ?? null;
     // Dedupe by content: the agent_end path and the generate-result path both
@@ -709,6 +711,7 @@ async function persistArtifactSnapshot(
 async function buildHistoryFromChat(designId: string | null): Promise<ChatMessage[]> {
   if (!designId || !window.codesign) return [];
   try {
+    // TODO(v0.2/T2.4): re-route through session JSONL — see T2.5.
     await window.codesign.chat.seedFromSnapshots(designId);
     const rows = await window.codesign.chat.list(designId);
     const out: ChatMessage[] = [];
@@ -745,6 +748,7 @@ async function persistDesignState(
       // chat_messages (canonical) instead of the removed store.messages mirror.
       let thumbText: string | null = null;
       try {
+        // TODO(v0.2/T2.4): re-route through session JSONL — see T2.5.
         const rows = await window.codesign.chat.list(designId);
         const firstUser = rows.find((r) => r.kind === 'user');
         const raw = (firstUser?.payload as { text?: string } | null)?.text;
@@ -752,6 +756,7 @@ async function persistDesignState(
       } catch {
         // Non-fatal — thumbnail stays unchanged.
       }
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
       await window.codesign.snapshots.setThumbnail(designId, thumbText);
     }
     await get().loadDesigns();
@@ -798,6 +803,7 @@ async function maybeAutoRename(
     });
   }
   try {
+    // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
     await window.codesign.snapshots.renameDesign(designId, newName);
     await get().loadDesigns();
   } catch (err) {
@@ -1615,6 +1621,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
           let appliedIn: string | null = null;
           for (let attempt = 0; attempt < 5; attempt++) {
             await new Promise((r) => setTimeout(r, attempt * 50));
+            // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
             const snaps = await window.codesign.snapshots.list(designIdAtStart);
             if (snaps.length > 0 && snaps[0]?.id) {
               appliedIn = snaps[0].id;
@@ -1622,6 +1629,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
             }
           }
           if (appliedIn) {
+            // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
             const updated = await window.codesign.comments.markApplied(pendingEditIds, appliedIn);
             if (get().currentDesignId === designIdAtStart && updated.length > 0) {
               set((s) => ({
@@ -1885,6 +1893,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
   async loadDesigns() {
     if (!window.codesign) return;
     try {
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
       const designs = await window.codesign.snapshots.listDesigns();
       set({ designs, designsLoaded: true });
     } catch (err) {
@@ -1933,6 +1942,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     while (existingNames.has(`Untitled design ${n}`)) n += 1;
     const name = `Untitled design ${n}`;
     try {
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
       const design = await window.codesign.snapshots.createDesign(name);
       set({
         currentDesignId: design.id,
@@ -2050,6 +2060,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
 
     // Cold path — first visit (or evicted from pool). Pay the IPC + parse cost.
     try {
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
       const snapshots = await window.codesign.snapshots.list(id);
       const latest = snapshots[0] ?? null;
       const html = latest ? latest.artifactSource : null;
@@ -2097,6 +2108,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     const trimmed = name.trim();
     if (!trimmed) return;
     try {
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
       await window.codesign.snapshots.renameDesign(id, trimmed);
       await get().loadDesigns();
       set({ designToRename: null });
@@ -2116,6 +2128,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     if (!source) return null;
     const name = tr('projects.duplicateNameTemplate', { name: source.name });
     try {
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
       const cloned = await window.codesign.snapshots.duplicateDesign(id, name);
       await get().loadDesigns();
       get().pushToast({
@@ -2144,6 +2157,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       return;
     }
     try {
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
       await window.codesign.snapshots.softDeleteDesign(id);
       if (get().autoPolishFired.has(id)) {
         const nextFired = new Set(get().autoPolishFired);
@@ -2270,6 +2284,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     }
     try {
       // Seed existing designs' chat history from snapshots on first open.
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.5.
       await window.codesign.chat.seedFromSnapshots(designId);
       const rows = await window.codesign.chat.list(designId);
       // Guard against a design switch happening while the IPC was in flight —
@@ -2286,6 +2301,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
   async appendChatMessage(input: ChatAppendInput) {
     if (!window.codesign) return null;
     try {
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.5.
       const row = await window.codesign.chat.append(input);
       // Only merge into state if the append belongs to the current design —
       // a background append to a previous design must not pollute the view.
@@ -2343,6 +2359,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
   async updateChatToolStatus({ designId, seq, status, result, durationMs, errorMessage }) {
     if (!window.codesign) return;
     try {
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.5.
       await window.codesign.chat.updateToolStatus({
         designId,
         seq,
@@ -2487,6 +2504,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       return;
     }
     try {
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.5 / T2.6.
       const [rows, snaps] = await Promise.all([
         window.codesign.comments.list(designId),
         window.codesign.snapshots.list(designId),
@@ -2536,6 +2554,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     let snapshotId: string | null = get().currentSnapshotId;
     if (!snapshotId) {
       try {
+        // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
         const snaps = await window.codesign.snapshots.list(designId);
         snapshotId = snaps[0]?.id ?? null;
         if (snapshotId) set({ currentSnapshotId: snapshotId });
@@ -2551,6 +2570,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       return null;
     }
     try {
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.5.
       const row = await window.codesign.comments.add({
         designId,
         snapshotId,
@@ -2581,6 +2601,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
   async updateComment(id, patch) {
     if (!window.codesign) return null;
     try {
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.5.
       const updated = await window.codesign.comments.update(id, patch);
       if (!updated) return null;
       set((s) => ({
@@ -2622,6 +2643,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
   async removeComment(id) {
     if (!window.codesign) return;
     try {
+      // TODO(v0.2/T2.4): re-route through session JSONL — see T2.5.
       await window.codesign.comments.remove(id);
       set((s) => ({ comments: s.comments.filter((c) => c.id !== id) }));
     } catch (err) {

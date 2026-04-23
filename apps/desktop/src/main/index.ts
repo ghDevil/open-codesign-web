@@ -30,14 +30,12 @@ import { autoUpdater } from 'electron-updater';
 import type { AgentStreamEvent } from '../preload/index';
 import { registerAppMenu } from './app-menu';
 import { showBootDialog, writeBootErrorSync } from './boot-fallback';
-import { registerChatMessagesIpc, registerChatMessagesUnavailableIpc } from './chat-messages-ipc';
 import {
   CHATGPT_CODEX_PROVIDER_ID,
   getCodexTokenStore,
   migrateStaleCodexEntryIfNeeded,
   registerCodexOAuthIpc,
 } from './codex-oauth-ipc';
-import { registerCommentsIpc, registerCommentsUnavailableIpc } from './comments-ipc';
 import { configDir } from './config';
 import { registerConnectionIpc } from './connection-ipc';
 import { scanDesignSystem } from './design-system';
@@ -75,7 +73,6 @@ import { cleanupStaleTmps } from './reported-fingerprints';
 import { resolveActiveApiKey, resolveApiKeyWithKeylessFallback } from './resolve-api-key';
 import { withRun } from './runContext';
 import { pruneDiagnosticEvents, recordDiagnosticEvent, safeInitSnapshotsDb } from './snapshots-db';
-import { registerSnapshotsIpc, registerSnapshotsUnavailableIpc } from './snapshots-ipc';
 import { initStorageSettings } from './storage-settings';
 
 // ESM shim: package.json "type": "module" means the built bundle is ESM and
@@ -1261,9 +1258,6 @@ void app.whenReady().then(async () => {
     const dbResult = safeInitSnapshotsDb(join(app.getPath('userData'), 'designs.db'));
     const diagnosticsDb: Database | null = dbResult.ok ? dbResult.db : null;
     if (dbResult.ok) {
-      registerSnapshotsIpc(dbResult.db);
-      registerChatMessagesIpc(dbResult.db);
-      registerCommentsIpc(dbResult.db);
       try {
         pruneDiagnosticEvents(dbResult.db, 500);
       } catch (err) {
@@ -1277,15 +1271,13 @@ void app.whenReady().then(async () => {
         message: dbResult.error.message,
         stack: dbResult.error.stack,
       });
-      // Install stub handlers so renderer-side calls reject with a typed
-      // SNAPSHOTS_UNAVAILABLE CodesignError instead of Electron's opaque
-      // "No handler registered" rejection — see snapshots-ipc.ts.
-      registerSnapshotsUnavailableIpc(dbResult.error.message);
-      registerChatMessagesUnavailableIpc(dbResult.error.message);
-      registerCommentsUnavailableIpc(dbResult.error.message);
+      // Snapshot / chat / comment IPC channels are gone (T2.4) — v0.2 routes
+      // those through the pi-coding-agent session JSONL. Diagnostics still
+      // need the DB; surface the failure but let the app open so the user
+      // can still generate without the report-issue path.
       dialog.showErrorBox(
-        'Design history unavailable',
-        `Could not open the local snapshots database. Version history will be disabled for this session.\n\n${dbResult.error.message}`,
+        'Diagnostics database unavailable',
+        `Could not open the local diagnostics database. Error reporting will be disabled for this session.\n\n${dbResult.error.message}`,
       );
     }
     registerIpcHandlers(diagnosticsDb);
