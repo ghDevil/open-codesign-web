@@ -35,6 +35,18 @@ export type { LoadAllSkillsOptions } from './skills/index.js';
 
 export { generateViaAgent } from './agent.js';
 export type { AgentEvent, GenerateViaAgentDeps } from './agent.js';
+export {
+  createCodesignSession,
+  AuthStorage,
+  ModelRegistry,
+  SessionManager,
+} from './agent-session.js';
+export type {
+  CreateSessionOptions,
+  PermissionDecision,
+  PermissionHook,
+  SessionHandle,
+} from './agent-session.js';
 export { FRAME_TEMPLATES, type FrameName } from './frames/index.js';
 export { DESIGN_SKILLS, type DesignSkillName } from './design-skills/index.js';
 export {
