@@ -1067,108 +1067,27 @@ describe('applyComment()', () => {
         },
         model: MODEL,
         apiKey: 'sk-test',
+        workspaceRoot: '/tmp/nonexistent',
       }),
     ).rejects.toBeInstanceOf(CodesignError);
   });
 
-  it('builds a revision prompt around the selected element', async () => {
-    completeMock.mockResolvedValueOnce({
-      content: RESPONSE,
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: 0,
-    });
-
-    await applyComment({
-      html: SAMPLE_HTML,
-      comment: 'Make this hero tighter and more premium.',
-      selection: {
-        selector: '#hero',
-        tag: 'section',
-        outerHTML: '<section id="hero">Hi</section>',
-        rect: { top: 0, left: 0, width: 100, height: 100 },
-      },
-      model: MODEL,
-      apiKey: 'sk-test',
-      designSystem: DESIGN_SYSTEM,
-    });
-
-    const messages = completeMock.mock.calls[0]?.[1] as ChatMessage[];
-    const system = messages[0];
-    const user = messages[1];
-    if (!system || !user) throw new Error('expected revision messages');
-    expect(system.content).toContain('Revision workflow');
-    expect(user.content).toContain('Make this hero tighter and more premium.');
-    expect(user.content).toContain('#hero');
-    expect(user.content).toContain(SAMPLE_HTML);
-    expect(user.content).toContain('Muted neutrals with warm copper accents.');
-    expect(user.content).toContain('Prioritize the selected element first');
-    expect(user.content).toContain('Do not use Markdown code fences');
-  });
-
-  it('returns no artifacts for fenced revision responses (prose fallback removed)', async () => {
-    completeMock.mockResolvedValueOnce({
-      content: FENCED_RESPONSE,
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: 0,
-    });
-
-    const result = await applyComment({
-      html: SAMPLE_HTML,
-      comment: 'Make the title more playful.',
-      selection: {
-        selector: 'h1',
-        tag: 'h1',
-        outerHTML: '<h1>Hi</h1>',
-        rect: { top: 0, left: 0, width: 80, height: 24 },
-      },
-      model: MODEL,
-      apiKey: 'sk-test',
-    });
-
-    expect(result.artifacts).toHaveLength(0);
-  });
-
-  it('emits named-step logs in order through the injected logger', async () => {
-    completeMock.mockResolvedValueOnce({
-      content: RESPONSE,
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: 0,
-    });
-
-    const events: string[] = [];
-    const logger = {
-      info: (event: string) => events.push(event),
-      warn: (event: string) => events.push(`WARN:${event}`),
-      error: (event: string) => events.push(`ERR:${event}`),
-    };
-
-    await applyComment({
-      html: SAMPLE_HTML,
-      comment: 'Tighten the hero copy.',
-      selection: {
-        selector: '#hero',
-        tag: 'section',
-        outerHTML: '<section id="hero">Hi</section>',
-        rect: { top: 0, left: 0, width: 100, height: 100 },
-      },
-      model: MODEL,
-      apiKey: 'sk-test',
-      logger,
-    });
-
-    expect(events).toEqual([
-      '[apply_comment] step=resolve_model',
-      '[apply_comment] step=resolve_model.ok',
-      '[apply_comment] step=build_request',
-      '[apply_comment] step=build_request.ok',
-      '[apply_comment] step=send_request',
-      '[apply_comment] step=send_request.ok',
-      '[apply_comment] step=parse_response',
-      '[apply_comment] step=parse_response.ok',
-    ]);
+  it('throws on empty html', async () => {
+    await expect(
+      applyComment({
+        html: '',
+        comment: 'Tighten the hero.',
+        selection: {
+          selector: '#hero',
+          tag: 'section',
+          outerHTML: '<section id="hero">Hi</section>',
+          rect: { top: 0, left: 0, width: 100, height: 100 },
+        },
+        model: MODEL,
+        apiKey: 'sk-test',
+        workspaceRoot: '/tmp/nonexistent',
+      }),
+    ).rejects.toBeInstanceOf(CodesignError);
   });
 });
 

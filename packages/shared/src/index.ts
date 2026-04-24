@@ -152,9 +152,11 @@ export const GeneratePayloadV1 = z.object({
 export type GeneratePayloadV1 = z.infer<typeof GeneratePayloadV1>;
 
 export const ApplyCommentPayload = z.object({
+  designId: z.string().min(1),
   html: z.string().min(1).max(500_000),
   comment: z.string().min(1).max(4_000),
   selection: SelectedElement,
+  generationId: GenerationId,
   model: ModelRef.optional(),
   referenceUrl: z.string().url().optional(),
   attachments: z.array(LocalInputFile).max(12).default([]),

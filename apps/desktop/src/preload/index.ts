@@ -277,6 +277,8 @@ const api = {
   generateTitle: (prompt: string) =>
     ipcRenderer.invoke('codesign:v1:generate-title', { prompt }) as Promise<string>,
   applyComment: (payload: {
+    designId: string;
+    generationId: string;
     html: string;
     comment: string;
     selection: SelectedElement;

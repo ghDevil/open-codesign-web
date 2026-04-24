@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 import {
   type AgentEvent,
   applyComment,
+  buildApplyCommentUserPrompt,
   type CoreLogger,
+  composeSystemPrompt,
   type GenerateImageAssetRequest,
   type GenerateImageAssetResult,
   generate,
@@ -110,24 +112,6 @@ if (storageLocations.dataDir !== undefined) {
   mkdirSync(storageLocations.dataDir, { recursive: true });
   app.setPath('userData', storageLocations.dataDir);
 }
-
-/**
- * Workstream B Phase 1 feature flag. When truthy, `codesign:*:generate` routes
- * through `generateViaAgent()` (pi-agent-core, zero tools). Default off — any
- * other value (including unset / empty) keeps the legacy `generate()` path.
- *
- * Read once at module init: changing the env var mid-session requires an app
- * restart, which matches every other flag we expose today.
- */
-const USE_AGENT_RUNTIME = (() => {
-  const raw = process.env['USE_AGENT_RUNTIME'];
-  // Default ON: we want the tool-loop path by default now that text streaming
-  // and the text_editor + set_todos tools are wired. Explicitly opt out with
-  // `USE_AGENT_RUNTIME=0` or `=false` to fall back to the single-turn
-  // generate() path.
-  if (raw === '0' || raw === 'false') return false;
-  return true;
-})();
 
 const IS_VITEST = process.env['VITEST'] === 'true';
 
@@ -427,13 +411,6 @@ function registerIpcHandlers(db: Database | null): void {
     });
   };
 
-  if (USE_AGENT_RUNTIME) {
-    logIpc.info('generate.runtime.agent_enabled', {
-      env: 'USE_AGENT_RUNTIME',
-      phase: 1,
-    });
-  }
-
   /** Adapter so `core` can log step events through the same scoped electron-log
    * sink the IPC handler uses. Keeps a single timeline per generation in the
    * log file without forcing `core` to depend on electron-log.
@@ -501,20 +478,18 @@ function registerIpcHandlers(db: Database | null): void {
   };
 
   /**
-   * Phase 1 flag dispatcher. When `USE_AGENT_RUNTIME` is off, passes through
-   * to `generate()` unchanged. When on, routes through `generateViaAgent()`
-   * and forwards normalized `AgentEvent`s to the renderer via
-   * `agent:event:v1` so the sidebar chat can render incremental output
-   * instead of waiting for the full final message.
+   * Dispatches a generate request through the agent runtime. Forwards
+   * normalized `AgentEvent`s to the renderer via `agent:event:v1` so the
+   * sidebar chat can render incremental output instead of waiting for the
+   * full final message.
    */
   const runGenerate = async (
-    input: Parameters<typeof generate>[0],
+    input: Parameters<typeof generateViaAgent>[0],
     id: string,
     designId: string | null,
     previousHtml: string | null,
     _workspacePath: string | null,
-  ): ReturnType<typeof generate> => {
-    if (!USE_AGENT_RUNTIME) return generate(input);
+  ): ReturnType<typeof generateViaAgent> => {
     const sendEvent = (event: AgentStreamEvent) => {
       mainWindow?.webContents.send('agent:event:v1', event);
     };
@@ -1124,10 +1099,15 @@ function registerIpcHandlers(db: Database | null): void {
 
   ipcMain.handle('codesign:apply-comment', async (_e, raw: unknown) => {
     const payload = ApplyCommentPayload.parse(raw);
-    const runId = crypto.randomUUID();
-    return withRun(runId, async () => {
+    const id = payload.generationId;
+    return withRun(id, async () => {
+      const controller = new AbortController();
+      inFlight.set(id, controller);
+      const coreLogger = coreLoggerFor(id);
+
       const cfg = getCachedConfig();
       if (cfg === null) {
+        inFlight.delete(id);
         throw new CodesignError(
           'No configuration found. Complete onboarding first.',
           'CONFIG_MISSING',
@@ -1139,8 +1119,24 @@ function registerIpcHandlers(db: Database | null): void {
       const hint = payload.model ?? { provider: cfg.provider, modelId: cfg.modelPrimary };
       const active = resolveActiveModel(cfg, hint);
       const allowKeyless = active.allowKeyless;
-      const apiKey = await resolveApiKeyForActive(active.model.provider, allowKeyless);
+      let apiKey: string;
+      try {
+        apiKey = await resolveApiKeyForActive(active.model.provider, allowKeyless);
+      } catch (err) {
+        inFlight.delete(id);
+        throw err;
+      }
       const baseUrl = active.baseUrl ?? undefined;
+
+      const workspaceRoot = resolveWorkspaceRootForDesign(payload.designId);
+      if (workspaceRoot === undefined) {
+        inFlight.delete(id);
+        throw new CodesignError(
+          'This design has no workspace bound. Reopen the design from the dashboard.',
+          'WORKSPACE_MISSING',
+        );
+      }
+
       const promptContext = await preparePromptContext({
         attachments: payload.attachments,
         referenceUrl: payload.referenceUrl,
@@ -1148,6 +1144,8 @@ function registerIpcHandlers(db: Database | null): void {
       });
 
       logIpc.info('applyComment', {
+        generationId: id,
+        designId: payload.designId,
         provider: active.model.provider,
         modelId: active.model.modelId,
         ...(active.overridden
@@ -1160,44 +1158,73 @@ function registerIpcHandlers(db: Database | null): void {
         baseUrl: baseUrl ?? '<default>',
       });
 
+      const systemPrompt = composeSystemPrompt({ mode: 'revise' });
+      const userPrompt = buildApplyCommentUserPrompt({
+        comment: payload.comment,
+        selection: payload.selection,
+        ...(promptContext.attachments !== undefined
+          ? { attachments: promptContext.attachments }
+          : {}),
+        ...(promptContext.referenceUrl !== undefined
+          ? { referenceUrl: promptContext.referenceUrl }
+          : {}),
+        designSystem: promptContext.designSystem ?? null,
+      });
+
       const t0 = Date.now();
+      let clearTimeoutGuard: () => void = () => {};
       try {
-        const workspaceRoot =
-          resolveWorkspaceRootForDesign(payload.designId) ?? app.getPath('userData');
-        const templatesRoot = path_module.join(app.getPath('userData'), 'templates');
-        const result = await applyComment({
-          html: payload.html,
-          comment: payload.comment,
-          selection: payload.selection,
-          model: active.model,
-          apiKey,
+        clearTimeoutGuard = await armTimeout(id, controller);
+        const isCodex = active.model.provider === CHATGPT_CODEX_PROVIDER_ID;
+        const result = await runGenerate(
+          {
+            prompt: userPrompt,
+            systemPrompt,
+            history: [],
+            model: active.model,
+            apiKey,
+            ...(isCodex
+              ? { getApiKey: () => resolveActiveApiKeyFromState(active.model.provider) }
+              : {}),
+            attachments: promptContext.attachments,
+            referenceUrl: promptContext.referenceUrl,
+            designSystem: promptContext.designSystem ?? null,
+            ...(baseUrl !== undefined ? { baseUrl } : {}),
+            wire: active.wire,
+            ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
+            ...(allowKeyless ? { allowKeyless: true } : {}),
+            signal: controller.signal,
+            logger: coreLogger,
+          },
+          id,
+          payload.designId,
+          payload.html,
           workspaceRoot,
-          templatesRoot,
-          attachments: promptContext.attachments,
-          referenceUrl: promptContext.referenceUrl,
-          designSystem: promptContext.designSystem ?? null,
-          ...(baseUrl !== undefined ? { baseUrl } : {}),
-          wire: active.wire,
-          ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
-          ...(allowKeyless ? { allowKeyless: true } : {}),
-        });
+        );
         logIpc.info('applyComment.ok', {
+          generationId: id,
           ms: Date.now() - t0,
           artifacts: result.artifacts.length,
           cost: result.costUsd,
         });
         return result;
       } catch (err) {
+        const timeoutErr = extractGenerationTimeoutError(controller.signal);
+        const rethrow = timeoutErr ?? err;
         logIpc.error('applyComment.fail', {
+          generationId: id,
           ms: Date.now() - t0,
           provider: active.model.provider,
           modelId: active.model.modelId,
           selector: payload.selection.selector,
-          message: err instanceof Error ? err.message : String(err),
-          code: err instanceof CodesignError ? err.code : undefined,
+          message: rethrow instanceof Error ? rethrow.message : String(rethrow),
+          code: rethrow instanceof CodesignError ? rethrow.code : undefined,
         });
-        recordFinalError('apply-comment', runId, err);
-        throw err;
+        recordFinalError('apply-comment', id, rethrow);
+        throw rethrow;
+      } finally {
+        clearTimeoutGuard();
+        inFlight.delete(id);
       }
     });
   });

@@ -1715,30 +1715,39 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     const cfg = get().config;
     const html = get().previewHtml;
     const selection = get().selectedElement;
-    if (cfg === null || !cfg.hasKey || html === null || selection === null) return;
+    const designIdAtStart = get().currentDesignId;
+    if (
+      cfg === null ||
+      !cfg.hasKey ||
+      html === null ||
+      selection === null ||
+      designIdAtStart === null
+    )
+      return;
 
     const userMessageText = `Edit ${selection.tag}: ${trimmed}`;
     const referenceUrl = normalizeReferenceUrl(get().referenceUrl);
     const attachments = uniqueFiles(get().inputFiles);
-    const designIdAtStart = get().currentDesignId;
+    const generationId = newId();
 
     set(() => ({
       isGenerating: true,
+      activeGenerationId: generationId,
       generatingDesignId: designIdAtStart,
       errorMessage: null,
       iframeErrors: [],
     }));
 
-    if (designIdAtStart) {
-      void get().appendChatMessage({
-        designId: designIdAtStart,
-        kind: 'user',
-        payload: { text: userMessageText },
-      });
-    }
+    void get().appendChatMessage({
+      designId: designIdAtStart,
+      kind: 'user',
+      payload: { text: userMessageText },
+    });
 
     try {
       const result = await window.codesign.applyComment({
+        designId: designIdAtStart,
+        generationId,
         html,
         comment: trimmed,
         selection,

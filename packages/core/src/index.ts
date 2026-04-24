@@ -18,6 +18,7 @@ import type {
   WireApi,
 } from '@open-codesign/shared';
 import { CodesignError, ERROR_CODES } from '@open-codesign/shared';
+import { type GenerateViaAgentDeps, generateViaAgent as runAgent } from './agent.js';
 import { remapProviderError } from './errors.js';
 import { type Collected, collect, stripEmptyFences } from './lib/artifact-collect.js';
 import { buildContextSections, buildUserPromptWithContext } from './lib/context-format.js';
@@ -210,6 +211,11 @@ export interface ApplyCommentInput {
   selection: SelectedElement;
   model: ModelRef;
   apiKey: string;
+  /** Absolute path to the design's workspace root. The agent edits
+   *  `<workspaceRoot>/index.html` directly via `text_editor`. */
+  workspaceRoot: string;
+  /** @see GenerateInput.templatesRoot */
+  templatesRoot?: string | undefined;
   baseUrl?: string | undefined;
   wire?: WireApi | undefined;
   httpHeaders?: Record<string, string> | undefined;
@@ -277,16 +283,28 @@ function imageInputsForWire(
     .filter((image): image is { data: string; mimeType: string } => image !== null);
 }
 
-function buildRevisionPrompt(input: ApplyCommentInput, contextSections: string[]): string {
+export interface BuildApplyCommentPromptInput {
+  comment: string;
+  selection: SelectedElement;
+  designSystem?: StoredDesignSystem | null | undefined;
+  attachments?: AttachmentContext[] | undefined;
+  referenceUrl?: ReferenceUrlContext | null | undefined;
+}
+
+export function buildApplyCommentUserPrompt(input: BuildApplyCommentPromptInput): string {
+  const contextSections = buildContextSections({
+    ...(input.designSystem !== undefined ? { designSystem: input.designSystem } : {}),
+    ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
+    ...(input.referenceUrl !== undefined ? { referenceUrl: input.referenceUrl } : {}),
+  });
   const parts = [
-    'Revise the existing HTML artifact below.',
+    'Revise the HTML that is already in the workspace at `index.html`.',
     'Keep the overall structure, copy, and layout intact unless the user request requires a broader change.',
     'Prioritize the selected element first and avoid unrelated edits.',
     `User request: ${input.comment.trim()}`,
     `Selected element tag: <${input.selection.tag}>`,
     `Selected element selector: ${input.selection.selector}`,
     `Selected element snippet:\n${input.selection.outerHTML || '(empty)'}`,
-    `Current full HTML:\n${input.html}`,
   ];
   if (contextSections.length > 0) {
     parts.push(
@@ -295,10 +313,12 @@ function buildRevisionPrompt(input: ApplyCommentInput, contextSections: string[]
     parts.push(contextSections.join('\n\n'));
   }
   parts.push(
-    'Return exactly one full updated HTML artifact wrapped in the required <artifact> tag. Do not use Markdown code fences. A short summary outside the artifact is enough.',
+    'Edit the file with the `text_editor` tool — do NOT paste HTML in chat. When done, call the `done` tool. Keep the reply short; no narration beyond the required ≤15-word tool-call intros.',
   );
   return parts.join('\n\n');
 }
+
+export { composeSystemPrompt } from './prompts/index.js';
 
 async function runModel(input: ModelRunInput): Promise<GenerateOutput> {
   const log = input.logger ?? NOOP_LOGGER;
@@ -655,7 +675,10 @@ export async function generate(input: GenerateInput): Promise<GenerateOutput> {
     : output;
 }
 
-export async function applyComment(input: ApplyCommentInput): Promise<GenerateOutput> {
+export async function applyComment(
+  input: ApplyCommentInput,
+  deps: GenerateViaAgentDeps = {},
+): Promise<GenerateOutput> {
   const log = input.logger ?? NOOP_LOGGER;
   const ctx = {
     provider: input.model.provider,
@@ -669,42 +692,42 @@ export async function applyComment(input: ApplyCommentInput): Promise<GenerateOu
     throw new CodesignError('Existing HTML cannot be empty', ERROR_CODES.INPUT_EMPTY_HTML);
   }
 
-  log.info('[apply_comment] step=resolve_model', ctx);
-  const resolveStart = Date.now();
-  log.info('[apply_comment] step=resolve_model.ok', { ...ctx, ms: Date.now() - resolveStart });
-
   log.info('[apply_comment] step=build_request', ctx);
   const buildStart = Date.now();
-  const messages: ChatMessage[] = [
-    {
-      role: 'system',
-      content: composeSystemPrompt({
-        mode: 'revise',
-      }),
-    },
-    { role: 'user', content: buildRevisionPrompt(input, buildContextSections(input)) },
-  ];
+  const systemPrompt = composeSystemPrompt({ mode: 'revise' });
+  const userPrompt = buildApplyCommentUserPrompt({
+    comment: input.comment,
+    selection: input.selection,
+    ...(input.designSystem !== undefined ? { designSystem: input.designSystem } : {}),
+    ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
+    ...(input.referenceUrl !== undefined ? { referenceUrl: input.referenceUrl } : {}),
+  });
   log.info('[apply_comment] step=build_request.ok', {
     ...ctx,
     ms: Date.now() - buildStart,
-    messages: messages.length,
   });
 
-  return runModel({
+  const agentInput: GenerateInput = {
+    prompt: userPrompt,
+    systemPrompt,
+    history: [],
     model: input.model,
     apiKey: input.apiKey,
-    baseUrl: input.baseUrl,
-    wire: input.wire,
-    httpHeaders: input.httpHeaders,
-    allowKeyless: input.allowKeyless,
-    reasoningLevel: input.reasoningLevel,
-    signal: input.signal,
-    onRetry: input.onRetry,
-    messages,
-    userImages: imageInputsForWire(input.attachments, input.wire),
-    logger: input.logger,
-    logScope: 'apply_comment',
-  });
+    workspaceRoot: input.workspaceRoot,
+    ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl } : {}),
+    ...(input.wire !== undefined ? { wire: input.wire } : {}),
+    ...(input.httpHeaders !== undefined ? { httpHeaders: input.httpHeaders } : {}),
+    ...(input.allowKeyless !== undefined ? { allowKeyless: input.allowKeyless } : {}),
+    ...(input.reasoningLevel !== undefined ? { reasoningLevel: input.reasoningLevel } : {}),
+    ...(input.designSystem !== undefined ? { designSystem: input.designSystem } : {}),
+    ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
+    ...(input.referenceUrl !== undefined ? { referenceUrl: input.referenceUrl } : {}),
+    ...(input.templatesRoot !== undefined ? { templatesRoot: input.templatesRoot } : {}),
+    ...(input.signal !== undefined ? { signal: input.signal } : {}),
+    ...(input.onRetry !== undefined ? { onRetry: input.onRetry } : {}),
+    ...(input.logger !== undefined ? { logger: input.logger } : {}),
+  };
+  return runAgent(agentInput, deps);
 }
 
 // ---------------------------------------------------------------------------
