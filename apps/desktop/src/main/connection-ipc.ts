@@ -3,6 +3,7 @@ import {
   BUILTIN_PROVIDERS,
   CodesignError,
   ERROR_CODES,
+  type ProviderEntry,
   type SupportedOnboardingProvider,
   type WireApi,
   canonicalBaseUrl,
@@ -496,18 +497,8 @@ export async function runProviderTest(
     // not degrade anthropic — its /v1/models is standard, and skipping it
     // would mask real path-shape mistakes.
     if (res.status === 404 && (creds.wire === 'openai-chat' || creds.wire === 'openai-responses')) {
-      const probe = await probeInferenceEndpoint(creds.wire, normalizedBaseUrl, headers);
-      if (probe.kind === 'pass') {
-        return {
-          ok: true,
-          probeMethod:
-            creds.wire === 'openai-responses' ? 'responses_degraded' : 'chat_completion_degraded',
-        };
-      }
-      if (probe.kind === 'http' && probe.status !== 404) {
-        const { code, hint } = classifyHttpError(probe.status);
-        return { ok: false, code, message: `HTTP ${probe.status}`, hint };
-      }
+      const degraded = await tryDegradeProbe(creds.wire, normalizedBaseUrl, headers);
+      if (degraded !== null) return degraded;
       // Inference endpoint also 404'd (or the network dropped) — fall through
       // and report the original /models 404.
     }
@@ -515,6 +506,25 @@ export async function runProviderTest(
     return { ok: false, code, message: `HTTP ${res.status}`, hint };
   }
   return { ok: true, probeMethod: 'models' };
+}
+
+async function tryDegradeProbe(
+  wire: 'openai-chat' | 'openai-responses',
+  normalizedBaseUrl: string,
+  headers: Record<string, string>,
+): Promise<ConnectionTestResponse | null> {
+  const probe = await probeInferenceEndpoint(wire, normalizedBaseUrl, headers);
+  if (probe.kind === 'pass') {
+    return {
+      ok: true,
+      probeMethod: wire === 'openai-responses' ? 'responses_degraded' : 'chat_completion_degraded',
+    };
+  }
+  if (probe.kind === 'http' && probe.status !== 404) {
+    const { code, hint } = classifyHttpError(probe.status);
+    return { ok: false, code, message: `HTTP ${probe.status}`, hint };
+  }
+  return null;
 }
 
 type ProbeResult =
@@ -576,124 +586,8 @@ async function probeInferenceEndpoint(
 }
 
 export function registerConnectionIpc(): void {
-  ipcMain.handle(
-    'connection:v1:test',
-    async (_e, raw: unknown): Promise<ConnectionTestResponse> => {
-      let payload: ConnectionTestPayloadV1;
-      try {
-        payload = parseConnectionTestPayload(raw);
-      } catch (err) {
-        return {
-          ok: false,
-          code: 'IPC_BAD_INPUT',
-          message: err instanceof Error ? err.message : String(err),
-          hint: 'Invalid connection test payload',
-        };
-      }
-
-      const { provider, apiKey, baseUrl } = payload;
-      const ep = buildModelsEndpoint(provider, baseUrl);
-      const authHeaders = buildAuthHeaders(provider, apiKey, baseUrl);
-
-      let res: Response;
-      try {
-        res = await fetchWithTimeout(ep.url, {
-          method: 'GET',
-          headers: { ...ep.headers, ...authHeaders },
-        });
-      } catch (err) {
-        const { code, hint } = classifyNetworkError(err);
-        return {
-          ok: false,
-          code,
-          message: err instanceof Error ? err.message : 'Network request failed',
-          hint,
-        };
-      }
-
-      if (!res.ok) {
-        const { code, hint } = classifyHttpError(res.status);
-        return {
-          ok: false,
-          code,
-          message: `HTTP ${res.status}`,
-          hint,
-        };
-      }
-
-      return { ok: true };
-    },
-  );
-
-  ipcMain.handle('models:v1:list', async (_e, raw: unknown): Promise<ModelsListResponse> => {
-    let payload: ModelsListPayloadV1;
-    try {
-      payload = parseModelsListPayload(raw);
-    } catch (err) {
-      return {
-        ok: false,
-        code: 'IPC_BAD_INPUT',
-        message: err instanceof Error ? err.message : String(err),
-        hint: 'Invalid models:v1:list payload',
-      };
-    }
-
-    const { provider, apiKey, baseUrl } = payload;
-
-    const cached = getCachedModels(provider, baseUrl, apiKey);
-    if (cached !== null) return { ok: true, models: cached };
-
-    const ep = buildModelsEndpoint(provider, baseUrl);
-    const authHeaders = buildAuthHeaders(provider, apiKey, baseUrl);
-
-    let res: Response;
-    try {
-      res = await fetchWithTimeout(ep.url, {
-        method: 'GET',
-        headers: { ...ep.headers, ...authHeaders },
-      });
-    } catch (err) {
-      return {
-        ok: false,
-        code: 'NETWORK',
-        message: err instanceof Error ? err.message : String(err),
-        hint: 'Cannot reach provider /models endpoint',
-      };
-    }
-
-    if (!res.ok) {
-      return {
-        ok: false,
-        code: 'HTTP',
-        message: `HTTP ${res.status}`,
-        hint: 'Model list request failed',
-      };
-    }
-
-    let body: unknown;
-    try {
-      body = await res.json();
-    } catch {
-      return {
-        ok: false,
-        code: 'PARSE',
-        message: 'Invalid JSON in response',
-        hint: 'Provider returned non-JSON',
-      };
-    }
-
-    const ids = extractModelIds(body);
-    if (ids === null) {
-      return {
-        ok: false,
-        code: 'PARSE',
-        message: 'Provider returned unexpected models response shape',
-        hint: 'Unexpected response shape — check provider /models endpoint compatibility',
-      };
-    }
-    setCachedModels(provider, baseUrl, apiKey, ids);
-    return { ok: true, models: ids };
-  });
+  ipcMain.handle('connection:v1:test', (_e, raw: unknown) => handleConnectionV1Test(raw));
+  ipcMain.handle('models:v1:list', (_e, raw: unknown) => handleModelsV1List(raw));
 
   // Tests the currently active provider using the stored (encrypted) key — no key passed from renderer.
   ipcMain.handle('connection:v1:test-active', async (): Promise<ConnectionTestResponse> => {
@@ -704,233 +598,356 @@ export function registerConnectionIpc(): void {
 
   // Tests a specific provider by id — used by the per-row "Test connection"
   // button in Settings. Same probe as test-active but routed by id.
-  ipcMain.handle(
-    'connection:v1:test-provider',
-    async (_e, raw: unknown): Promise<ConnectionTestResponse> => {
-      if (typeof raw !== 'string' || raw.length === 0) {
-        return {
-          ok: false,
-          code: 'IPC_BAD_INPUT',
-          message: 'test-provider expects a provider id string',
-          hint: 'Internal error — missing provider id',
-        };
-      }
-      const creds = resolveCredentialsForProvider(raw);
-      if (!('provider' in creds)) return creds;
-      return runProviderTest(creds);
-    },
+  ipcMain.handle('connection:v1:test-provider', (_e, raw: unknown) =>
+    handleConnectionV1TestProvider(raw),
   );
 
   // Fetch available models for a stored provider by ID — credentials resolved
   // from the encrypted config so the renderer never touches plaintext keys.
-  ipcMain.handle(
-    'models:v1:list-for-provider',
-    async (_e, raw: unknown): Promise<ModelsListResponse> => {
-      if (typeof raw !== 'string' || raw.length === 0) {
-        return {
-          ok: false,
-          code: 'IPC_BAD_INPUT',
-          message: 'list-for-provider expects a provider id string',
-          hint: 'Internal error — missing provider id',
-        };
-      }
-
-      const cfg = getCachedConfig();
-      if (cfg === null) {
-        return {
-          ok: false,
-          code: 'IPC_BAD_INPUT',
-          message: 'No configuration loaded',
-          hint: 'Complete onboarding first',
-        };
-      }
-      const entry =
-        cfg.providers[raw] ??
-        (isSupportedOnboardingProvider(raw) ? BUILTIN_PROVIDERS[raw] : undefined);
-      if (entry === undefined) {
-        return {
-          ok: false,
-          code: 'IPC_BAD_INPUT',
-          message: `Provider "${raw}" not found in config`,
-          hint: 'Re-add the provider from Settings',
-        };
-      }
-
-      // Providers that expose a static hint (e.g. chatgpt-codex, whose /models
-      // endpoint requires OAuth bearer + ChatGPT-Account-Id headers that this
-      // keyless discovery path cannot supply) short-circuit with modelsHint.
-      if (entry.modelsHint !== undefined && entry.modelsHint.length > 0) {
-        return { ok: true, models: entry.modelsHint };
-      }
-
-      let apiKey: string;
-      try {
-        apiKey = getApiKeyForProvider(raw);
-      } catch (err) {
-        if (!isKeylessProviderAllowed(raw, entry)) {
-          return {
-            ok: false,
-            code: 'IPC_BAD_INPUT',
-            message: err instanceof Error ? err.message : `No API key stored for provider "${raw}"`,
-            hint: 'Open Settings and import Codex again, or add an API key for this provider',
-          };
-        }
-        apiKey = '';
-      }
-
-      const cached = getCachedModels(raw, entry.baseUrl, apiKey);
-      if (cached !== null) return { ok: true, models: cached };
-
-      const { url } = buildEndpointForWire(entry.wire, entry.baseUrl);
-      const headers = buildAuthHeadersForWire(entry.wire, apiKey, entry.httpHeaders, entry.baseUrl);
-
-      let res: Response;
-      try {
-        res = await fetchWithTimeout(url, { method: 'GET', headers });
-      } catch (err) {
-        return {
-          ok: false,
-          code: 'NETWORK',
-          message: err instanceof Error ? err.message : String(err),
-          hint: 'Cannot reach provider /models endpoint',
-        };
-      }
-
-      if (!res.ok) {
-        return {
-          ok: false,
-          code: 'HTTP',
-          message: `HTTP ${res.status}`,
-          hint: 'Model list request failed',
-        };
-      }
-
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch {
-        return {
-          ok: false,
-          code: 'PARSE',
-          message: 'Invalid JSON in response',
-          hint: 'Provider returned non-JSON',
-        };
-      }
-
-      const ids = extractModelIds(body);
-      if (ids === null) {
-        return {
-          ok: false,
-          code: 'PARSE',
-          message: 'Unexpected models response shape',
-          hint: 'Check provider /models endpoint compatibility',
-        };
-      }
-      setCachedModels(raw, entry.baseUrl, apiKey, ids);
-      return { ok: true, models: ids };
-    },
+  ipcMain.handle('models:v1:list-for-provider', (_e, raw: unknown) =>
+    handleModelsV1ListForProvider(raw),
   );
 
   // ── Wire-agnostic test endpoint (v3 custom providers) ────────────────────
-  ipcMain.handle(
-    'config:v1:test-endpoint',
-    async (_e, raw: unknown): Promise<TestEndpointResponse> => {
-      let payload: TestEndpointPayload;
-      try {
-        payload = parseTestEndpointPayload(raw);
-      } catch (err) {
-        return {
-          ok: false,
-          error: 'bad-input',
-          message: err instanceof Error ? err.message : String(err),
-        };
-      }
-
-      const { url } = buildEndpointForWire(payload.wire, payload.baseUrl);
-      const headers = buildAuthHeadersForWire(
-        payload.wire,
-        payload.apiKey,
-        payload.httpHeaders,
-        payload.baseUrl,
-      );
-
-      let res: Response;
-      try {
-        res = await fetchWithTimeout(url, { method: 'GET', headers });
-      } catch (err) {
-        return {
-          ok: false,
-          error: 'network',
-          message: err instanceof Error ? err.message : 'Network request failed',
-        };
-      }
-
-      if (res.status === 401 || res.status === 403) {
-        return { ok: false, error: 'auth', message: `HTTP ${res.status}` };
-      }
-      if (res.status === 404) {
-        return { ok: false, error: 'not-a-model-endpoint', message: 'HTTP 404' };
-      }
-      if (!res.ok) {
-        return { ok: false, error: `http-${res.status}`, message: `HTTP ${res.status}` };
-      }
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch {
-        return { ok: false, error: 'parse', message: 'Provider returned non-JSON' };
-      }
-      const ids = extractModelIds(body);
-      return { ok: true, modelCount: ids?.length ?? 0, models: ids ?? [] };
-    },
-  );
+  ipcMain.handle('config:v1:test-endpoint', (_e, raw: unknown) => handleConfigV1TestEndpoint(raw));
 
   // ── Ollama probe — used by onboarding to show "detected/not running" ─────
   // We intentionally don't reuse the /v1/models endpoint because /api/tags is
   // Ollama's canonical liveness probe, returns faster, and survives users who
   // disabled the OpenAI-compat server. Short 2s timeout because the user is
   // staring at a spinner in the onboarding flow.
-  ipcMain.handle('ollama:v1:probe', async (_e, raw: unknown): Promise<OllamaProbeResponse> => {
-    let baseUrl: string;
-    try {
-      baseUrl = parseOllamaProbePayload(raw);
-    } catch (err) {
-      // Surface invalid URL / unsupported scheme as an explicit IPC error
-      // instead of silently coercing back to localhost — the renderer needs
-      // to see the mistake to let the user fix their typed baseUrl.
+  ipcMain.handle('ollama:v1:probe', (_e, raw: unknown) => handleOllamaV1Probe(raw));
+}
+
+async function handleConnectionV1Test(raw: unknown): Promise<ConnectionTestResponse> {
+  let payload: ConnectionTestPayloadV1;
+  try {
+    payload = parseConnectionTestPayload(raw);
+  } catch (err) {
+    return {
+      ok: false,
+      code: 'IPC_BAD_INPUT',
+      message: err instanceof Error ? err.message : String(err),
+      hint: 'Invalid connection test payload',
+    };
+  }
+
+  const { provider, apiKey, baseUrl } = payload;
+  const ep = buildModelsEndpoint(provider, baseUrl);
+  const authHeaders = buildAuthHeaders(provider, apiKey, baseUrl);
+
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(ep.url, {
+      method: 'GET',
+      headers: { ...ep.headers, ...authHeaders },
+    });
+  } catch (err) {
+    const { code, hint } = classifyNetworkError(err);
+    return {
+      ok: false,
+      code,
+      message: err instanceof Error ? err.message : 'Network request failed',
+      hint,
+    };
+  }
+
+  if (!res.ok) {
+    const { code, hint } = classifyHttpError(res.status);
+    return {
+      ok: false,
+      code,
+      message: `HTTP ${res.status}`,
+      hint,
+    };
+  }
+
+  return { ok: true };
+}
+
+async function handleModelsV1List(raw: unknown): Promise<ModelsListResponse> {
+  let payload: ModelsListPayloadV1;
+  try {
+    payload = parseModelsListPayload(raw);
+  } catch (err) {
+    return {
+      ok: false,
+      code: 'IPC_BAD_INPUT',
+      message: err instanceof Error ? err.message : String(err),
+      hint: 'Invalid models:v1:list payload',
+    };
+  }
+
+  const { provider, apiKey, baseUrl } = payload;
+
+  const cached = getCachedModels(provider, baseUrl, apiKey);
+  if (cached !== null) return { ok: true, models: cached };
+
+  const ep = buildModelsEndpoint(provider, baseUrl);
+  const authHeaders = buildAuthHeaders(provider, apiKey, baseUrl);
+
+  const result = await fetchModelListResponse(
+    ep.url,
+    { ...ep.headers, ...authHeaders },
+    {
+      message: 'Provider returned unexpected models response shape',
+      hint: 'Unexpected response shape — check provider /models endpoint compatibility',
+    },
+  );
+  if (result.ok) setCachedModels(provider, baseUrl, apiKey, result.models);
+  return result;
+}
+
+async function handleConnectionV1TestProvider(raw: unknown): Promise<ConnectionTestResponse> {
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return {
+      ok: false,
+      code: 'IPC_BAD_INPUT',
+      message: 'test-provider expects a provider id string',
+      hint: 'Internal error — missing provider id',
+    };
+  }
+  const creds = resolveCredentialsForProvider(raw);
+  if (!('provider' in creds)) return creds;
+  return runProviderTest(creds);
+}
+
+type ResolvedProviderForListing = { providerId: string; entry: ProviderEntry };
+
+function resolveProviderForListing(
+  raw: unknown,
+): ResolvedProviderForListing | Extract<ModelsListResponse, { ok: false }> {
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return {
+      ok: false,
+      code: 'IPC_BAD_INPUT',
+      message: 'list-for-provider expects a provider id string',
+      hint: 'Internal error — missing provider id',
+    };
+  }
+  const cfg = getCachedConfig();
+  if (cfg === null) {
+    return {
+      ok: false,
+      code: 'IPC_BAD_INPUT',
+      message: 'No configuration loaded',
+      hint: 'Complete onboarding first',
+    };
+  }
+  const entry =
+    cfg.providers[raw] ?? (isSupportedOnboardingProvider(raw) ? BUILTIN_PROVIDERS[raw] : undefined);
+  if (entry === undefined) {
+    return {
+      ok: false,
+      code: 'IPC_BAD_INPUT',
+      message: `Provider "${raw}" not found in config`,
+      hint: 'Re-add the provider from Settings',
+    };
+  }
+  return { providerId: raw, entry };
+}
+
+function resolveApiKeyForListing(
+  providerId: string,
+  entry: ProviderEntry,
+): { apiKey: string } | Extract<ModelsListResponse, { ok: false }> {
+  try {
+    return { apiKey: getApiKeyForProvider(providerId) };
+  } catch (err) {
+    if (!isKeylessProviderAllowed(providerId, entry)) {
       return {
         ok: false,
         code: 'IPC_BAD_INPUT',
-        message: err instanceof Error ? err.message : String(err),
+        message:
+          err instanceof Error ? err.message : `No API key stored for provider "${providerId}"`,
+        hint: 'Open Settings and import Codex again, or add an API key for this provider',
       };
     }
-    const url = `${baseUrl.replace(/\/+$/, '')}/api/tags`;
-    let res: Response;
-    try {
-      res = await fetchWithTimeout(url, { method: 'GET' }, 2000);
-    } catch (err) {
-      const { code } = classifyNetworkError(err);
-      return { ok: false, code, message: err instanceof Error ? err.message : String(err) };
-    }
-    if (!res.ok) {
-      return { ok: false, code: 'HTTP', message: `HTTP ${res.status}` };
-    }
-    let body: unknown;
-    try {
-      body = await res.json();
-    } catch {
-      return { ok: false, code: 'PARSE', message: 'Non-JSON response' };
-    }
-    const models = extractModelIds(body);
-    if (models === null) {
-      // Don't silently pretend Ollama is up with zero models — that would
-      // push the UI into an "available but empty" state that's actually a
-      // parser bug. Surface PARSE so the renderer can flag the probe as
-      // broken rather than rendering an empty model picker.
-      return { ok: false, code: 'PARSE', message: 'Unexpected /api/tags shape' };
-    }
-    return { ok: true, models };
+    return { apiKey: '' };
+  }
+}
+
+async function handleModelsV1ListForProvider(raw: unknown): Promise<ModelsListResponse> {
+  const resolved = resolveProviderForListing(raw);
+  if ('ok' in resolved) return resolved;
+  const { providerId, entry } = resolved;
+
+  // Providers that expose a static hint (e.g. chatgpt-codex, whose /models
+  // endpoint requires OAuth bearer + ChatGPT-Account-Id headers that this
+  // keyless discovery path cannot supply) short-circuit with modelsHint.
+  if (entry.modelsHint !== undefined && entry.modelsHint.length > 0) {
+    return { ok: true, models: entry.modelsHint };
+  }
+
+  const keyResult = resolveApiKeyForListing(providerId, entry);
+  if ('ok' in keyResult) return keyResult;
+  const { apiKey } = keyResult;
+
+  const cached = getCachedModels(providerId, entry.baseUrl, apiKey);
+  if (cached !== null) return { ok: true, models: cached };
+
+  const { url } = buildEndpointForWire(entry.wire, entry.baseUrl);
+  const headers = buildAuthHeadersForWire(entry.wire, apiKey, entry.httpHeaders, entry.baseUrl);
+
+  const result = await fetchModelListResponse(url, headers, {
+    message: 'Unexpected models response shape',
+    hint: 'Check provider /models endpoint compatibility',
   });
+  if (result.ok) setCachedModels(providerId, entry.baseUrl, apiKey, result.models);
+  return result;
+}
+
+async function fetchModelListResponse(
+  url: string,
+  headers: Record<string, string>,
+  shapeError: { message: string; hint: string },
+): Promise<ModelsListResponse> {
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, { method: 'GET', headers });
+  } catch (err) {
+    return {
+      ok: false,
+      code: 'NETWORK',
+      message: err instanceof Error ? err.message : String(err),
+      hint: 'Cannot reach provider /models endpoint',
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      code: 'HTTP',
+      message: `HTTP ${res.status}`,
+      hint: 'Model list request failed',
+    };
+  }
+
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return {
+      ok: false,
+      code: 'PARSE',
+      message: 'Invalid JSON in response',
+      hint: 'Provider returned non-JSON',
+    };
+  }
+
+  const ids = extractModelIds(body);
+  if (ids === null) {
+    return {
+      ok: false,
+      code: 'PARSE',
+      message: shapeError.message,
+      hint: shapeError.hint,
+    };
+  }
+  return { ok: true, models: ids };
+}
+
+async function handleConfigV1TestEndpoint(raw: unknown): Promise<TestEndpointResponse> {
+  let payload: TestEndpointPayload;
+  try {
+    payload = parseTestEndpointPayload(raw);
+  } catch (err) {
+    return {
+      ok: false,
+      error: 'bad-input',
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  const { url } = buildEndpointForWire(payload.wire, payload.baseUrl);
+  const headers = buildAuthHeadersForWire(
+    payload.wire,
+    payload.apiKey,
+    payload.httpHeaders,
+    payload.baseUrl,
+  );
+
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, { method: 'GET', headers });
+  } catch (err) {
+    return {
+      ok: false,
+      error: 'network',
+      message: err instanceof Error ? err.message : 'Network request failed',
+    };
+  }
+
+  const statusError = classifyTestEndpointStatus(res.status);
+  if (statusError !== null) return statusError;
+
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return { ok: false, error: 'parse', message: 'Provider returned non-JSON' };
+  }
+  const ids = extractModelIds(body);
+  return { ok: true, modelCount: ids?.length ?? 0, models: ids ?? [] };
+}
+
+function classifyTestEndpointStatus(status: number): TestEndpointResponse | null {
+  if (status === 401 || status === 403) {
+    return { ok: false, error: 'auth', message: `HTTP ${status}` };
+  }
+  if (status === 404) {
+    return { ok: false, error: 'not-a-model-endpoint', message: 'HTTP 404' };
+  }
+  if (status < 200 || status >= 300) {
+    return { ok: false, error: `http-${status}`, message: `HTTP ${status}` };
+  }
+  return null;
+}
+
+async function handleOllamaV1Probe(raw: unknown): Promise<OllamaProbeResponse> {
+  let baseUrl: string;
+  try {
+    baseUrl = parseOllamaProbePayload(raw);
+  } catch (err) {
+    // Surface invalid URL / unsupported scheme as an explicit IPC error
+    // instead of silently coercing back to localhost — the renderer needs
+    // to see the mistake to let the user fix their typed baseUrl.
+    return {
+      ok: false,
+      code: 'IPC_BAD_INPUT',
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+  const url = `${baseUrl.replace(/\/+$/, '')}/api/tags`;
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(url, { method: 'GET' }, 2000);
+  } catch (err) {
+    const { code } = classifyNetworkError(err);
+    return { ok: false, code, message: err instanceof Error ? err.message : String(err) };
+  }
+  if (!res.ok) {
+    return { ok: false, code: 'HTTP', message: `HTTP ${res.status}` };
+  }
+  return parseOllamaTagsBody(res);
+}
+
+async function parseOllamaTagsBody(res: Response): Promise<OllamaProbeResponse> {
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return { ok: false, code: 'PARSE', message: 'Non-JSON response' };
+  }
+  const models = extractModelIds(body);
+  if (models === null) {
+    // Don't silently pretend Ollama is up with zero models — that would
+    // push the UI into an "available but empty" state that's actually a
+    // parser bug. Surface PARSE so the renderer can flag the probe as
+    // broken rather than rendering an empty model picker.
+    return { ok: false, code: 'PARSE', message: 'Unexpected /api/tags shape' };
+  }
+  return { ok: true, models };
 }
 
 export type OllamaProbeResponse =
@@ -1024,16 +1041,19 @@ function parseTestEndpointPayload(raw: unknown): TestEndpointPayload {
     baseUrl: baseUrl.trim(),
     apiKey: apiKey.trim(),
   };
-  const headers = r['httpHeaders'];
-  if (headers !== undefined && headers !== null) {
-    if (typeof headers !== 'object') {
-      throw new CodesignError('httpHeaders must be an object', ERROR_CODES.IPC_BAD_INPUT);
-    }
-    const map: Record<string, string> = {};
-    for (const [k, v] of Object.entries(headers as Record<string, unknown>)) {
-      if (typeof v === 'string') map[k] = v;
-    }
-    out.httpHeaders = map;
-  }
+  const headers = parseTestEndpointHttpHeaders(r['httpHeaders']);
+  if (headers !== undefined) out.httpHeaders = headers;
   return out;
+}
+
+function parseTestEndpointHttpHeaders(value: unknown): Record<string, string> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'object') {
+    throw new CodesignError('httpHeaders must be an object', ERROR_CODES.IPC_BAD_INPUT);
+  }
+  const map: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === 'string') map[k] = v;
+  }
+  return map;
 }
