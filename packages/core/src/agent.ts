@@ -71,6 +71,7 @@ import { makeReadDesignSystemTool } from './tools/read-design-system.js';
 import { makeReadUrlTool } from './tools/read-url.js';
 import { makeSetTodosTool } from './tools/set-todos.js';
 import { type TextEditorFsCallbacks, makeTextEditorTool } from './tools/text-editor.js';
+import { makeTweaksTool } from './tools/tweaks.js';
 
 /** Local mirror of the assistant message shape that pi-agent-core emits (via
  *  pi-ai). Declared here so this file does not take a direct dependency on
@@ -777,6 +778,11 @@ export async function generateViaAgent(
         TSchema,
         unknown
       >,
+    );
+  }
+  if (input.readWorkspaceFiles) {
+    defaultTools.push(
+      makeTweaksTool(input.readWorkspaceFiles) as unknown as AgentTool<TSchema, unknown>,
     );
   }
   const tools = deps.tools ?? defaultTools;
