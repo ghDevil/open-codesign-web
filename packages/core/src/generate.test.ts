@@ -1228,18 +1228,21 @@ describe('composeSystemPrompt()', () => {
     expect(prompt).toContain('Single-page structure ladder');
   });
 
-  it('create mode embeds iOS frame starter template', () => {
+  it('create mode points the model at the iphone-16-pro-frame scaffold instead of inlining HTML', () => {
     const prompt = composeSystemPrompt({ mode: 'create' });
     expect(prompt).toContain('iOS frame starter');
-    expect(prompt).toContain('.ios-status-bar');
-    expect(prompt).toContain('ios-dynamic-island');
-    expect(prompt).toContain('ios-home-indicator');
+    expect(prompt).toContain("scaffold({kind: 'iphone-16-pro-frame'");
+    expect(prompt).toContain("destPath: 'frames/iphone.jsx'");
+    // The old embedded HTML skeleton must be gone — bytes shouldn't ship in every mobile prompt.
+    expect(prompt).not.toContain('.ios-status-bar');
+    expect(prompt).not.toContain('ios-dynamic-island');
+    expect(prompt).not.toContain('ios-home-indicator');
   });
 
   it('tweak mode does not include iOS frame starter template', () => {
     const prompt = composeSystemPrompt({ mode: 'tweak' });
     expect(prompt).not.toContain('iOS frame starter');
-    expect(prompt).not.toContain('.ios-status-bar');
+    expect(prompt).not.toContain('iphone-16-pro-frame');
   });
 
   it('create mode advertises the device-frames starter assets without hardcoding chrome', () => {
@@ -1262,7 +1265,7 @@ describe('composeSystemPrompt()', () => {
   it('revise mode does not include iOS frame starter template', () => {
     const prompt = composeSystemPrompt({ mode: 'revise' });
     expect(prompt).not.toContain('iOS frame starter');
-    expect(prompt).not.toContain('.ios-status-bar');
+    expect(prompt).not.toContain('iphone-16-pro-frame');
   });
 
   it('create mode whitelists cdnjs.cloudflare.com for permitted JS libraries', () => {
