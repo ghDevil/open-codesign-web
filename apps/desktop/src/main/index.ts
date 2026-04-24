@@ -678,7 +678,13 @@ function registerIpcHandlers(db: Database | null): void {
               .join('');
             // Strip <artifact ...>...</artifact> blocks — artifact content is
             // delivered via fs_updated / artifact_delivered, not the chat text.
-            const finalText = rawText.replace(/<artifact[\s\S]*?<\/artifact>/g, '').trim();
+            // The second pattern catches the cancel-mid-stream case where only
+            // the opening tag has landed: without it a half-emitted artifact
+            // leaks the whole HTML body into the chat bubble.
+            const finalText = rawText
+              .replace(/<artifact[\s\S]*?<\/artifact>/g, '')
+              .replace(/<artifact\b[\s\S]*$/g, '')
+              .trim();
             sendEvent({ ...baseCtx, type: 'turn_end', finalText });
             return;
           }

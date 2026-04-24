@@ -338,9 +338,18 @@ export function makeDoneTool(
       };
       const text =
         status === 'ok'
-          ? runtimeVerify
-            ? 'ok — no syntactic or runtime issues detected.'
-            : 'ok — no syntactic issues detected. (Runtime verification not configured in this host.)'
+          ? [
+              runtimeVerify
+                ? 'ok — no syntactic or runtime issues detected.'
+                : 'ok — no syntactic issues detected. (Runtime verification not configured in this host.)',
+              '',
+              'STOP. The design is verified. Your only remaining action is a short',
+              '2–3 sentence natural-language summary of the design decisions — no',
+              'code, no fenced blocks, no `<artifact>` tags, no file re-emission.',
+              'Do NOT call `done` again. Do NOT call any other tool. The host',
+              'extracts the artifact from the virtual filesystem automatically;',
+              "anything else you emit is wasted tokens and pollutes the user's chat.",
+            ].join('\n')
           : `has_errors\n${errors.map((e) => `- ${e.message}${e.lineno ? ` (line ${e.lineno})` : ''}`).join('\n')}`;
       return { content: [{ type: 'text', text }], details };
     },

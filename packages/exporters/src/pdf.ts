@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { CodesignError, ERROR_CODES } from '@open-codesign/shared';
 import type { ExportResult } from './index';
 
@@ -33,11 +36,23 @@ export async function exportPdf(
   const executablePath = opts.chromePath ?? (await findSystemChrome());
 
   let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
+  // Isolate the user-data-dir to a disposable tmpdir so macOS's
+  // single-instance handling doesn't activate the user's running Chrome
+  // (bouncing the Dock icon) instead of starting a headless worker — same
+  // fix as preview-runtime.ts.
+  const userDataDir = await mkdtemp(join(tmpdir(), 'codesign-pdf-'));
   try {
     browser = await puppeteer.launch({
       executablePath,
       headless: true,
-      args: ['--no-sandbox', '--disable-dev-shm-usage'],
+      userDataDir,
+      args: [
+        '--headless=new',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-default-browser-check',
+      ],
     });
     const page = await browser.newPage();
     await page.setViewport(DEFAULT_VIEWPORT);
@@ -66,5 +81,10 @@ export async function exportPdf(
     );
   } finally {
     if (browser) await browser.close();
+    try {
+      await rm(userDataDir, { recursive: true, force: true });
+    } catch {
+      /* noop */
+    }
   }
 }
