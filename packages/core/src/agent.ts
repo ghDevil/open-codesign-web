@@ -69,6 +69,7 @@ import {
 import { makeListFilesTool } from './tools/list-files.js';
 import { makeReadDesignSystemTool } from './tools/read-design-system.js';
 import { makeReadUrlTool } from './tools/read-url.js';
+import { makeScaffoldTool } from './tools/scaffold.js';
 import { makeSetTitleTool } from './tools/set-title.js';
 import { makeSetTodosTool } from './tools/set-todos.js';
 import { makeSkillTool } from './tools/skill.js';
@@ -760,6 +761,9 @@ export async function generateViaAgent(
   const loadedSkills = new Set<string>();
   defaultTools.push(
     makeSkillTool({ dedup: loadedSkills }) as unknown as AgentTool<TSchema, unknown>,
+  );
+  defaultTools.push(
+    makeScaffoldTool(() => input.workspaceRoot ?? null) as unknown as AgentTool<TSchema, unknown>,
   );
   defaultTools.push(makeReadUrlTool() as unknown as AgentTool<TSchema, unknown>);
   defaultTools.push(

@@ -1,6 +1,8 @@
 import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import { Type } from '@sinclair/typebox';
 
 /**
  * `scaffold` tool (T3.2). Copies a pre-bundled starter file from
@@ -72,4 +74,76 @@ export async function runScaffold(req: ScaffoldRequest): Promise<ScaffoldResult>
   await copyFile(sourceAbs, dest);
   const bytes = (await readFile(dest)).byteLength;
   return { ok: true, written: dest, bytes };
+}
+
+const ScaffoldParams = Type.Object({
+  kind: Type.String({
+    minLength: 1,
+    description:
+      'Manifest key identifying which prebuilt starter to copy. See packages/core/src/scaffolds/manifest.json for the authoritative list.',
+  }),
+  destPath: Type.String({
+    minLength: 1,
+    description:
+      'Workspace-relative destination path (e.g. "frames/iphone.jsx"). Parent directories are created.',
+  }),
+});
+
+export type ScaffoldDetails =
+  | { ok: true; kind: string; destPath: string; written: string; bytes: number }
+  | { ok: false; kind: string; destPath: string; reason: string }
+  | { ok: false; reason: string };
+
+export function makeScaffoldTool(
+  getWorkspaceRoot: () => string | null | undefined,
+): AgentTool<typeof ScaffoldParams, ScaffoldDetails> {
+  return {
+    name: 'scaffold',
+    label: 'Scaffold',
+    description:
+      "Drop a prebuilt starter file into the current workspace. kind: one of the keys in packages/core/src/scaffolds/manifest.json (device-frame / browser / dev-mockup / ui-primitive / background / surface / deck / landing). destPath: workspace-relative path. Example: scaffold({kind: 'iphone-16-pro-frame', destPath: 'frames/iphone.jsx'}).",
+    parameters: ScaffoldParams,
+    async execute(_toolCallId, params): Promise<AgentToolResult<ScaffoldDetails>> {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        const reason = 'no workspace attached to this session';
+        return {
+          content: [{ type: 'text', text: `scaffold failed: ${reason}` }],
+          details: { ok: false, reason },
+        };
+      }
+      const result = await runScaffold({
+        kind: params.kind,
+        destPath: params.destPath,
+        workspaceRoot,
+      });
+      if (result.ok && result.written && typeof result.bytes === 'number') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Scaffolded ${params.kind} -> ${result.written} (${result.bytes} bytes)`,
+            },
+          ],
+          details: {
+            ok: true,
+            kind: params.kind,
+            destPath: params.destPath,
+            written: result.written,
+            bytes: result.bytes,
+          },
+        };
+      }
+      const reason = result.reason ?? 'unknown error';
+      return {
+        content: [{ type: 'text', text: `scaffold failed: ${reason}` }],
+        details: {
+          ok: false,
+          kind: params.kind,
+          destPath: params.destPath,
+          reason,
+        },
+      };
+    },
+  };
 }

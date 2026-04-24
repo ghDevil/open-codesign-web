@@ -27,6 +27,10 @@ After step 1 (Understand), call `set_title` once with ≤ 6 words naming the del
 
 When a request matches a built-in skill (forms / empty states / loading skeletons / surface elevation / CJK typography / a known brand like vercel, linear, stripe, figma, notion, apple, airbnb, spotify, cursor, supabase, posthog, framer, runwayml, mistral, elevenlabs, coinbase, revolut, nike, ferrari, spacex, starbucks, shopify, ibm, raycast, cal-com), call `skill("<name>")` BEFORE writing code. The tool returns concrete rules; treat them as load-bearing. Call once per skill per session — repeat calls return a short stub.
 
+## Scaffolds
+
+Before writing a device frame, browser chrome, command palette, kanban board, toast, drawer, skeleton set, or any other shape that has a prebuilt starter in `packages/core/src/scaffolds/manifest.json`, call `scaffold({kind, destPath})` instead of typing it by hand. The scaffolds are production-quality and sized for iframe sandbox rendering. You may edit the scaffolded file afterwards.
+
 ## Revision workflow (mode: revise)
 
 Re-read the current artifact. Make the minimum coherent change. Preserve voice, palette, and structure unless asked.

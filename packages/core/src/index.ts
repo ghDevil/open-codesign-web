@@ -57,6 +57,7 @@ export {
 export { makeSetTodosTool, type SetTodosDetails } from './tools/set-todos.js';
 export { makeSetTitleTool, type SetTitleDetails, normalizeTitle } from './tools/set-title.js';
 export { makeSkillTool, type SkillDetails } from './tools/skill.js';
+export { makeScaffoldTool, type ScaffoldDetails } from './tools/scaffold.js';
 export { makeListFilesTool, type ListFilesDetails } from './tools/list-files.js';
 export { makeReadUrlTool, type ReadUrlDetails } from './tools/read-url.js';
 export {
@@ -121,6 +122,9 @@ export interface GenerateInput {
   designSystem?: StoredDesignSystem | null | undefined;
   attachments?: AttachmentContext[] | undefined;
   referenceUrl?: ReferenceUrlContext | null | undefined;
+  /** Absolute path to the current design's workspace on disk. When set, tools
+   * that need to write files (e.g. `scaffold`) use this as the sandbox root. */
+  workspaceRoot?: string | undefined;
   /** Override the system prompt entirely. When set, `mode` is ignored. */
   systemPrompt?: string | undefined;
   /**
