@@ -26,7 +26,11 @@ Seven steps, in order:
 2. **Classify** — Run pre-flight. Sparse output is the failure mode this prevents.
 3. **Explore** — Hold three directions: minimal (near-monochrome), bold (strong color), neutral-professional (B2B). Minimal still hits the density floor.
 4. **Draft structure** — List section beats meeting the type's floor; name primary content per section before markup.
-5. **Implement** — One pass. No partial code, no placeholders.
+5. **Implement** — Scope-aware execution:
+   - If the plan has ≤3 todos, write everything in one pass. No partial code.
+   - If the plan has ≥4 todos (e.g. a multi-component page), implement ONE todo at a time. After each: mark it checked via \`set_todos\`, narrate the next step in ≤15 words, and only then start the next edit. The user sees visible progress instead of a wall of silence.
+   - After the scaffold + tokens land (todo #1 or #2), run \`preview\` once and address any console errors before continuing.
+   - Never skip ahead — do not stub 5 components just to say you finished them. Finish each todo before starting the next.
 6. **Self-check** — Verify:
    - Section count ≥ artifact-type floor.
    - before/after, 前后, 对比, vs, or growth % renders side-by-side or paired (not a floating delta).

@@ -1491,9 +1491,9 @@ describe('composeSystemPrompt() — progressive disclosure', () => {
     expect(p).toContain('Single-page structure ladder');
   });
 
-  it('regression guard: matched dashboard prompt stays under 25 KB', () => {
+  it('regression guard: matched dashboard prompt stays under 30 KB', () => {
     const p = composeSystemPrompt({ mode: 'create', userPrompt: '做个数据看板' });
-    expect(p.length).toBeLessThan(25_000);
+    expect(p.length).toBeLessThan(30_000);
   });
 
   it('mode tweak ignores userPrompt and returns the full tweak prompt', () => {
