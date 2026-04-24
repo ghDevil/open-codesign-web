@@ -1,4 +1,4 @@
-import { type ReactElement, useEffect, useState } from 'react';
+import { type ReactElement, useCallback, useEffect, useState } from 'react';
 import type {
   AskAnswer,
   AskFileQuestion,
@@ -34,6 +34,17 @@ export function AskModal() {
     };
   }, []);
 
+  const resolve = useCallback((requestId: string, result: AskResult) => {
+    void window.codesign?.ask?.resolve?.(requestId, result);
+    setPending(null);
+    setAnswers({});
+  }, []);
+
+  const cancel = useCallback(() => {
+    if (!pending) return;
+    resolve(pending.requestId, { status: 'cancelled', answers: [] });
+  }, [pending, resolve]);
+
   useEffect(() => {
     if (!pending) return;
     const onKey = (e: KeyboardEvent) => {
@@ -41,17 +52,9 @@ export function AskModal() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending, cancel]);
 
   if (!pending) return null;
-
-  function resolve(result: AskResult) {
-    if (!pending) return;
-    void window.codesign?.ask?.resolve?.(pending.requestId, result);
-    setPending(null);
-    setAnswers({});
-  }
 
   function submit() {
     if (!pending) return;
@@ -59,11 +62,7 @@ export function AskModal() {
       questionId: q.id,
       value: answers[q.id] ?? null,
     }));
-    resolve({ status: 'answered', answers: collected });
-  }
-
-  function cancel() {
-    resolve({ status: 'cancelled', answers: [] });
+    resolve(pending.requestId, { status: 'answered', answers: collected });
   }
 
   function setValue(id: string, value: AnswerValue) {
