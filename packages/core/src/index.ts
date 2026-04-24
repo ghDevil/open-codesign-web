@@ -75,6 +75,12 @@ export {
   type DoneError,
   type DoneRuntimeVerifier,
 } from './tools/done.js';
+export {
+  makePreviewTool,
+  trimPreviewResult,
+  type PreviewResult,
+  type RunPreviewFn,
+} from './tools/preview.js';
 
 export interface AttachmentContext {
   name: string;
@@ -130,6 +136,18 @@ export interface GenerateInput {
   signal?: AbortSignal | undefined;
   onRetry?: ((info: RetryReason) => void) | undefined;
   logger?: CoreLogger | undefined;
+  /**
+   * Optional host-injected preview executor. When provided, the agent gets
+   * a `preview` tool it can call before `done` to render the artifact and
+   * read back console / asset errors + a DOM outline (or screenshot on
+   * vision-capable models).
+   */
+  runPreview?:
+    | ((opts: {
+        path: string;
+        vision: boolean;
+      }) => Promise<import('./tools/preview.js').PreviewResult>)
+    | undefined;
 }
 
 export interface ApplyCommentInput {

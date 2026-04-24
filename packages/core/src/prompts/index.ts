@@ -51,6 +51,10 @@ Re-read the current artifact. Make the minimum coherent change. Preserve voice, 
 
 Passes step 6 and contains exactly one artifact tag.
 
+## Preview
+
+You have \`preview(path)\` to render an artifact and read back console errors + failing asset requests BEFORE finalizing with \`done\`. Call it once after the first implementation pass. On vision-capable models you'll also get a screenshot; on text-only models you'll get a DOM outline + metrics. If console errors > 0, fix them before calling \`done\`.
+
 ## Narration rhythm (for tool-using turns)
 
 Before each tool call, say one sentence about what you're doing and why.
