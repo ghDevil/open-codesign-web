@@ -34,6 +34,58 @@ describe('buildSrcdoc', () => {
     expect(twice).toBe(once);
   });
 
+  it('injects the JSX runtime stack when a full-HTML payload uses <script type="text/babel">', () => {
+    const mixed = [
+      '<!doctype html>',
+      '<html><head><title>mixed</title></head><body>',
+      '<div id="root"></div>',
+      '<script type="text/babel" data-presets="react">',
+      'function App() { return <div>mixed</div>; }',
+      'ReactDOM.createRoot(document.getElementById("root")).render(<App/>);',
+      '</script>',
+      '</body></html>',
+    ].join('\n');
+    const out = buildSrcdoc(mixed);
+    expect(out).toContain('CODESIGN_JSX_RUNTIME');
+    expect(out).toContain('IOSDevice');
+    expect(out).toContain('DesignCanvas');
+    expect(out).toContain('CODESIGN_OVERLAY_SCRIPT');
+    // Still the HTML passthrough — not wrapped as JSX.
+    expect(out).not.toContain('AGENT_BODY_BEGIN');
+  });
+
+  it('injects the JSX runtime when the HTML payload references IOSDevice / ReactDOM.createRoot even without type="text/babel"', () => {
+    const html =
+      '<!doctype html><html><body><div id="root"></div>' +
+      '<script>ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(IOSDevice));</script>' +
+      '</body></html>';
+    const out = buildSrcdoc(html);
+    expect(out).toContain('CODESIGN_JSX_RUNTIME');
+  });
+
+  it('does NOT inject the JSX runtime into pure HTML + CDN libs (Chart.js style)', () => {
+    const pureHtml =
+      '<!doctype html><html><body>' +
+      '<canvas id="c"></canvas>' +
+      '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>' +
+      '<script>new Chart(document.getElementById("c"), { type: "bar", data: {} });</script>' +
+      '</body></html>';
+    const out = buildSrcdoc(pureHtml);
+    expect(out).not.toContain('CODESIGN_JSX_RUNTIME');
+    // Overlay still there for element selection / error reporting.
+    expect(out).toContain('CODESIGN_OVERLAY_SCRIPT');
+  });
+
+  it('does not double-inject the JSX runtime when a mixed document is rebuilt', () => {
+    const mixed =
+      '<!doctype html><html><body>' +
+      '<script type="text/babel">ReactDOM.createRoot(document.getElementById("root")).render(<App/>);</script>' +
+      '</body></html>';
+    const once = buildSrcdoc(mixed);
+    const twice = buildSrcdoc(once);
+    expect(twice).toBe(once);
+  });
+
   it('wraps a fragment via the JSX path (no legacy HTML branch)', () => {
     const out = buildSrcdoc('<div>plain</div>');
     expect(out).toContain('AGENT_BODY_BEGIN');

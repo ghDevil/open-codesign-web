@@ -1162,12 +1162,17 @@ function registerIpcHandlers(db: Database | null): void {
 
       const t0 = Date.now();
       try {
+        const workspaceRoot =
+          resolveWorkspaceRootForDesign(payload.designId) ?? app.getPath('userData');
+        const templatesRoot = path_module.join(app.getPath('userData'), 'templates');
         const result = await applyComment({
           html: payload.html,
           comment: payload.comment,
           selection: payload.selection,
           model: active.model,
           apiKey,
+          workspaceRoot,
+          templatesRoot,
           attachments: promptContext.attachments,
           referenceUrl: promptContext.referenceUrl,
           designSystem: promptContext.designSystem ?? null,

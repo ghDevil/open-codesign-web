@@ -34,6 +34,7 @@ export { isElementRectsMessage, isOverlayMessage, OVERLAY_SCRIPT } from './overl
 const JSX_TEMPLATE_BEGIN = '<!-- AGENT_BODY_BEGIN -->';
 const JSX_TEMPLATE_END = '<!-- AGENT_BODY_END -->';
 const OVERLAY_MARKER = '<!-- CODESIGN_OVERLAY_SCRIPT -->';
+const JSX_RUNTIME_MARKER = '<!-- CODESIGN_JSX_RUNTIME -->';
 
 function escapeForScriptLiteral(jsx: string): string {
   // JSON.stringify handles quotes/newlines; the </script> escape prevents the
@@ -85,6 +86,53 @@ function overlayScriptTag(): string {
   return `${OVERLAY_MARKER}<script>${OVERLAY_SCRIPT}</script>`;
 }
 
+// HTML payloads authored by the agent occasionally mix a `<!doctype html>`
+// shell with Babel-transpiled JSX inside (`<script type="text/babel">`) or
+// references to the window-scoped component library (IOSDevice, DesignCanvas,
+// …). Without the React + Babel stack those references die silently and the
+// iframe renders blank — the model then misdiagnoses this as "Babel missing"
+// and rewrites everything in plain HTML. Detecting the mixed-mode case and
+// injecting the same runtime the JSX branch uses keeps both authoring styles
+// viable; pure HTML + CDN-library pages (Chart.js etc.) match no signal and
+// pay zero inline-script cost.
+function needsJsxRuntimeInHtml(html: string): boolean {
+  return (
+    /<script[^>]*type=["']text\/babel["']/i.test(html) ||
+    /\bReactDOM\.createRoot\b/.test(html) ||
+    /\bReact\.createElement\b/.test(html) ||
+    /\bIOSDevice\b/.test(html) ||
+    /\bDesignCanvas\b/.test(html) ||
+    /\bAppleWatchUltra\b/.test(html) ||
+    /\bAndroidPhone\b/.test(html) ||
+    /\bMacOSSafari\b/.test(html)
+  );
+}
+
+function jsxRuntimeScripts(): string {
+  return [
+    `<script>${REACT_UMD}</script>`,
+    `<script>${REACT_DOM_UMD}</script>`,
+    `<script>${BABEL_STANDALONE}</script>`,
+    `<script>${TWEAKS_BRIDGE_SETUP}</script>`,
+    `<script type="text/babel" data-presets="react">${IOS_FRAME_JSX}</script>`,
+    `<script type="text/babel" data-presets="react">${DESIGN_CANVAS_JSX}</script>`,
+  ].join('\n');
+}
+
+function injectJsxRuntimeIntoHtml(html: string): string {
+  if (html.includes(JSX_RUNTIME_MARKER)) return html;
+  const stack = `${JSX_RUNTIME_MARKER}\n${jsxRuntimeScripts()}`;
+  // Insert at the very top of <body> so user's own `<script type="text/babel">`
+  // tags (which typically sit inside <body>) see React/Babel already loaded.
+  if (/<body[^>]*>/i.test(html)) {
+    return html.replace(/(<body[^>]*>)/i, `$1\n${stack}`);
+  }
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/(<\/head>)/i, `${stack}\n$1`);
+  }
+  return `${stack}\n${html}`;
+}
+
 function injectOverlayIntoHtmlDocument(html: string): string {
   if (html.includes(OVERLAY_MARKER) || html.includes("type: 'ELEMENT_SELECTED'")) {
     return html;
@@ -124,10 +172,15 @@ export function buildSrcdoc(userSource: string): string {
   );
   // Already-wrapped srcdoc (round-trip safe) — return as-is.
   if (stripped.includes(JSX_TEMPLATE_BEGIN)) return stripped;
-  // Legacy HTML document (pre-JSX-only-switchover snapshots) — render as-is.
+  // Legacy HTML document (pre-JSX-only-switchover snapshots, or agents that
+  // wrote a full `<!doctype>` shell). Inject the JSX runtime only when the
+  // payload actually references it — pure HTML + CDN libs stay untouched.
   const head = stripped.trimStart().slice(0, 2048).toLowerCase();
   if (head.startsWith('<!doctype') || head.startsWith('<html')) {
-    return injectOverlayIntoHtmlDocument(stripped);
+    const withRuntime = needsJsxRuntimeInHtml(stripped)
+      ? injectJsxRuntimeIntoHtml(stripped)
+      : stripped;
+    return injectOverlayIntoHtmlDocument(withRuntime);
   }
   return wrapJsxAsSrcdoc(stripped);
 }
