@@ -320,8 +320,8 @@ const LegacyConfigSchema = z.object({
   provider: ProviderIdEnum,
   modelPrimary: z.string(),
   modelFast: z.string().optional(),
-  secrets: z.record(ProviderIdEnum, SecretRef).default({}),
-  baseUrls: z.record(ProviderIdEnum, BaseUrlRef).default({}),
+  secrets: z.partialRecord(ProviderIdEnum, SecretRef).default({}),
+  baseUrls: z.partialRecord(ProviderIdEnum, BaseUrlRef).default({}),
   designSystem: StoredDesignSystem.optional(),
 });
 type LegacyConfig = z.infer<typeof LegacyConfigSchema>;

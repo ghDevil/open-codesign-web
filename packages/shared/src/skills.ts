@@ -9,7 +9,7 @@ export const SkillFrontmatterV1 = z.object({
       providers: z.array(z.string()).default(['*']),
       scope: z.enum(['system', 'prefix']).default('system'),
     })
-    .default({}),
+    .default({ providers: ['*'], scope: 'system' }),
   disable_model_invocation: z.boolean().default(false),
   user_invocable: z.boolean().default(true),
   allowed_tools: z.array(z.string()).optional(),
