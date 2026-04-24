@@ -266,37 +266,41 @@ describe('snapshots:v1:create', () => {
 // ---------------------------------------------------------------------------
 
 describe('snapshots:v1:create-design', () => {
-  it('creates a design with the trimmed name', () => {
-    const result = call('snapshots:v1:create-design', v1({ name: '  My design  ' })) as Record<
-      string,
-      unknown
-    >;
+  it('creates a design with the trimmed name', async () => {
+    const result = (await callAsync(
+      'snapshots:v1:create-design',
+      v1({ name: '  My design  ' }),
+    )) as Record<string, unknown>;
     expect(result['name']).toBe('My design');
     expect(typeof result['id']).toBe('string');
   });
 
-  it('rejects undefined with IPC_BAD_INPUT (no silent default)', () => {
-    expect(() => call('snapshots:v1:create-design', undefined)).toThrow(CodesignError);
+  it('rejects undefined with IPC_BAD_INPUT (no silent default)', async () => {
+    await expect(callAsync('snapshots:v1:create-design', undefined)).rejects.toThrow(CodesignError);
     try {
-      call('snapshots:v1:create-design', undefined);
+      await callAsync('snapshots:v1:create-design', undefined);
     } catch (err) {
       expect((err as CodesignError).code).toBe('IPC_BAD_INPUT');
     }
   });
 
-  it('rejects an empty / whitespace-only name with IPC_BAD_INPUT', () => {
-    expect(() => call('snapshots:v1:create-design', v1({ name: '   ' }))).toThrow(CodesignError);
+  it('rejects an empty / whitespace-only name with IPC_BAD_INPUT', async () => {
+    await expect(callAsync('snapshots:v1:create-design', v1({ name: '   ' }))).rejects.toThrow(
+      CodesignError,
+    );
     try {
-      call('snapshots:v1:create-design', v1({ name: '' }));
+      await callAsync('snapshots:v1:create-design', v1({ name: '' }));
     } catch (err) {
       expect((err as CodesignError).code).toBe('IPC_BAD_INPUT');
     }
   });
 
-  it('rejects a non-string name with IPC_BAD_INPUT', () => {
-    expect(() => call('snapshots:v1:create-design', v1({ name: 42 }))).toThrow(CodesignError);
+  it('rejects a non-string name with IPC_BAD_INPUT', async () => {
+    await expect(callAsync('snapshots:v1:create-design', v1({ name: 42 }))).rejects.toThrow(
+      CodesignError,
+    );
     try {
-      call('snapshots:v1:create-design', v1({ name: { wrong: true } }));
+      await callAsync('snapshots:v1:create-design', v1({ name: { wrong: true } }));
     } catch (err) {
       expect((err as CodesignError).code).toBe('IPC_BAD_INPUT');
     }

@@ -9,12 +9,15 @@
  * initSnapshotsDb().
  */
 
+import { existsSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
 import type { Design, DesignSnapshot, SnapshotCreateInput } from '@open-codesign/shared';
 import { CodesignError } from '@open-codesign/shared';
 import type BetterSqlite3 from 'better-sqlite3';
 import type { BrowserWindow } from 'electron';
 import { bindWorkspace, checkWorkspaceFolderExists, openWorkspaceFolder } from './design-workspace';
-import { dialog, ipcMain } from './electron-runtime';
+import { app, dialog, ipcMain } from './electron-runtime';
 import { getLogger } from './logger';
 import {
   createDesign,
@@ -33,6 +36,22 @@ import {
 type Database = BetterSqlite3.Database;
 
 const logger = getLogger('snapshots-ipc');
+
+/**
+ * Derive a filesystem-safe directory name from a design title for the
+ * auto-bound default workspace. Kept in sync with renderer's workspace-path
+ * slug style — ASCII alphanumerics + dashes, max 48 chars.
+ */
+function defaultDesignSlug(name: string): string {
+  const cleaned = name
+    .normalize('NFKD')
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 48);
+  return cleaned.length > 0 ? cleaned : 'untitled-design';
+}
 
 /**
  * Translate a raw better-sqlite3 SqliteError into a typed CodesignError so the
@@ -238,20 +257,52 @@ export function registerSnapshotsIpc(db: Database): void {
     logger.info('snapshot.deleted', { id: r['id'] });
   });
 
-  ipcMain.handle('snapshots:v1:create-design', (_e: unknown, raw: unknown): Design => {
-    if (typeof raw !== 'object' || raw === null) {
-      throw new CodesignError(
-        'snapshots:v1:create-design expects an object with name',
-        'IPC_BAD_INPUT',
-      );
-    }
-    const r = raw as Record<string, unknown>;
-    requireSchemaV1(r, 'snapshots:v1:create-design');
-    if (typeof r['name'] !== 'string' || r['name'].trim().length === 0) {
-      throw new CodesignError('name must be a non-empty string', 'IPC_BAD_INPUT');
-    }
-    return runDb('create-design', () => createDesign(db, (r['name'] as string).trim()));
-  });
+  ipcMain.handle(
+    'snapshots:v1:create-design',
+    async (_e: unknown, raw: unknown): Promise<Design> => {
+      if (typeof raw !== 'object' || raw === null) {
+        throw new CodesignError(
+          'snapshots:v1:create-design expects an object with name',
+          'IPC_BAD_INPUT',
+        );
+      }
+      const r = raw as Record<string, unknown>;
+      requireSchemaV1(r, 'snapshots:v1:create-design');
+      if (typeof r['name'] !== 'string' || r['name'].trim().length === 0) {
+        throw new CodesignError('name must be a non-empty string', 'IPC_BAD_INPUT');
+      }
+      const name = (r['name'] as string).trim();
+      const design = runDb('create-design', () => createDesign(db, name));
+      // v0.2: every design MUST have a workspace — per docs/v0.2-plan.md §2.3.
+      // When the user hasn't picked one explicitly, seed
+      //   <Documents>/CoDesign/<slug(name)>[-N]/
+      // and bind it. Collision suffix handles duplicate names.
+      try {
+        const defaultRoot = path.join(app.getPath('documents'), 'CoDesign');
+        const slug = defaultDesignSlug(name);
+        let attempt = 0;
+        let workspacePath = path.join(defaultRoot, slug);
+        while (existsSync(workspacePath)) {
+          attempt += 1;
+          workspacePath = path.join(defaultRoot, `${slug}-${attempt}`);
+          if (attempt > 100) {
+            throw new Error(`Could not find a unique workspace path under ${defaultRoot}`);
+          }
+        }
+        await mkdir(workspacePath, { recursive: true });
+        return await bindWorkspace(db, design.id, workspacePath, false);
+      } catch (err) {
+        // Non-fatal: design row is committed; user can pick a workspace
+        // manually from the FilesTab WorkspaceSection. Log and return the
+        // workspace-less design instead of surfacing a boot-time error.
+        logger.warn('create-design.default-workspace.failed', {
+          designId: design.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return design;
+      }
+    },
+  );
 
   ipcMain.handle('snapshots:v1:get-design', (_e: unknown, raw: unknown): Design | null => {
     const id = parseIdPayload(raw, 'get-design');
