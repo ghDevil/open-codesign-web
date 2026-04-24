@@ -75,6 +75,15 @@ export {
   type DoneError,
   type DoneRuntimeVerifier,
 } from './tools/done.js';
+export {
+  makeAskTool,
+  validateAskInput,
+  type AskBridge,
+  type AskInput,
+  type AskResult,
+  type AskAnswer,
+  type AskQuestion,
+} from './tools/ask.js';
 
 export interface AttachmentContext {
   name: string;
@@ -130,6 +139,14 @@ export interface GenerateInput {
   signal?: AbortSignal | undefined;
   onRetry?: ((info: RetryReason) => void) | undefined;
   logger?: CoreLogger | undefined;
+  /**
+   * Optional async bridge for the `ask` tool. When provided, the agent gains
+   * an `ask` tool that pauses the turn, renders the questionnaire to the
+   * user, and resumes with the collected answers.
+   */
+  askBridge?:
+    | ((input: import('./tools/ask.js').AskInput) => Promise<import('./tools/ask.js').AskResult>)
+    | undefined;
 }
 
 export interface ApplyCommentInput {
