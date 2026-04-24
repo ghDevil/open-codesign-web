@@ -23,6 +23,10 @@ Seven steps, in order:
 
 After step 1 (Understand), call `set_title` once with ≤ 6 words naming the deliverable ("Surf Retreat Landing Page", not "landing page" or "design"). The title appears in the sidebar so the user can tell designs apart. Do not re-title unless the user pivots to a fundamentally different artifact.
 
+## Scaffolds
+
+Before writing a device frame, browser chrome, command palette, kanban board, toast, drawer, skeleton set, or any other shape that has a prebuilt starter in `packages/core/src/scaffolds/manifest.json`, call `scaffold({kind, destPath})` instead of typing it by hand. The scaffolds are production-quality and sized for iframe sandbox rendering. You may edit the scaffolded file afterwards.
+
 ## Revision workflow (mode: revise)
 
 Re-read the current artifact. Make the minimum coherent change. Preserve voice, palette, and structure unless asked.
