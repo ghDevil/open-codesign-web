@@ -12,8 +12,9 @@
  * PDF exporter's discovery rules (no bundled Chromium — PRINCIPLES §1).
  */
 
-import { readFile } from 'node:fs/promises';
-import { resolve, sep } from 'node:path';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve, sep } from 'node:path';
 import type { PreviewResult } from '@open-codesign/core';
 import { findSystemChrome } from '@open-codesign/exporters';
 import type { Browser, ConsoleMessage, HTTPRequest, HTTPResponse, Page } from 'puppeteer-core';
@@ -62,11 +63,27 @@ export async function runPreview(opts: RunPreviewOptions): Promise<PreviewResult
   const startTs = Date.now();
   let browser: Browser | null = null;
   let page: Page | null = null;
+  // Launch with an isolated, disposable user-data-dir. Without this puppeteer
+  // tries to reuse the user's default Chrome profile; macOS's single-instance
+  // handling then activates their running Chrome (bouncing the Dock icon)
+  // instead of starting a headless worker. A per-call tmpdir plus
+  // --headless=new keeps the launch invisible AND independent of whatever
+  // Chrome windows the user has open.
+  const userDataDir = await mkdtemp(join(tmpdir(), 'codesign-preview-'));
   try {
     browser = await puppeteer.launch({
       executablePath,
       headless: true,
-      args: ['--no-sandbox', '--disable-dev-shm-usage'],
+      userDataDir,
+      args: [
+        '--headless=new',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        // Suppress "Chrome is not the default browser" and similar first-run
+        // dialogs that would otherwise stall the launch handshake.
+        '--no-first-run',
+        '--no-default-browser-check',
+      ],
     });
     page = await browser.newPage();
     await page.setViewport(DEFAULT_VIEWPORT);
@@ -170,6 +187,13 @@ export async function runPreview(opts: RunPreviewOptions): Promise<PreviewResult
     }
     try {
       if (browser) await browser.close();
+    } catch {
+      /* noop */
+    }
+    // Clean up the per-call profile dir — leaving it around would let the
+    // tmpdir accumulate hundreds of MB across runs.
+    try {
+      await rm(userDataDir, { recursive: true, force: true });
     } catch {
       /* noop */
     }

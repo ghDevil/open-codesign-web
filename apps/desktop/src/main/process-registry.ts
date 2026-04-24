@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, execSync, spawn } from 'node:child_process';
 import { getLogger } from './logger';
 
 /**
@@ -65,7 +65,12 @@ export function spawnTracked(req: SpawnRequest): SpawnResult {
   const child = spawn(req.command, [...(req.args ?? [])], {
     cwd: req.cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
-    detached: false,
+    // Each tracked process heads its own process group so we can signal the
+    // whole tree on stop. Dev servers (vite / next / astro) spawn their own
+    // workers (esbuild / webpack / turbopack) which inherit the group — with
+    // `detached: false` those workers would orphan when we SIGTERM the parent
+    // and keep running until the user killed them by hand.
+    detached: true,
   });
   const id = nextId();
   const entry: ProcessEntry = {
@@ -126,21 +131,57 @@ export function stopProcessesForDesign(designId: string): number {
 }
 
 export function shutdownAllProcesses(): void {
-  for (const entry of Array.from(processes.values())) killChild(entry);
+  // before-quit runs this synchronously and the event loop tears down right
+  // after — `setTimeout`-based grace periods wouldn't fire. Send SIGTERM to
+  // every tracked process group, then busy-wait up to 2s for them to exit,
+  // then SIGKILL whatever is still around. `execSync('kill')` blocks the
+  // main process briefly but that's appropriate on quit.
+  const entries = Array.from(processes.values());
+  for (const entry of entries) signalGroup(entry, 'SIGTERM');
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    if (entries.every((e) => e.child.killed || e.child.exitCode !== null)) break;
+    // Spin briefly; sleep via a blocking syscall keeps CPU usage low.
+    try {
+      execSync('sleep 0.1');
+    } catch {
+      /* noop */
+    }
+  }
+  for (const entry of entries) {
+    if (entry.child.exitCode === null && !entry.child.killed) {
+      signalGroup(entry, 'SIGKILL');
+    }
+  }
+}
+
+function signalGroup(entry: ProcessEntry, signal: NodeJS.Signals): void {
+  const pid = entry.child.pid;
+  if (pid === undefined) return;
+  try {
+    // Negative pid = target the whole process group (requires the child to
+    // have been spawned with `detached: true`, which we do in `spawnTracked`).
+    process.kill(-pid, signal);
+  } catch (err) {
+    // Group kill may fail with ESRCH if the process already exited, or with
+    // EPERM on the rare case where the child changed its gid. Fall back to
+    // signalling just the direct child so at least the parent dies.
+    try {
+      entry.child.kill(signal);
+    } catch {
+      log.warn('process.kill.fail', { id: entry.id, signal, error: String(err) });
+    }
+  }
 }
 
 function killChild(entry: ProcessEntry): boolean {
   try {
-    entry.child.kill('SIGTERM');
+    signalGroup(entry, 'SIGTERM');
     setTimeout(() => {
-      if (!entry.child.killed) {
-        try {
-          entry.child.kill('SIGKILL');
-        } catch {
-          // process may already be gone
-        }
+      if (entry.child.exitCode === null && !entry.child.killed) {
+        signalGroup(entry, 'SIGKILL');
       }
-    }, 3000);
+    }, 3000).unref();
     return true;
   } catch (err) {
     log.warn('process.kill.fail', { id: entry.id, error: String(err) });
