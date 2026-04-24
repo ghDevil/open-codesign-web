@@ -2160,6 +2160,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
               updatedAt: nowIso,
               thumbnailText: null,
               deletedAt: null,
+              workspacePath: null,
             },
           ],
           designToRename: null,

@@ -61,7 +61,6 @@ import { reasoningForModel } from './index.js';
 import { type CoreLogger, NOOP_LOGGER } from './logger.js';
 import { composeSystemPrompt } from './prompts/index.js';
 import { makeAskTool } from './tools/ask.js';
-import { makeDeclareTweakSchemaTool } from './tools/declare-tweak-schema.js';
 import { type DoneRuntimeVerifier, makeDoneTool } from './tools/done.js';
 import {
   type GenerateImageAssetFn,
@@ -778,9 +777,6 @@ export async function generateViaAgent(
   if (deps.fs) {
     defaultTools.push(makeTextEditorTool(deps.fs) as unknown as AgentTool<TSchema, unknown>);
     defaultTools.push(makeListFilesTool(deps.fs) as unknown as AgentTool<TSchema, unknown>);
-    defaultTools.push(
-      makeDeclareTweakSchemaTool(deps.fs) as unknown as AgentTool<TSchema, unknown>,
-    );
     defaultTools.push(
       makeDoneTool(deps.fs, deps.runtimeVerify) as unknown as AgentTool<TSchema, unknown>,
     );
