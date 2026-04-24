@@ -1,25 +1,27 @@
 /**
- * Workstream B — Phase 1 agent-runtime wrapper.
+ * Agent runtime wrapper — the live generate path in v0.2.
  *
  * Routes a `generate()`-shaped request through `@mariozechner/pi-agent-core`
- * with an empty tool list. Purpose: de-risk the runtime integration before
- * Phase 2 introduces real tools (str_replace_based_edit_tool, set_todos,
- * load_skill, verify_syntax). When `USE_AGENT_RUNTIME` is off this file is
- * not imported, so behavior for existing users is unchanged.
+ * with the full v0.2 tool set (set_title, set_todos, text_editor, list_files,
+ * done, read_url, read_design_system, generate_image_asset, skill, scaffold,
+ * preview, tweaks, ask — see `defaultTools` below). Streams `turn_start` /
+ * `message_update` / `turn_end` lifecycle events through `onEvent` so the
+ * renderer can drive the chat/preview UI.
  *
- * Design doc: docs/plans/2026-04-20-agentic-sidebar-custom-endpoint-design.md §4.
- *
- * Divergences from the design-doc §4.4 sketch (documented here for Workstream C
- * to plan against):
- *   - pi-agent-core's `Agent` does NOT accept `model` / `systemPrompt` / `tools`
- *     as top-level constructor args. They live in `options.initialState`.
- *   - There is no `agent.run()` method returning `{finalText, usage}`. Instead
- *     we call `agent.prompt(userMessage)` (Promise<void>) and read the final
+ * pi-agent-core quirks worth remembering:
+ *   - `Agent` does NOT accept `model` / `systemPrompt` / `tools` as top-level
+ *     constructor args. They live in `options.initialState`.
+ *   - There is no `agent.run()` returning `{finalText, usage}`. We call
+ *     `agent.prompt(userMessage)` (Promise<void>) and read the final
  *     assistant message + usage from `agent.state.messages` after settlement.
  *   - The stream delta event is `message_update` with
- *     `assistantMessageEvent.type === 'text_delta'`, NOT a top-level `text_delta`
- *     event. Callers see `turn_start` / `turn_end` / `message_*` lifecycle
- *     events directly via `onEvent`.
+ *     `assistantMessageEvent.type === 'text_delta'`, not a top-level
+ *     `text_delta` event.
+ *
+ * The legacy single-turn path at `packages/core/src/index.ts` `generate()` is
+ * still reachable via `USE_AGENT_RUNTIME=0` and is the contract used by
+ * `applyComment()` (inline-comment IPC). Removing it is tracked in the
+ * v0.2 audit (`docs/v0.2-legacy-audit.md` §9 items #8/#9).
  */
 
 import path from 'node:path';
@@ -430,35 +432,6 @@ const AGENTIC_TOOL_GUIDANCE = [
   '  call in the JSX.',
   '',
   '## Self-check via `done`',
-  '',
-  '### TWEAK_SCHEMA — declare control hints for the tweak panel',
-  '',
-  'After your artifact is otherwise complete and `TWEAK_DEFAULTS` is stable,',
-  'call `declare_tweak_schema` ONCE to tell the host how to render each token',
-  'in the live Tweak panel. The host injects (or replaces) a sibling block:',
-  '',
-  '```jsx',
-  'const TWEAK_SCHEMA = /*TWEAK-SCHEMA-BEGIN*/{ ... }/*TWEAK-SCHEMA-END*/;',
-  '```',
-  '',
-  'right after `TWEAK_DEFAULTS`. Calling it again replaces the previous schema.',
-  '',
-  '**Picking a kind for each token**',
-  '- Hex / rgb color string → `{ kind: "color" }`',
-  '- Number that is a CSS pixel value → `{ kind: "number", min, max, step, unit: "px" }`',
-  '  - Padding / radius / gap: `min: 0, max: 32, step: 2`',
-  '  - Font size:               `min: 12, max: 72, step: 1`',
-  '  - Border / stroke width:   `min: 0, max: 8, step: 1`',
-  '- A small fixed set of string options (e.g. density, variant) → `{ kind: "enum", options: [...] }`',
-  '- True/false flag → `{ kind: "boolean" }`',
-  '- Free-form text (heading, label, caption) → `{ kind: "string", placeholder: "Hint text" }`',
-  '',
-  "Tokens you leave out of the schema fall back to the host's heuristic, so it",
-  'is fine to declare hints only for the tokens whose UI matters.',
-  '',
-  'Call `declare_tweak_schema` BEFORE `done` so the schema block is part of the',
-  'artifact that `done` verifies. Do not declare schema for tokens that are not',
-  'in `TWEAK_DEFAULTS` — they will be silently ignored.',
   '',
   'After producing a complete artifact, call `done` to verify it. The host runs',
   'two checks: (a) static syntax lint (unclosed tags, duplicate IDs, missing',

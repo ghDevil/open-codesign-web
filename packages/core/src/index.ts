@@ -176,8 +176,8 @@ export interface GenerateInput {
    * Optional workspace-glob reader. When provided, the agent wires up the
    * `tweaks` tool so the model can aggregate EDITMODE blocks across multiple
    * files. Main-process implementations pass a real glob-backed reader; unit
-   * tests can stub with an in-memory map. When omitted, the legacy
-   * `declare_tweak_schema` path (single-file) is still available.
+   * tests can stub with an in-memory map. When omitted, the `tweaks` tool
+   * simply is not registered.
    */
   readWorkspaceFiles?:
     | ((patterns?: string[]) => Promise<Array<{ file: string; contents: string }>>)

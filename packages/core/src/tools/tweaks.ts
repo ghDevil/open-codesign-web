@@ -1,20 +1,17 @@
 /**
  * tweaks — cross-file EDITMODE aggregator.
  *
- * v0.1 shipped a single-file `declare_tweak_schema` tool that only looked at
- * `index.html`. As workspaces grow to hold multiple source files (jsx, css,
- * html split by concern), the agent needs a way to register tweakable values
- * scattered across several files. This tool wraps two pure helpers:
+ * As workspaces grow to hold multiple source files (jsx, css, html split by
+ * concern), the agent needs a way to register tweakable values scattered
+ * across several files. This tool wraps two pure helpers:
  *
  *   - `parseTweakBlocks(files)` — strips non-EDITMODE files, returns per-file
  *     token bags.
  *   - `aggregateTweaks(files)` — flattens into `{file, key, value}` triples for
  *     hosts that prefer a table over nested maps.
  *
- * The legacy `declare_tweak_schema` tool stays in place and still governs
- * `TWEAK_SCHEMA` (control-hint) blocks. This tool is advisory: the renderer's
- * Tweaks panel uses its result to pre-populate controls so the user can nudge
- * values without re-prompting.
+ * This tool is advisory: the renderer's Tweaks panel uses its result to
+ * pre-populate controls so the user can nudge values without re-prompting.
  */
 
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
