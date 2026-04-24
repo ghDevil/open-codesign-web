@@ -2110,8 +2110,14 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     try {
       // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
       await window.codesign.snapshots.renameDesign(id, trimmed);
-      await get().loadDesigns();
-      set({ designToRename: null });
+      // Optimistic in-memory update: the T2.4 stubs return a synthetic
+      // Design but do not persist, and listDesigns() comes back empty,
+      // which would blank the sidebar on every reload. Patch the row
+      // locally until T2.6 lands a JSONL-backed store.
+      set((s) => ({
+        designs: s.designs.map((d) => (d.id === id ? { ...d, name: trimmed } : d)),
+        designToRename: null,
+      }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : tr('errors.unknown');
       get().pushToast({
