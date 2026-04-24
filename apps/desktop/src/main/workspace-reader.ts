@@ -1,5 +1,5 @@
 import type { Dirent } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 export const DEFAULT_WORKSPACE_PATTERNS = ['**/*.html', '**/*.jsx', '**/*.css', '**/*.js'] as const;
@@ -84,6 +84,88 @@ export async function readWorkspaceFilesAt(
 
 function normalizeSlashes(p: string): string {
   return sep === '/' ? p : p.split(sep).join('/');
+}
+
+export interface WorkspaceFileEntry {
+  /** Workspace-relative POSIX path (e.g. `index.html`, `assets/logo.png`). */
+  path: string;
+  /** Coarse file kind — `html` for the rendered artifact, `asset` for anything
+   *  else. Renderer uses this for icon / ordering; finer mime detection is the
+   *  viewer's job. */
+  kind: 'html' | 'asset';
+  /** File size in bytes. */
+  size: number;
+  /** ISO-8601 mtime string. */
+  updatedAt: string;
+}
+
+/** Ignored by `listWorkspaceFilesAt` and `readWorkspaceFilesAt`. Keeps the
+ *  scan bounded on workspaces that have a bundled node_modules or build
+ *  outputs lying around. */
+const LIST_IGNORED_DIRS = new Set<string>([
+  'node_modules',
+  '.git',
+  '.codesign',
+  'dist',
+  'out',
+  '.turbo',
+  '.vite',
+  '__pycache__',
+]);
+
+const LIST_MAX_FILES = 2_000;
+
+/**
+ * Recursively list all files under `root`, returning metadata only (path,
+ * size, mtime, kind). Skips `.git`, `node_modules`, build outputs. Unlike
+ * `readWorkspaceFilesAt` this does NOT read file contents — the renderer's
+ * files panel only needs the directory listing, not the bytes.
+ *
+ * Returns entries sorted by path (POSIX-style separators). Silently returns
+ * `[]` when `root` does not exist.
+ */
+export async function listWorkspaceFilesAt(root: string): Promise<WorkspaceFileEntry[]> {
+  const out: WorkspaceFileEntry[] = [];
+
+  async function walk(dir: string): Promise<void> {
+    if (out.length >= LIST_MAX_FILES) return;
+    let entries: Dirent[] = [];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (out.length >= LIST_MAX_FILES) return;
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (LIST_IGNORED_DIRS.has(entry.name)) continue;
+        await walk(abs);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      let size = 0;
+      let mtime = new Date();
+      try {
+        const s = await stat(abs);
+        size = s.size;
+        mtime = s.mtime;
+      } catch {
+        continue;
+      }
+      const rel = normalizeSlashes(relative(root, abs));
+      out.push({
+        path: rel,
+        kind: rel.endsWith('.html') ? 'html' : 'asset',
+        size,
+        updatedAt: mtime.toISOString(),
+      });
+    }
+  }
+
+  await walk(root);
+  out.sort((a, b) => a.path.localeCompare(b.path));
+  return out;
 }
 
 /** Tiny glob → regex. Supports `**` (any including slashes), `*` (no slash),

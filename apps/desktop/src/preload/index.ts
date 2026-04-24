@@ -468,6 +468,15 @@ const api = {
         { ok: true; models: string[] } | { ok: false; code: string; message: string }
       >,
   },
+  files: {
+    list: (designId: string) =>
+      ipcRenderer.invoke('codesign:files:v1:list', {
+        schemaVersion: 1,
+        designId,
+      }) as Promise<
+        Array<{ path: string; kind: 'html' | 'asset'; size: number; updatedAt: string }>
+      >,
+  },
   snapshots: {
     listDesigns: () =>
       ipcRenderer.invoke('snapshots:v1:list-designs', { schemaVersion: 1 }) as Promise<Design[]>,

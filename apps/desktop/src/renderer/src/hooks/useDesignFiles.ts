@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCodesignStore } from '../store';
 
 export type DesignFileKind = 'html' | 'asset';
@@ -13,66 +13,126 @@ export interface DesignFileEntry {
 export interface UseDesignFilesResult {
   files: DesignFileEntry[];
   loading: boolean;
-  backend: 'snapshots' | 'files-ipc';
+  backend: 'workspace' | 'snapshots';
 }
 
-// TODO: Workstream E — swap the implementation of this hook to call
-// `window.codesign.files.list(designId)` once the files-ipc namespace lands.
-// The hook signature (DesignFileEntry[]) stays stable, so consumers do not
-// change. Until then we derive a single virtual `index.html` file from the
-// latest snapshot in `design_snapshots`.
+/**
+ * Read the design's bound workspace directory directly. The list reflects
+ * whatever is on disk right now — every write path (text_editor, scaffold,
+ * generate_image_asset, the user dragging a file in by hand) shows up
+ * because we do not depend on any tool remembering to fire an event.
+ *
+ * Live updates piggyback on the agent event stream: any `fs_updated`,
+ * `tool_call_result`, or `turn_end` event for the current design schedules a
+ * re-list. Throttled so a burst of tool calls does not spam `readdir`.
+ */
 export function useDesignFiles(designId: string | null): UseDesignFilesResult {
   const previewHtml = useCodesignStore((s) => s.previewHtml);
-  const designs = useCodesignStore((s) => s.designs);
-  const [latestSnapshotAt, setLatestSnapshotAt] = useState<string | null>(null);
+  const [files, setFiles] = useState<DesignFileEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const filesIpcAvailable =
-    typeof window !== 'undefined' &&
-    Boolean((window.codesign as unknown as { files?: unknown })?.files);
+  const backend: 'workspace' | 'snapshots' =
+    typeof window !== 'undefined' && (window.codesign as unknown as { files?: unknown })?.files
+      ? 'workspace'
+      : 'snapshots';
 
-  // Look up the latest snapshot timestamp for the current design so the Files
-  // panel can show "N minutes ago" next to the sole `index.html` row. We
-  // debounce on designId + previewHtml so a fresh generation refreshes it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: previewHtml is intentionally listed as a fresh-generation signal
-  useEffect(() => {
-    let cancelled = false;
-    if (!designId || !window.codesign) {
-      setLatestSnapshotAt(null);
+  const refetch = useCallback(async () => {
+    if (!designId) {
+      setFiles([]);
       return;
     }
-    setLoading(true);
-    // TODO(v0.2/T2.4): re-route through session JSONL — see T2.6.
-    window.codesign.snapshots
-      .list(designId)
-      .then((snaps) => {
-        if (cancelled) return;
-        setLatestSnapshotAt(snaps[0]?.createdAt ?? null);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setLatestSnapshotAt(null);
-      })
-      .finally(() => {
-        if (cancelled) return;
+    if (backend === 'workspace') {
+      try {
+        setLoading(true);
+        const rows = await (
+          window.codesign as unknown as {
+            files: {
+              list: (
+                id: string,
+              ) => Promise<
+                Array<{ path: string; kind: DesignFileKind; size: number; updatedAt: string }>
+              >;
+            };
+          }
+        ).files.list(designId);
+        setFiles(
+          rows.map((r) => ({
+            path: r.path,
+            kind: r.kind,
+            size: r.size,
+            updatedAt: r.updatedAt,
+          })),
+        );
+      } catch {
+        setFiles([]);
+      } finally {
         setLoading(false);
-      });
+      }
+      return;
+    }
+    // Legacy fallback: no files IPC → derive a single index.html entry from
+    // the last preview if we have one. Kept so downstream tests that mock a
+    // codesign-without-files preload keep passing.
+    if (previewHtml) {
+      setFiles([
+        {
+          path: 'index.html',
+          kind: 'html',
+          size: previewHtml.length,
+          updatedAt: new Date().toISOString(),
+        },
+      ]);
+    } else {
+      setFiles([]);
+    }
+  }, [designId, backend, previewHtml]);
+
+  // Initial fetch + refetch when the design changes.
+  useEffect(() => {
+    void refetch();
+  }, [refetch]);
+
+  // Throttle-refetch on agent events for the same design.
+  const throttleRef = useRef<{ pending: boolean; lastRun: number }>({
+    pending: false,
+    lastRun: 0,
+  });
+  useEffect(() => {
+    if (backend !== 'workspace') return;
+    if (!designId || !window.codesign) return;
+    const off = window.codesign.chat?.onAgentEvent?.((event) => {
+      if (event.designId !== designId) return;
+      const relevant =
+        event.type === 'fs_updated' ||
+        event.type === 'tool_call_result' ||
+        event.type === 'turn_end' ||
+        event.type === 'agent_end';
+      if (!relevant) return;
+      const slot = throttleRef.current;
+      const now = Date.now();
+      const elapsed = now - slot.lastRun;
+      if (elapsed > 250) {
+        slot.lastRun = now;
+        void refetch();
+        return;
+      }
+      if (!slot.pending) {
+        slot.pending = true;
+        setTimeout(
+          () => {
+            slot.pending = false;
+            slot.lastRun = Date.now();
+            void refetch();
+          },
+          Math.max(0, 250 - elapsed),
+        );
+      }
+    });
     return () => {
-      cancelled = true;
+      off?.();
     };
-  }, [designId, previewHtml]);
+  }, [backend, designId, refetch]);
 
-  const files: DesignFileEntry[] = [];
-  if (designId && previewHtml) {
-    const design = designs.find((d) => d.id === designId);
-    const updatedAt = latestSnapshotAt ?? design?.updatedAt ?? new Date().toISOString();
-    files.push({ path: 'index.html', kind: 'html', updatedAt, size: previewHtml.length });
-  }
-
-  return {
-    files,
-    loading,
-    backend: filesIpcAvailable ? 'files-ipc' : 'snapshots',
-  };
+  return { files, loading, backend };
 }
 
 // Format an ISO timestamp as "22h ago" / "3d ago". Pure for testability.

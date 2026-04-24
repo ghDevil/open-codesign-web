@@ -32,6 +32,7 @@ import {
   setDesignThumbnail,
   softDeleteDesign,
 } from './snapshots-db';
+import { listWorkspaceFilesAt, type WorkspaceFileEntry } from './workspace-reader';
 
 type Database = BetterSqlite3.Database;
 
@@ -547,6 +548,27 @@ export function registerWorkspaceIpc(db: Database, getWin: () => BrowserWindow |
       return { exists };
     },
   );
+
+  ipcMain.handle(
+    'codesign:files:v1:list',
+    async (_e: unknown, raw: unknown): Promise<WorkspaceFileEntry[]> => {
+      if (typeof raw !== 'object' || raw === null) {
+        throw new CodesignError('codesign:files:v1:list expects { designId }', 'IPC_BAD_INPUT');
+      }
+      const r = raw as Record<string, unknown>;
+      requireSchemaV1(r, 'codesign:files:v1:list');
+      if (typeof r['designId'] !== 'string' || r['designId'].trim().length === 0) {
+        throw new CodesignError('designId must be a non-empty string', 'IPC_BAD_INPUT');
+      }
+      const design = runDb('files:list', () => getDesign(db, r['designId'] as string));
+      if (design === null || design.workspacePath === null) return [];
+      try {
+        return await listWorkspaceFilesAt(design.workspacePath);
+      } catch (cause) {
+        throw new CodesignError('Failed to list workspace files', 'IPC_DB_ERROR', { cause });
+      }
+    },
+  );
 }
 
 function parseIdPayload(raw: unknown, channel: string): string {
@@ -586,6 +608,7 @@ export const SNAPSHOTS_CHANNELS_V1 = [
   'snapshots:v1:workspace:update',
   'snapshots:v1:workspace:open',
   'snapshots:v1:workspace:check',
+  'codesign:files:v1:list',
 ] as const;
 
 export function registerSnapshotsUnavailableIpc(reason: string): void {
