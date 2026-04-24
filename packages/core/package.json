@@ -13,16 +13,16 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.69.0",
     "@mariozechner/pi-agent-core": "^0.69.0",
     "@mariozechner/pi-ai": "^0.69.0",
+    "@mariozechner/pi-coding-agent": "^0.69.0",
     "@open-codesign/artifacts": "workspace:*",
     "@open-codesign/providers": "workspace:*",
     "@open-codesign/shared": "workspace:*",
     "@sinclair/typebox": "^0.34.49"
   },
   "devDependencies": {
-    "typescript": "^5.7.2",
+    "typescript": "^6.0.3",
     "vitest": "^2.1.8"
   }
 }
