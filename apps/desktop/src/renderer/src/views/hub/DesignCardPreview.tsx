@@ -2,6 +2,10 @@ import { buildPreviewDocument, requiresPreviewScripts } from '@open-codesign/run
 import type { Design } from '@open-codesign/shared';
 import { Plus } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  resolveReferencedWorkspacePreviewPath,
+  resolveWorkspacePreviewSource,
+} from '../../preview/workspace-source';
 
 // Hub cards render many iframes in parallel; live CSS animations / transitions /
 // autoplaying media in each one thrash compositor + GPU for no user value (the
@@ -113,6 +117,10 @@ function pruneOldestCacheEntriesIfNeeded(): void {
   }
 }
 
+function hasWorkspaceSourceReference(source: string): boolean {
+  return resolveReferencedWorkspacePreviewPath(source, 'index.html') !== null;
+}
+
 export function DesignCardPreview({ design }: DesignCardPreviewProps) {
   const [html, setHtml] = useState<string | null>(() =>
     readCache(cacheKey(design.id, design.updatedAt)),
@@ -180,7 +188,7 @@ export function DesignCardPreview({ design }: DesignCardPreviewProps) {
     if (!visible) return;
     const key = cacheKey(design.id, design.updatedAt);
     const cached = readCache(key);
-    if (cached !== null) {
+    if (cached !== null && !hasWorkspaceSourceReference(cached)) {
       setHtml(cached);
       setFailed(false);
       return;
@@ -198,8 +206,18 @@ export function DesignCardPreview({ design }: DesignCardPreviewProps) {
           setFailed(true);
           return;
         }
-        writeCache(key, source);
-        setHtml(source);
+        return resolveWorkspacePreviewSource({
+          designId: design.id,
+          source,
+          path: 'index.html',
+          read: window.codesign?.files?.read,
+        });
+      })
+      .then((result) => {
+        if (cancelled || !mounted.current || !result) return;
+        writeCache(key, result.content);
+        setHtml(result.content);
+        setFailed(false);
       })
       .catch(() => {
         if (!cancelled && mounted.current) setFailed(true);

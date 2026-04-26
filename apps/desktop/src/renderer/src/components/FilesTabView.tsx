@@ -1,10 +1,5 @@
 import { useT } from '@open-codesign/i18n';
-import {
-  buildPreviewDocument,
-  findArtifactSourceReference,
-  isRenderablePath,
-  resolveArtifactSourceReferencePath,
-} from '@open-codesign/runtime';
+import { buildPreviewDocument, isRenderablePath } from '@open-codesign/runtime';
 import { FileCode2, Folder, FolderOpen } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type DesignFileEntry, type DesignFileKind, useDesignFiles } from '../hooks/useDesignFiles';
@@ -14,7 +9,10 @@ import {
   handlePreviewMessage,
   isTrustedPreviewMessageSource,
 } from '../preview/helpers';
+import { readWorkspacePreviewSource } from '../preview/workspace-source';
 import { useCodesignStore } from '../store';
+
+export { resolveReferencedWorkspacePreviewPath } from '../preview/workspace-source';
 
 function truncatePath(path: string, maxLength = 40): string {
   if (path.length <= maxLength) return path;
@@ -219,17 +217,6 @@ export function chooseWorkspacePreviewSourceMode(input: {
   return 'unavailable';
 }
 
-function isHtmlPreviewPath(path: string): boolean {
-  const lower = path.toLowerCase();
-  return lower.endsWith('.html') || lower.endsWith('.htm');
-}
-
-export function resolveReferencedWorkspacePreviewPath(source: string, path: string): string | null {
-  if (!isHtmlPreviewPath(path)) return null;
-  const reference = findArtifactSourceReference(source);
-  return reference === null ? null : resolveArtifactSourceReferencePath(path, reference);
-}
-
 function designFileRevisionKey(file: DesignFileEntry | null | undefined): string | null {
   if (!file) return null;
   return `${file.path}:${file.updatedAt}:${file.size ?? ''}`;
@@ -325,13 +312,7 @@ export function WorkspaceFilePreview({ path, file, files }: WorkspaceFilePreview
     }
     let cancelled = false;
     setReadError(null);
-    void read(currentDesignId, path)
-      .then(async (result) => {
-        const referencedPath = resolveReferencedWorkspacePreviewPath(result.content, result.path);
-        if (referencedPath === null) return { content: result.content, path: result.path };
-        const referenced = await read(currentDesignId, referencedPath);
-        return { content: referenced.content, path: referenced.path };
-      })
+    void readWorkspacePreviewSource({ designId: currentDesignId, path, read })
       .then((result) => {
         if (cancelled) return;
         setPreviewSource(result);

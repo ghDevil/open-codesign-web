@@ -672,6 +672,69 @@ describe('useCodesignStore artifact persistence', () => {
     expect(restored.currentDesignId).toBe(designId);
     expect(restored.previewHtml).toBe('<html><body>persisted</body></html>');
   });
+
+  it('persists referenced JSX source instead of the placeholder index.html', async () => {
+    const designId = 'design-referenced-source';
+    const designRow = {
+      schemaVersion: 1 as const,
+      id: designId,
+      name: 'Referenced source',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      thumbnailText: null,
+      deletedAt: null,
+      workspacePath: '/tmp/codesign',
+    };
+    const placeholder =
+      '<!doctype html><html><body><!-- artifact source lives in index.jsx --></body></html>';
+    const jsxSource =
+      'function App(){ return <main id="real-source">Hi</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);';
+    const create = vi.fn((input) => Promise.resolve({ id: 'snap-1', ...input }));
+
+    vi.stubGlobal('window', {
+      codesign: {
+        files: {
+          read: vi.fn(async (_id: string, path: string) => ({
+            path,
+            content: path === 'index.jsx' ? jsxSource : placeholder,
+          })),
+        },
+        snapshots: {
+          list: vi.fn(() => Promise.resolve([])),
+          create,
+          listDesigns: vi.fn(() => Promise.resolve([designRow])),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      currentDesignId: designId,
+      designs: [designRow],
+      previewHtml: placeholder,
+      chatMessages: [
+        {
+          schemaVersion: 1,
+          id: 1,
+          designId,
+          seq: 1,
+          kind: 'user',
+          payload: { text: 'make a messaging screen' },
+          snapshotId: null,
+          createdAt: '2024-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    await useCodesignStore.getState().persistAgentRunSnapshot({ designId });
+
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      artifactSource: jsxSource,
+      prompt: 'make a messaging screen',
+    });
+    expect(useCodesignStore.getState().previewHtml).toBe(jsxSource);
+  });
 });
 
 describe('loadDesigns startup', () => {

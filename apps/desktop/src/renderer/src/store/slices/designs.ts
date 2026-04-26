@@ -1,3 +1,4 @@
+import { resolveWorkspacePreviewSource } from '../../preview/workspace-source.js';
 import type { CodesignState } from '../../store.js';
 import { tr } from '../lib/locale.js';
 import { recordPreviewInPool } from './snapshots.js';
@@ -7,6 +8,20 @@ type SetState = (
   updater: ((state: CodesignState) => Partial<CodesignState> | object) | Partial<CodesignState>,
 ) => void;
 type GetState = () => CodesignState;
+
+async function resolveDesignPreviewSource(
+  designId: string,
+  source: string | null,
+): Promise<string | null> {
+  if (source === null || !window.codesign) return source;
+  const resolved = await resolveWorkspacePreviewSource({
+    designId,
+    source,
+    path: 'index.html',
+    read: window.codesign.files?.read,
+  }).catch(() => ({ content: source, path: 'index.html' }));
+  return resolved.content;
+}
 
 interface DesignsSliceActions {
   loadDesigns: CodesignState['loadDesigns'];
@@ -193,7 +208,10 @@ export function makeDesignsSlice(set: SetState, get: GetState): DesignsSliceActi
             const snapshots = await window.codesign?.snapshots.list(id);
             if (!snapshots || get().currentDesignId !== id) return;
             const latest = snapshots[0] ?? null;
-            const fresh = latest ? latest.artifactSource : null;
+            const fresh = await resolveDesignPreviewSource(
+              id,
+              latest ? latest.artifactSource : null,
+            );
             if (fresh !== null && fresh !== get().previewHtml) {
               const refreshed = recordPreviewInPool(
                 get().previewHtmlByDesign,
@@ -218,7 +236,7 @@ export function makeDesignsSlice(set: SetState, get: GetState): DesignsSliceActi
       try {
         const snapshots = await window.codesign.snapshots.list(id);
         const latest = snapshots[0] ?? null;
-        const html = latest ? latest.artifactSource : null;
+        const html = await resolveDesignPreviewSource(id, latest ? latest.artifactSource : null);
         const incomingPool = recordPreviewInPool(outgoingPool.cache, outgoingPool.recent, id, html);
         set({
           currentDesignId: id,

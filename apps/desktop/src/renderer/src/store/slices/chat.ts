@@ -1,4 +1,5 @@
 import type { ChatAppendInput, ChatToolCallPayload } from '@open-codesign/shared';
+import { resolveWorkspacePreviewSource } from '../../preview/workspace-source.js';
 import type { CodesignState } from '../../store.js';
 import { looksRunnableArtifact } from '../lib/artifact.js';
 import { tr } from '../lib/locale.js';
@@ -196,13 +197,34 @@ export function makeChatSlice(set: SetState, get: GetState): ChatSliceActions {
       if (state.currentDesignId !== designId) return;
       const html = state.previewHtml;
       if (!html || html.trim().length === 0) return;
+      const resolved = await resolveWorkspacePreviewSource({
+        designId,
+        source: html,
+        path: 'index.html',
+        read: window.codesign.files?.read,
+      }).catch(() => ({ content: html, path: 'index.html' }));
+      if (get().currentDesignId !== designId) return;
+      const artifactContent = resolved.content;
+      if (artifactContent !== html) {
+        const pool = recordPreviewInPool(
+          get().previewHtmlByDesign,
+          get().recentDesignIds,
+          designId,
+          artifactContent,
+        );
+        set({
+          previewHtml: artifactContent,
+          previewHtmlByDesign: pool.cache,
+          recentDesignIds: pool.recent,
+        });
+      }
       // Guard against persisting truncated artifacts. When an agent run is
       // interrupted mid-edit (context explosion, 400 response, cancel, crash),
       // the virtual-FS has a partial JSX file that would overwrite the last
       // good snapshot and render as a blank card in the hub. Require a
       // ReactDOM.createRoot mount call + roughly balanced braces; if missing,
       // keep the last good snapshot and warn the user.
-      if (!looksRunnableArtifact(html)) {
+      if (!looksRunnableArtifact(artifactContent)) {
         get().pushToast({
           variant: 'info',
           title: tr('projects.notifications.snapshotSkipped'),
@@ -216,7 +238,7 @@ export function makeChatSlice(set: SetState, get: GetState): ChatSliceActions {
       const prompt = (lastUser?.payload as { text?: string } | undefined)?.text ?? null;
       const artifact: PersistArtifact = {
         type: 'html',
-        content: html,
+        content: artifactContent,
         prompt,
         message: finalText && finalText.length > 0 ? finalText : null,
       };
