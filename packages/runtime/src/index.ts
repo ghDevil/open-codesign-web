@@ -31,6 +31,7 @@ const JSX_TEMPLATE_BEGIN = '<!-- AGENT_BODY_BEGIN -->';
 const JSX_TEMPLATE_END = '<!-- AGENT_BODY_END -->';
 const OVERLAY_MARKER = '<!-- CODESIGN_OVERLAY_SCRIPT -->';
 const JSX_RUNTIME_MARKER = '<!-- CODESIGN_JSX_RUNTIME -->';
+const STANDALONE_RUNTIME_MARKER = '<!-- CODESIGN_STANDALONE_RUNTIME -->';
 const ARTIFACT_SOURCE_REFERENCE_RE =
   /<!--\s*artifact source lives in\s+([^<>]+?\.(?:jsx|tsx))\s*-->/i;
 
@@ -199,6 +200,15 @@ function jsxRuntimeComponentScripts(): string {
   ].join('\n');
 }
 
+function jsxRuntimeBaseScripts(): string {
+  return [
+    `<script>${REACT_UMD}</script>`,
+    `<script>${REACT_DOM_UMD}</script>`,
+    `<script>${BABEL_STANDALONE}</script>`,
+    jsxRuntimeComponentScripts(),
+  ].join('\n');
+}
+
 function wrapJsxAsSrcdoc(
   jsx: string,
   opts: { kind?: 'jsx' | 'tsx'; baseHref?: string | undefined } = {},
@@ -240,6 +250,31 @@ ${JSX_TEMPLATE_END}
 </html>`;
 }
 
+function wrapJsxAsStandaloneDocument(
+  jsx: string,
+  opts: { kind?: 'jsx' | 'tsx'; baseHref?: string | undefined } = {},
+): string {
+  const kind = opts.kind ?? 'jsx';
+  const normalized = autoMountJsxIfNeeded(ensureEditmodeMarkers(jsx));
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+${baseTag(opts.baseHref)}<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300;1,9..144,400&family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}html,body,#root{height:100%;}body{font-family:'DM Sans',system-ui,sans-serif;background:var(--color-artifact-bg, #ffffff);}</style>
+</head>
+<body>
+<div id="root"></div>
+${STANDALONE_RUNTIME_MARKER}
+${jsxRuntimeBaseScripts()}
+${compileAndRunScript(normalized, kind)}
+</body>
+</html>`;
+}
+
 function overlayScriptTag(): string {
   return `${OVERLAY_MARKER}<script>${OVERLAY_SCRIPT}</script>`;
 }
@@ -276,18 +311,73 @@ function jsxRuntimeScripts(): string {
   ].join('\n');
 }
 
+function stripHostJsxRuntimeScripts(html: string): string {
+  return html.replace(
+    /<script\b[^>]*\bsrc=(["'])([^"']+)\1[^>]*>\s*<\/script>/gi,
+    (tag, _quote: string, rawSrc: string) => {
+      let url: URL;
+      try {
+        url = new URL(rawSrc);
+      } catch {
+        return tag;
+      }
+      const path = url.pathname;
+      const isReactUmd =
+        /\/react@\d[^/]*\/umd\/react\.(?:development|production(?:\.min)?)\.js$/i.test(path);
+      const isReactDomUmd =
+        /\/react-dom@\d[^/]*\/umd\/react-dom\.(?:development|production(?:\.min)?)\.js$/i.test(
+          path,
+        );
+      const isBabelStandalone = /\/@babel\/standalone(?:@\d[^/]*)?\/babel\.min\.js$/i.test(path);
+      return isReactUmd || isReactDomUmd || isBabelStandalone ? '' : tag;
+    },
+  );
+}
+
+function inlineScriptLooksLikeJsx(scriptBody: string): boolean {
+  return (
+    /\bReactDOM\.createRoot\b/.test(scriptBody) &&
+    (/\)\s*\.render\s*\(\s*</.test(scriptBody) ||
+      /return\s*\(\s*</.test(scriptBody) ||
+      /return\s*</.test(scriptBody) ||
+      /<[A-Z][A-Za-z0-9]*(?:\s|>|\/)/.test(scriptBody))
+  );
+}
+
+function markInlineJsxScriptsAsBabel(html: string): string {
+  return html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (tag, attrs: string, body) => {
+    if (/\bsrc\s*=/i.test(attrs) || /\btype\s*=/i.test(attrs)) return tag;
+    if (!inlineScriptLooksLikeJsx(body)) return tag;
+    return `<script type="text/babel"${attrs}>${body}</script>`;
+  });
+}
+
 function injectJsxRuntimeIntoHtml(html: string): string {
   if (html.includes(JSX_RUNTIME_MARKER)) return html;
+  const cleaned = markInlineJsxScriptsAsBabel(stripHostJsxRuntimeScripts(html));
   const stack = `${JSX_RUNTIME_MARKER}\n${jsxRuntimeScripts()}`;
   // Insert at the very top of <body> so user's own `<script type="text/babel">`
   // tags (which typically sit inside <body>) see React/Babel already loaded.
-  if (/<body[^>]*>/i.test(html)) {
-    return html.replace(/(<body[^>]*>)/i, `$1\n${stack}`);
+  if (/<body[^>]*>/i.test(cleaned)) {
+    return cleaned.replace(/(<body[^>]*>)/i, (_match, open: string) => `${open}\n${stack}`);
   }
-  if (/<\/head>/i.test(html)) {
-    return html.replace(/(<\/head>)/i, `${stack}\n$1`);
+  if (/<\/head>/i.test(cleaned)) {
+    return cleaned.replace(/(<\/head>)/i, (close) => `${stack}\n${close}`);
   }
-  return `${stack}\n${html}`;
+  return `${stack}\n${cleaned}`;
+}
+
+function injectStandaloneJsxRuntimeIntoHtml(html: string): string {
+  if (html.includes(STANDALONE_RUNTIME_MARKER)) return html;
+  const cleaned = markInlineJsxScriptsAsBabel(stripHostJsxRuntimeScripts(html));
+  const stack = `${STANDALONE_RUNTIME_MARKER}\n${jsxRuntimeBaseScripts()}`;
+  if (/<body[^>]*>/i.test(cleaned)) {
+    return cleaned.replace(/(<body[^>]*>)/i, (_match, open: string) => `${open}\n${stack}`);
+  }
+  if (/<\/head>/i.test(cleaned)) {
+    return cleaned.replace(/(<\/head>)/i, (close) => `${stack}\n${close}`);
+  }
+  return `${stack}\n${cleaned}`;
 }
 
 function injectOverlayIntoHtmlDocument(html: string): string {
@@ -296,10 +386,10 @@ function injectOverlayIntoHtmlDocument(html: string): string {
   }
   const script = overlayScriptTag();
   if (/<\/body\s*>/i.test(html)) {
-    return html.replace(/<\/body\s*>/i, `${script}</body>`);
+    return html.replace(/<\/body\s*>/i, () => `${script}</body>`);
   }
   if (/<\/html\s*>/i.test(html)) {
-    return html.replace(/<\/html\s*>/i, `${script}</html>`);
+    return html.replace(/<\/html\s*>/i, () => `${script}</html>`);
   }
   return `${html}${script}`;
 }
@@ -355,6 +445,44 @@ export function buildPreviewDocument(
   }
 
   return wrapJsxAsSrcdoc(stripped, { kind, baseHref: opts.baseHref });
+}
+
+function ensureStandaloneShell(html: string): string {
+  const trimmed = html.trim();
+  if (/^<!doctype/i.test(trimmed)) return trimmed;
+  if (/<html[\s>]/i.test(trimmed)) return `<!doctype html>\n${trimmed}`;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body>
+${trimmed}
+</body>
+</html>`;
+}
+
+export function buildStandaloneDocument(
+  userSource: string,
+  opts: BuildPreviewDocumentOptions = {},
+): string {
+  const stripped = userSource.replace(
+    /<meta[^>]*http-equiv=["']Content-Security-Policy["'][^>]*>/gi,
+    '',
+  );
+  const classified = classifyRenderableSource(stripped, opts.path);
+  const kind = classified === 'unknown' && opts.path === undefined ? 'jsx' : classified;
+  if (kind === 'unknown') {
+    return injectBaseHrefIntoHtmlDocument(ensureStandaloneShell(stripped), opts.baseHref);
+  }
+  if (kind === 'html') {
+    const html = needsJsxRuntimeInHtml(stripped)
+      ? injectStandaloneJsxRuntimeIntoHtml(stripped)
+      : stripped;
+    return injectBaseHrefIntoHtmlDocument(ensureStandaloneShell(html), opts.baseHref);
+  }
+  return wrapJsxAsStandaloneDocument(stripped, { kind, baseHref: opts.baseHref });
 }
 
 /**

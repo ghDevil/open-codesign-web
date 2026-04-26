@@ -18,6 +18,8 @@
 - **Forbidden**:
   - Arbitrary `fetch()` / `XMLHttpRequest` to external APIs — all data must be inline.
   - Scripts from any host other than `cdnjs.cloudflare.com` (no `esm.sh`, `jsdelivr`, `unpkg` — too open, no version verification).
+  - React / ReactDOM / @babel standalone runtime scripts, imports, CDN links, or `type="text/babel"` tags. The host preview/runtime injects React, ReactDOM, Babel, device-frame components, and design-canvas components for JSX artifacts.
+  - In agentic workspace mode, HTML document wrappers around JSX source (`<!doctype>`, `<html>`, `<head>`, `<body>`, `<div id="root">`, `<script>`). The `.html` workspace file is JSX source; the host builds the document shell for preview and export.
   - Hotlinked photos from any host (`placeholder.com`, `unsplash.com`, `picsum.photos`, etc.).
 - All other assets must be inline: SVG icons, CSS gradients, data URIs for tiny images.
 

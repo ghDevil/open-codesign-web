@@ -546,6 +546,8 @@ describe('generateViaAgent() — Phase 1 pass-through', () => {
     const sys = agentCalls[0]?.options.initialState?.systemPrompt as string;
     expect(sys).toContain('str_replace_based_edit_tool');
     expect(sys).toContain('Do NOT emit `<artifact>`');
+    expect(sys).toContain('Do NOT add React / ReactDOM / @babel standalone runtime scripts');
+    expect(sys).toContain('index.html` is artifact source');
   });
 
   it('adds explicit bitmap trigger guidance when image asset tool is enabled', async () => {

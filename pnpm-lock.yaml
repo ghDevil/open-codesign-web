@@ -218,6 +218,9 @@ importers:
 
   packages/exporters:
     dependencies:
+      '@open-codesign/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       '@open-codesign/shared':
         specifier: workspace:*
         version: link:../shared

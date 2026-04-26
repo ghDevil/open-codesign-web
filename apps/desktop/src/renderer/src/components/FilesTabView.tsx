@@ -9,6 +9,11 @@ import { FileCode2, Folder, FolderOpen } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { type DesignFileEntry, type DesignFileKind, useDesignFiles } from '../hooks/useDesignFiles';
 import { workspacePathComparisonKey } from '../lib/workspace-path';
+import {
+  formatIframeError,
+  handlePreviewMessage,
+  isTrustedPreviewMessageSource,
+} from '../preview/helpers';
 import { useCodesignStore } from '../store';
 
 function truncatePath(path: string, maxLength = 40): string {
@@ -277,6 +282,21 @@ export function WorkspaceFilePreview({ path, file, files }: WorkspaceFilePreview
   );
   const [readError, setReadError] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  useEffect(() => {
+    function onMessage(event: MessageEvent): void {
+      if (!isTrustedPreviewMessageSource(event.source, iframeRef.current?.contentWindow)) return;
+      handlePreviewMessage(event.data, {
+        onElementSelected: () => {},
+        onElementRects: () => {},
+        onIframeError: (msg) =>
+          pushIframeError(formatIframeError(msg.kind, msg.message, msg.source, msg.lineno)),
+      });
+    }
+
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [pushIframeError]);
 
   useEffect(() => {
     // Re-read when the file watcher reports changed metadata for either the

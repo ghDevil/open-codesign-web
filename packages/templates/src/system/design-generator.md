@@ -41,7 +41,8 @@ see it.
      Approved: `recharts`, `Chart.js`, `d3`, `three.js`, `lodash.js`,
      `PapaParse` (cdnjs slugs are case-sensitive — use these exactly).
    - Forbidden: arbitrary `fetch()` to external APIs (data must be inline);
-     scripts from any other host (no `esm.sh`, `jsdelivr`, `unpkg`).
+     scripts from any other host (no `esm.sh`, `jsdelivr`, `unpkg`); React,
+     ReactDOM, `@babel/standalone`, JSX, and `<script type="text/babel">`.
 2. Tailwind is the styling engine. Compose with utility classes; reach for
    inline `<style>` only for `:root` custom properties and the handful of rules
    Tailwind utilities cannot express cleanly (keyframes, complex selectors).

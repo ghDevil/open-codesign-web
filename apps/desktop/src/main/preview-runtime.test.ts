@@ -193,6 +193,29 @@ describeIfChrome('runPreview with real Chrome', () => {
     expect(result.metrics.nodes).toBeGreaterThan(20);
   }, 30_000);
 
+  it('renders mixed HTML + inline JSX without relying on user-added CDN runtimes', async () => {
+    writeFileSync(
+      join(tempDir, 'Mixed.html'),
+      [
+        '<!doctype html><html><head>',
+        '<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>',
+        '<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>',
+        '<script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>',
+        '</head><body><div id="root"></div>',
+        '<script>function App() { return <main id="mixed-jsx-root">Mixed JSX</main>; } ReactDOM.createRoot(document.getElementById("root")).render(<App/>);</script>',
+        '</body></html>',
+      ].join('\n'),
+      'utf8',
+    );
+    const result = await runPreview({
+      path: 'Mixed.html',
+      vision: false,
+      workspaceRoot: tempDir,
+    });
+    expect(result.ok, JSON.stringify(result, null, 2)).toBe(true);
+    expect(result.domOutline).toContain('main#mixed-jsx-root');
+  }, 30_000);
+
   it('does not follow source-reference-looking strings inside JSX files', async () => {
     writeFileSync(
       join(tempDir, 'Marker.jsx'),

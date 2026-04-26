@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPreviewDocument,
   buildSrcdoc,
+  buildStandaloneDocument,
   classifyRenderableSource,
   extractAndUpgradeArtifact,
   findArtifactSourceReference,
@@ -93,6 +94,37 @@ describe('buildSrcdoc', () => {
     expect(twice).toBe(once);
   });
 
+  it('removes user-added React/Babel CDN runtime scripts from mixed HTML previews', () => {
+    const mixed = [
+      '<!doctype html>',
+      '<html><head>',
+      '<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>',
+      '<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>',
+      '<script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>',
+      '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>',
+      '</head><body><div id="root"></div>',
+      '<script type="text/babel">function App(){ return <div>mixed</div>; } ReactDOM.createRoot(document.getElementById("root")).render(<App/>);</script>',
+      '</body></html>',
+    ].join('\n');
+
+    const out = buildSrcdoc(mixed);
+    expect(out).toContain('CODESIGN_JSX_RUNTIME');
+    expect(out).not.toContain('cdn.jsdelivr.net/npm/react@18/umd/react.development.js');
+    expect(out).not.toContain('cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js');
+    expect(out).not.toContain('cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js');
+    expect(out).toContain('cdn.jsdelivr.net/npm/chart.js');
+  });
+
+  it('marks inline JSX scripts as text/babel before injecting the runtime', () => {
+    const html =
+      '<!doctype html><html><body><div id="root"></div>' +
+      '<script>function App(){ return <div>mixed</div>; } ReactDOM.createRoot(document.getElementById("root")).render(<App/>);</script>' +
+      '</body></html>';
+    const out = buildSrcdoc(html);
+    expect(out).toContain('CODESIGN_JSX_RUNTIME');
+    expect(out).toContain('<script type="text/babel">function App()');
+  });
+
   it('wraps a fragment via the JSX path (no legacy HTML branch)', () => {
     const out = buildSrcdoc('<div>plain</div>');
     expect(out).toContain('AGENT_BODY_BEGIN');
@@ -148,6 +180,36 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);`;
     const wrapped = buildSrcdoc(jsxArtifact);
     const wrappedTwice = buildSrcdoc(wrapped);
     expect(wrappedTwice).toBe(wrapped);
+  });
+});
+
+describe('buildStandaloneDocument', () => {
+  it('exports bare JSX as browser-openable HTML with an inline runtime', () => {
+    const out = buildStandaloneDocument(
+      'function App() { return <div>hi</div>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);',
+      { path: 'index.html' },
+    );
+    expect(out).toContain('CODESIGN_STANDALONE_RUNTIME');
+    expect(out).toContain('window.Babel.transform');
+    expect(out).toContain('<div id="root"></div>');
+    expect(out).not.toContain('CODESIGN_OVERLAY_SCRIPT');
+  });
+
+  it('exports mixed HTML without external React/Babel CDN scripts or preview overlay', () => {
+    const out = buildStandaloneDocument(
+      [
+        '<!doctype html><html><head>',
+        '<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>',
+        '</head><body><div id="root"></div>',
+        '<script>function App(){ return <div>hi</div>; } ReactDOM.createRoot(document.getElementById("root")).render(<App/>);</script>',
+        '</body></html>',
+      ].join('\n'),
+      { path: 'index.html' },
+    );
+    expect(out).toContain('CODESIGN_STANDALONE_RUNTIME');
+    expect(out).toContain('<script type="text/babel">function App()');
+    expect(out).not.toContain('cdn.jsdelivr.net/npm/react@18');
+    expect(out).not.toContain('CODESIGN_OVERLAY_SCRIPT');
   });
 });
 
