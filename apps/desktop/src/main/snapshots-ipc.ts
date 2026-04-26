@@ -646,6 +646,7 @@ export const SNAPSHOTS_CHANNELS_V1 = [
   'snapshots:v1:workspace:open',
   'snapshots:v1:workspace:check',
   'codesign:files:v1:list',
+  'codesign:files:v1:read',
   'codesign:files:v1:subscribe',
   'codesign:files:v1:unsubscribe',
 ] as const;
