@@ -13,9 +13,22 @@ export type WorkspacePreviewRead = (
   path: string,
 ) => Promise<WorkspacePreviewReadResult>;
 
+export function hasWorkspaceSourceReference(source: string, path = 'index.html'): boolean {
+  return resolveReferencedWorkspacePreviewPath(source, path) !== null;
+}
+
+function looksLikeJsxModule(source: string): boolean {
+  return (
+    /\bReactDOM\.createRoot\s*\(/.test(source) ||
+    /EDITMODE-BEGIN/.test(source) ||
+    /(?:^|\n)\s*(?:function|const|let)\s+_?App\b/.test(source)
+  );
+}
+
 export function resolveReferencedWorkspacePreviewPath(source: string, path: string): string | null {
   const lower = path.toLowerCase();
   if (!lower.endsWith('.html') && !lower.endsWith('.htm')) return null;
+  if (looksLikeJsxModule(source)) return null;
   const reference = findArtifactSourceReference(source);
   return reference === null ? null : resolveArtifactSourceReferencePath(path, reference);
 }
@@ -39,11 +52,19 @@ export async function resolveWorkspacePreviewSource(input: {
   source: string;
   path?: string | undefined;
   read?: WorkspacePreviewRead | undefined;
+  requireReferencedSource?: boolean | undefined;
 }): Promise<WorkspacePreviewReadResult> {
   const path = input.path ?? 'index.html';
-  if (!input.read) return { content: input.source, path };
   const referencedPath = resolveReferencedWorkspacePreviewPath(input.source, path);
   if (referencedPath === null) return { content: input.source, path };
+  if (!input.read) {
+    if (input.requireReferencedSource) {
+      throw new Error(
+        `Cannot resolve referenced preview source without files API: ${referencedPath}`,
+      );
+    }
+    return { content: input.source, path };
+  }
   const referenced = await input.read(input.designId, referencedPath);
   return { content: referenced.content, path: referenced.path };
 }

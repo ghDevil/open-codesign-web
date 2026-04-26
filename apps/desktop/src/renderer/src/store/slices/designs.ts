@@ -1,4 +1,7 @@
-import { resolveWorkspacePreviewSource } from '../../preview/workspace-source.js';
+import {
+  hasWorkspaceSourceReference,
+  resolveWorkspacePreviewSource,
+} from '../../preview/workspace-source.js';
 import type { CodesignState } from '../../store.js';
 import { tr } from '../lib/locale.js';
 import { recordPreviewInPool } from './snapshots.js';
@@ -14,12 +17,14 @@ async function resolveDesignPreviewSource(
   source: string | null,
 ): Promise<string | null> {
   if (source === null || !window.codesign) return source;
+  const referencesWorkspaceSource = hasWorkspaceSourceReference(source);
   const resolved = await resolveWorkspacePreviewSource({
     designId,
     source,
     path: 'index.html',
     read: window.codesign.files?.read,
-  }).catch(() => ({ content: source, path: 'index.html' }));
+    requireReferencedSource: referencesWorkspaceSource,
+  });
   return resolved.content;
 }
 
@@ -155,6 +160,37 @@ export function makeDesignsSlice(set: SetState, get: GetState): DesignsSliceActi
       const state = get();
       if (state.currentDesignId === id) {
         set({ designsViewOpen: false });
+        void (async () => {
+          try {
+            const snapshots = await window.codesign?.snapshots.list(id);
+            if (!snapshots || get().currentDesignId !== id) return;
+            const latest = snapshots[0] ?? null;
+            const fresh = await resolveDesignPreviewSource(
+              id,
+              latest ? latest.artifactSource : null,
+            );
+            if (fresh !== null && fresh !== get().previewHtml) {
+              const refreshed = recordPreviewInPool(
+                get().previewHtmlByDesign,
+                get().recentDesignIds,
+                id,
+                fresh,
+              );
+              set({
+                previewHtml: fresh,
+                previewHtmlByDesign: refreshed.cache,
+                recentDesignIds: refreshed.recent,
+              });
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : tr('errors.unknown');
+            get().pushToast({
+              variant: 'error',
+              title: tr('projects.notifications.switchFailed'),
+              description: msg,
+            });
+          }
+        })();
         return;
       }
 

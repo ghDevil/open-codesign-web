@@ -1,3 +1,5 @@
+import { findArtifactSourceReference } from '@open-codesign/runtime';
+
 /**
  * Quick sanity gate for artifact content before we overwrite the design's
  * latest snapshot. Catches the dominant failure mode: an agent run that was
@@ -11,8 +13,10 @@
 export function looksRunnableArtifact(src: string): boolean {
   const trimmed = src.trim();
   if (trimmed.length === 0) return false;
+  const hasExplicitMount = /ReactDOM\.createRoot\s*\([\s\S]*?\)\s*\.render\s*\(/.test(trimmed);
+  if (findArtifactSourceReference(trimmed) !== null && !hasExplicitMount) return false;
   if (/<html[\s>]/i.test(trimmed) || /<body[\s>]/i.test(trimmed)) return true;
-  if (!/ReactDOM\.createRoot\s*\([\s\S]*?\)\s*\.render\s*\(/.test(trimmed)) return false;
+  if (!hasExplicitMount) return false;
   const opens = (trimmed.match(/\{/g) ?? []).length;
   const closes = (trimmed.match(/\}/g) ?? []).length;
   if (Math.abs(opens - closes) > 2) return false;

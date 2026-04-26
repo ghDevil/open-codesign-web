@@ -14,6 +14,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { AgentStreamEvent } from '../../../preload/index';
+import { resolveReferencedWorkspacePreviewPath } from '../preview/workspace-source';
 import { useCodesignStore } from '../store';
 
 interface PendingPersist {
@@ -236,9 +237,20 @@ export function useAgentStream(): void {
 
     const handleFsUpdated = (event: AgentStreamEvent) => {
       // Live mirror of the agent's text_editor mutations into the iframe.
-      // We only react to index.html — other paths (frames/, skills/) are
-      // read-only context and never become the rendered artifact.
-      if (event.path === 'index.html' && typeof event.content === 'string') {
+      // `index.html` is the default artifact file, but some workspaces keep a
+      // small HTML placeholder that points at a sibling JSX/TSX source.
+      if (typeof event.path !== 'string' || typeof event.content !== 'string') return;
+      if (event.path === 'index.html') {
+        scheduleFs({ designId: event.designId, content: event.content });
+        return;
+      }
+      const state = useCodesignStore.getState();
+      const visible =
+        state.currentDesignId === event.designId || state.generatingDesignId === event.designId;
+      const currentSource = visible ? state.previewHtml : state.previewHtmlByDesign[event.designId];
+      if (!currentSource) return;
+      const referencedPath = resolveReferencedWorkspacePreviewPath(currentSource, 'index.html');
+      if (referencedPath === event.path) {
         scheduleFs({ designId: event.designId, content: event.content });
       }
     };

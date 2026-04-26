@@ -3,7 +3,7 @@ import type { Design } from '@open-codesign/shared';
 import { Plus } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  resolveReferencedWorkspacePreviewPath,
+  hasWorkspaceSourceReference,
   resolveWorkspacePreviewSource,
 } from '../../preview/workspace-source';
 
@@ -45,13 +45,14 @@ export interface DesignCardPreviewProps {
 // session) + localStorage (cold start after reopening the app). Keyed on
 // designId + updatedAt so a fresh generate invalidates automatically.
 const memCache = new Map<string, string>();
-const LS_PREFIX = 'designCardPreview:';
+const CACHE_VERSION = 'v2';
+const LS_PREFIX = `designCardPreview:${CACHE_VERSION}:`;
 const LS_MAX_CHARS = 300_000; // ~ 300 KB per entry ceiling; skip caching huge HTML
 const LS_MAX_ENTRIES = 40;
 const MEM_MAX_ENTRIES = 40;
 
 function cacheKey(id: string, updatedAt: string): string {
-  return `${id}:${updatedAt}`;
+  return `${CACHE_VERSION}:${id}:${updatedAt}`;
 }
 
 // Map preserves insertion order, so delete+set on access makes the eviction
@@ -115,10 +116,6 @@ function pruneOldestCacheEntriesIfNeeded(): void {
   } catch {
     /* noop */
   }
-}
-
-function hasWorkspaceSourceReference(source: string): boolean {
-  return resolveReferencedWorkspacePreviewPath(source, 'index.html') !== null;
 }
 
 export function DesignCardPreview({ design }: DesignCardPreviewProps) {
@@ -211,6 +208,7 @@ export function DesignCardPreview({ design }: DesignCardPreviewProps) {
           source,
           path: 'index.html',
           read: window.codesign?.files?.read,
+          requireReferencedSource: hasWorkspaceSourceReference(source),
         });
       })
       .then((result) => {

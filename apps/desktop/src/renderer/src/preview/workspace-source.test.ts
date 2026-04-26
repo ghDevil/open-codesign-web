@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  hasWorkspaceSourceReference,
   readWorkspacePreviewSource,
   resolveReferencedWorkspacePreviewPath,
   resolveWorkspacePreviewSource,
@@ -27,6 +28,15 @@ describe('workspace preview source resolution', () => {
       resolveReferencedWorkspacePreviewPath(
         'const marker = "<!-- artifact source lives in other.jsx -->";',
         'App.jsx',
+      ),
+    ).toBeNull();
+  });
+
+  it('does not resolve source-reference-looking strings from JSX saved as index.html', () => {
+    expect(
+      resolveReferencedWorkspacePreviewPath(
+        'const marker = "<!-- artifact source lives in other.jsx -->";\nfunction App(){ return <main>{marker}</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);',
+        'index.html',
       ),
     ).toBeNull();
   });
@@ -60,5 +70,18 @@ describe('workspace preview source resolution', () => {
       path: 'index.html',
       content: '<!doctype html><body><!-- artifact source lives in index.jsx --></body>',
     });
+  });
+
+  it('can require referenced source resolution for persistence/export paths', async () => {
+    const source = '<!doctype html><body><!-- artifact source lives in index.jsx --></body>';
+
+    expect(hasWorkspaceSourceReference(source)).toBe(true);
+    await expect(
+      resolveWorkspacePreviewSource({
+        designId: 'd1',
+        source,
+        requireReferencedSource: true,
+      }),
+    ).rejects.toThrow(/Cannot resolve referenced preview source/);
   });
 });

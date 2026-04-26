@@ -534,6 +534,57 @@ describe('useCodesignStore design management', () => {
     expect(state.generatingDesignId).toBe('design-a');
   });
 
+  it('refreshes the current design when selecting it again from the hub', async () => {
+    const designId = 'design-current-refresh';
+    const placeholder =
+      '<!doctype html><html><body><!-- artifact source lives in index.jsx --></body></html>';
+    const jsxSource =
+      'function App(){ return <main id="fresh-current">Fresh</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);';
+
+    vi.stubGlobal('window', {
+      codesign: {
+        files: {
+          read: vi.fn(async (_id: string, path: string) => ({
+            path,
+            content: path === 'index.jsx' ? jsxSource : placeholder,
+          })),
+        },
+        snapshots: {
+          list: vi.fn(() =>
+            Promise.resolve([
+              {
+                schemaVersion: 1,
+                id: 'snap-1',
+                designId,
+                parentId: null,
+                type: 'initial',
+                prompt: null,
+                artifactType: 'html',
+                artifactSource: placeholder,
+                createdAt: '2024-01-01T00:00:00.000Z',
+              },
+            ]),
+          ),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      currentDesignId: designId,
+      previewHtml: placeholder,
+      previewHtmlByDesign: { [designId]: placeholder },
+      recentDesignIds: [designId],
+      designsViewOpen: true,
+    });
+
+    await useCodesignStore.getState().switchDesign(designId);
+
+    expect(useCodesignStore.getState().designsViewOpen).toBe(false);
+    await vi.waitFor(() => expect(useCodesignStore.getState().previewHtml).toBe(jsxSource));
+    expect(useCodesignStore.getState().previewHtmlByDesign[designId]).toBe(jsxSource);
+  });
+
   it('blocks softDeleteDesign while a generation is running so applyGenerateSuccess cannot leak into a stale design', async () => {
     const softDeleteDesign = vi.fn(() => Promise.resolve());
     vi.stubGlobal('window', {
@@ -732,6 +783,95 @@ describe('useCodesignStore artifact persistence', () => {
     expect(create.mock.calls[0]?.[0]).toMatchObject({
       artifactSource: jsxSource,
       prompt: 'make a messaging screen',
+    });
+    expect(useCodesignStore.getState().previewHtml).toBe(jsxSource);
+  });
+
+  it('skips snapshot persistence when a referenced workspace source cannot be read', async () => {
+    const designId = 'design-missing-source';
+    const placeholder =
+      '<!doctype html><html><body><!-- artifact source lives in index.jsx --></body></html>';
+    const create = vi.fn();
+
+    vi.stubGlobal('window', {
+      codesign: {
+        files: {
+          read: vi.fn(async () => {
+            throw new Error('index.jsx is missing');
+          }),
+        },
+        snapshots: {
+          list: vi.fn(() => Promise.resolve([])),
+          create,
+          listDesigns: vi.fn(() => Promise.resolve([])),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      currentDesignId: designId,
+      previewHtml: placeholder,
+      chatMessages: [
+        {
+          schemaVersion: 1,
+          id: 1,
+          designId,
+          seq: 1,
+          kind: 'user',
+          payload: { text: 'make a dashboard' },
+          snapshotId: null,
+          createdAt: '2024-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    await useCodesignStore.getState().persistAgentRunSnapshot({ designId });
+
+    expect(create).not.toHaveBeenCalled();
+    expect(useCodesignStore.getState().previewHtml).toBe(placeholder);
+    expect(useCodesignStore.getState().toasts.at(-1)).toMatchObject({
+      variant: 'error',
+      description: 'index.jsx is missing',
+    });
+  });
+
+  it('resolves referenced workspace source before exporting', async () => {
+    const designId = 'design-export-source';
+    const placeholder =
+      '<!doctype html><html><body><!-- artifact source lives in index.jsx --></body></html>';
+    const jsxSource =
+      'function App(){ return <main id="export-source">Export</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);';
+    const exportFile = vi.fn((_input: unknown) =>
+      Promise.resolve({ status: 'saved', path: '/tmp/export.html' }),
+    );
+
+    vi.stubGlobal('window', {
+      codesign: {
+        files: {
+          read: vi.fn(async (_id: string, path: string) => ({
+            path,
+            content: path === 'index.jsx' ? jsxSource : placeholder,
+          })),
+        },
+        export: exportFile,
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      currentDesignId: designId,
+      previewHtml: placeholder,
+      previewHtmlByDesign: { [designId]: placeholder },
+      recentDesignIds: [designId],
+    });
+
+    await useCodesignStore.getState().exportActive('html');
+
+    expect(exportFile).toHaveBeenCalledOnce();
+    expect(exportFile.mock.calls[0]?.[0]).toMatchObject({
+      format: 'html',
+      htmlContent: jsxSource,
     });
     expect(useCodesignStore.getState().previewHtml).toBe(jsxSource);
   });

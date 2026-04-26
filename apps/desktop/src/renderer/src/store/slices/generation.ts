@@ -1,6 +1,10 @@
 import type { CommentScope, LocalInputFile, OnboardingState } from '@open-codesign/shared';
 import type { CodesignApi, ExportFormat } from '../../../../preload/index.js';
 import { recordAction } from '../../lib/action-timeline.js';
+import {
+  hasWorkspaceSourceReference,
+  resolveWorkspacePreviewSource,
+} from '../../preview/workspace-source.js';
 import type { CodesignState } from '../../store.js';
 import { modelRef, newId, normalizeReferenceUrl, tr, uniqueFiles } from '../lib/locale.js';
 import { finishIfCurrent, isReadyConfig } from '../lib/ready-config.js';
@@ -744,11 +748,37 @@ export function makeGenerationSlice(set: SetState, get: GetState): GenerationSli
         return;
       }
       try {
+        const designId = get().currentDesignId;
+        const referencesWorkspaceSource = hasWorkspaceSourceReference(html);
+        const resolved =
+          designId !== null
+            ? await resolveWorkspacePreviewSource({
+                designId,
+                source: html,
+                path: 'index.html',
+                read: window.codesign.files?.read,
+                requireReferencedSource: referencesWorkspaceSource,
+              })
+            : { content: html, path: 'index.html' };
+        const htmlContent = resolved.content;
+        if (designId !== null && htmlContent !== html) {
+          const pool = recordPreviewInPool(
+            get().previewHtmlByDesign,
+            get().recentDesignIds,
+            designId,
+            htmlContent,
+          );
+          set({
+            previewHtml: htmlContent,
+            previewHtmlByDesign: pool.cache,
+            recentDesignIds: pool.recent,
+          });
+        }
         const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         const ext = format === 'markdown' ? 'md' : format;
         const res = await window.codesign.export({
           format,
-          htmlContent: html,
+          htmlContent,
           defaultFilename: `codesign-${stamp}.${ext}`,
         });
         if (res.status === 'saved' && res.path) {

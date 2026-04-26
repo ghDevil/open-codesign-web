@@ -1,5 +1,8 @@
 import type { ChatAppendInput, ChatToolCallPayload } from '@open-codesign/shared';
-import { resolveWorkspacePreviewSource } from '../../preview/workspace-source.js';
+import {
+  hasWorkspaceSourceReference,
+  resolveWorkspacePreviewSource,
+} from '../../preview/workspace-source.js';
 import type { CodesignState } from '../../store.js';
 import { looksRunnableArtifact } from '../lib/artifact.js';
 import { tr } from '../lib/locale.js';
@@ -197,12 +200,25 @@ export function makeChatSlice(set: SetState, get: GetState): ChatSliceActions {
       if (state.currentDesignId !== designId) return;
       const html = state.previewHtml;
       if (!html || html.trim().length === 0) return;
-      const resolved = await resolveWorkspacePreviewSource({
-        designId,
-        source: html,
-        path: 'index.html',
-        read: window.codesign.files?.read,
-      }).catch(() => ({ content: html, path: 'index.html' }));
+      const referencesWorkspaceSource = hasWorkspaceSourceReference(html);
+      let resolved: { content: string; path: string };
+      try {
+        resolved = await resolveWorkspacePreviewSource({
+          designId,
+          source: html,
+          path: 'index.html',
+          read: window.codesign.files?.read,
+          requireReferencedSource: referencesWorkspaceSource,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : tr('errors.unknown');
+        get().pushToast({
+          variant: 'error',
+          title: tr('projects.notifications.snapshotSkipped'),
+          description: msg,
+        });
+        return;
+      }
       if (get().currentDesignId !== designId) return;
       const artifactContent = resolved.content;
       if (artifactContent !== html) {
