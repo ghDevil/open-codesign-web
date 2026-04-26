@@ -28,7 +28,7 @@ export interface RunPreviewOptions {
   workspaceRoot: string;
 }
 
-const LOAD_TIMEOUT_MS = 5000;
+const LOAD_TIMEOUT_MS = 15_000;
 const SETTLE_AFTER_LOAD_MS = 800;
 const MAX_CONSOLE_ENTRIES = 50;
 const MAX_ASSET_ERRORS = 20;
