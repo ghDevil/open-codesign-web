@@ -29,7 +29,11 @@ const EXTERNAL = [
   'better-sqlite3',
   '@mariozechner/pi-ai',
   '@mariozechner/pi-agent-core',
+  'cors',
   'electron',
+  'express',
+  'multer',
+  'smol-toml',
 ];
 
 await build({
@@ -43,6 +47,9 @@ await build({
   plugins: [rawPlugin],
   sourcemap: true,
   logLevel: 'info',
+  banner: {
+    js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);",
+  },
   // Allow esbuild to resolve workspace packages via the monorepo node_modules
   nodePaths: [join(__dirname, '../../node_modules'), join(__dirname, 'node_modules')],
 });
