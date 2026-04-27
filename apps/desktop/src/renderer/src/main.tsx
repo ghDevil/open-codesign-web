@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './index.css';
 import { installRendererLogBridge } from './lib/renderer-logger';
+import './lib/web-codesign';
 
 // Install as early as possible so errors during bootstrap are captured.
 installRendererLogBridge();

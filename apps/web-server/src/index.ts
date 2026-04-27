@@ -55,17 +55,27 @@ import { buildAuthHeadersForWire } from './auth-headers.js';
 import {
   createDesign,
   createSnapshot,
+  createComment,
+  deleteComment,
   deleteSnapshot,
   duplicateDesign,
   getDesign,
   getSnapshot,
+  listChatMessages,
+  listComments,
   listDesigns,
+  listPendingEdits,
   listSnapshots,
+  markCommentsApplied,
   normalizeDesignFilePath,
   renameDesign,
+  seedChatFromSnapshots,
   setDesignThumbnail,
   softDeleteDesign,
+  updateChatToolCallStatus,
+  updateComment,
   upsertDesignFile,
+  appendChatMessage,
 } from './db-queries.js';
 import { scanDesignSystem } from './design-system.js';
 import {
@@ -494,11 +504,22 @@ app.get('/api/settings/providers', (req, res) => {
   try {
     const cfg = getCachedConfig();
     if (!cfg) return res.json([]);
-    const rows = Object.values(cfg.providers).map((p) => ({
-      ...p,
-      hasKey: cfg.secrets[p.id] !== undefined,
-      isActive: p.id === cfg.activeProvider,
-    }));
+    const rows = Object.values(cfg.providers).map((p) => {
+      const secret = cfg.secrets[p.id];
+      return {
+        provider: p.id,
+        maskedKey: secret?.mask ?? '',
+        baseUrl: p.baseUrl ?? null,
+        isActive: p.id === cfg.activeProvider,
+        label: p.name,
+        name: p.name,
+        builtin: p.builtin,
+        wire: p.wire,
+        defaultModel: p.defaultModel,
+        hasKey: secret !== undefined || p.requiresApiKey === false,
+        ...(p.reasoningLevel ? { reasoningLevel: p.reasoningLevel } : {}),
+      };
+    });
     res.json(rows);
   } catch (err) {
     handleError(res, err);
@@ -535,6 +556,118 @@ app.post('/api/config/list-endpoint-models', async (req, res) => {
     res.json({ ok: true, models: ids });
   } catch (err) {
     res.json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+async function testStoredProvider(providerId: string): Promise<
+  | { ok: true }
+  | { ok: false; code: string; message: string; hint: string }
+> {
+  const cfg = getCachedConfig();
+  if (!cfg) {
+    return {
+      ok: false,
+      code: ERROR_CODES.CONFIG_MISSING,
+      message: 'No configuration loaded',
+      hint: 'Complete onboarding first.',
+    };
+  }
+  const entry = cfg.providers[providerId];
+  if (!entry) {
+    return {
+      ok: false,
+      code: ERROR_CODES.IPC_NOT_FOUND,
+      message: `Provider "${providerId}" not found`,
+      hint: 'Refresh settings and try again.',
+    };
+  }
+  if (!entry.baseUrl) {
+    return {
+      ok: false,
+      code: ERROR_CODES.PROVIDER_BASE_URL_MISSING,
+      message: `Provider "${providerId}" is missing a base URL`,
+      hint: 'Open provider settings and add a base URL.',
+    };
+  }
+
+  const apiKey = await resolveApiKeyWithKeylessFallback(
+    providerId,
+    entry.requiresApiKey === false,
+    {
+      getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
+      getApiKeyForProvider,
+    },
+  );
+
+  let url: string;
+  try {
+    url = modelsEndpointUrl(entry.baseUrl, entry.wire);
+  } catch (err) {
+    return {
+      ok: false,
+      code: 'URL',
+      message: err instanceof Error ? err.message : String(err),
+      hint: 'Check the provider base URL and wire.',
+    };
+  }
+
+  try {
+    const headers = buildAuthHeadersForWire(entry.wire, apiKey, entry.httpHeaders, entry.baseUrl);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        code: String(response.status),
+        message: `HTTP ${response.status}`,
+        hint: 'Verify your key, billing, and endpoint configuration.',
+      };
+    }
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      code: 'NETWORK',
+      message: err instanceof Error ? err.message : String(err),
+      hint: 'Check that the endpoint is reachable from the server.',
+    };
+  }
+}
+
+app.get('/api/models/provider/:id', (req, res) => {
+  try {
+    const cfg = getCachedConfig();
+    if (!cfg) return res.json({ ok: true, models: [] });
+    const entry = cfg.providers[req.params.id];
+    if (!entry) return res.json({ ok: true, models: [] });
+    const hinted = [
+      ...(entry.modelsHint ?? []),
+      ...(entry.defaultModel ? [entry.defaultModel] : []),
+    ].filter((value, index, arr) => value && arr.indexOf(value) === index);
+    res.json({ ok: true, models: hinted });
+  } catch (err) {
+    res.json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post('/api/connection/test-active', async (_req, res) => {
+  try {
+    const cfg = getCachedConfig();
+    if (!cfg) return sendError(res, 503, 'No config', ERROR_CODES.CONFIG_MISSING);
+    res.json(await testStoredProvider(cfg.activeProvider));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post('/api/connection/test-provider/:id', async (req, res) => {
+  try {
+    res.json(await testStoredProvider(req.params.id));
+  } catch (err) {
+    handleError(res, err);
   }
 });
 
@@ -824,7 +957,7 @@ app.post('/api/apply-comment', async (req, res) => {
     };
     const cfg = getCachedConfig();
     if (!cfg) return sendError(res, 503, 'No config', ERROR_CODES.CONFIG_MISSING);
-    const hint = payload.model ?? { provider: cfg.provider, modelId: cfg.modelPrimary };
+    const hint = payload.model ?? { provider: cfg.activeProvider, modelId: cfg.activeModel };
     const active = resolveActiveModel(cfg, hint as never);
     const apiKey = await resolveApiKeyWithKeylessFallback(
       active.model.provider,
@@ -900,7 +1033,7 @@ app.patch('/api/designs/:id/rename', (req, res) => {
   try {
     const { name } = req.body as { name: string };
     renameDesign(getDb(), req.params.id, name);
-    res.json({ ok: true });
+    res.json(getDesign(getDb(), req.params.id));
   } catch (err) {
     handleError(res, err);
   }
@@ -910,7 +1043,7 @@ app.patch('/api/designs/:id/thumbnail', (req, res) => {
   try {
     const { thumbnail } = req.body as { thumbnail: string };
     setDesignThumbnail(getDb(), req.params.id, thumbnail);
-    res.json({ ok: true });
+    res.json(getDesign(getDb(), req.params.id));
   } catch (err) {
     handleError(res, err);
   }
@@ -919,7 +1052,7 @@ app.patch('/api/designs/:id/thumbnail', (req, res) => {
 app.delete('/api/designs/:id', (req, res) => {
   try {
     softDeleteDesign(getDb(), req.params.id);
-    res.json({ ok: true });
+    res.json(getDesign(getDb(), req.params.id));
   } catch (err) {
     handleError(res, err);
   }
@@ -966,6 +1099,122 @@ app.delete('/api/snapshots/:id', (req, res) => {
   try {
     deleteSnapshot(getDb(), req.params.id);
     res.json({ ok: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ── Chat ─────────────────────────────────────────────────────────────────────
+
+app.get('/api/designs/:id/chat', (req, res) => {
+  try {
+    res.json(listChatMessages(getDb(), req.params.id));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post('/api/designs/:id/chat/seed-from-snapshots', (req, res) => {
+  try {
+    const inserted = seedChatFromSnapshots(getDb(), req.params.id);
+    res.json({ inserted });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post('/api/designs/:id/chat', (req, res) => {
+  try {
+    const row = appendChatMessage(getDb(), {
+      designId: req.params.id,
+      kind: req.body.kind,
+      payload: req.body.payload,
+      snapshotId: req.body.snapshotId ?? null,
+    });
+    res.json(row);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.patch('/api/designs/:id/chat/:seq/tool-status', (req, res) => {
+  try {
+    updateChatToolCallStatus(
+      getDb(),
+      req.params.id,
+      Number.parseInt(req.params.seq, 10),
+      req.body.status,
+      req.body.errorMessage,
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ── Comments ─────────────────────────────────────────────────────────────────
+
+app.get('/api/designs/:id/comments', (req, res) => {
+  try {
+    const snapshotId =
+      typeof req.query['snapshotId'] === 'string' ? String(req.query['snapshotId']) : undefined;
+    res.json(listComments(getDb(), req.params.id, snapshotId));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get('/api/designs/:id/comments/pending-edits', (req, res) => {
+  try {
+    res.json(listPendingEdits(getDb(), req.params.id));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post('/api/designs/:id/comments', (req, res) => {
+  try {
+    const row = createComment(getDb(), {
+      designId: req.params.id,
+      snapshotId: req.body.snapshotId,
+      kind: req.body.kind,
+      selector: req.body.selector,
+      tag: req.body.tag,
+      outerHTML: req.body.outerHTML,
+      rect: req.body.rect,
+      text: req.body.text,
+      ...(req.body.scope ? { scope: req.body.scope } : {}),
+      ...(req.body.parentOuterHTML ? { parentOuterHTML: req.body.parentOuterHTML } : {}),
+    });
+    res.json(row);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.patch('/api/comments/:id', (req, res) => {
+  try {
+    const updated = updateComment(getDb(), req.params.id, {
+      ...(req.body.text !== undefined ? { text: req.body.text } : {}),
+      ...(req.body.status !== undefined ? { status: req.body.status } : {}),
+    });
+    res.json(updated);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.delete('/api/comments/:id', (req, res) => {
+  try {
+    res.json({ removed: deleteComment(getDb(), req.params.id) });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post('/api/comments/mark-applied', (req, res) => {
+  try {
+    res.json(markCommentsApplied(getDb(), req.body.ids ?? [], req.body.snapshotId));
   } catch (err) {
     handleError(res, err);
   }
@@ -1032,11 +1281,13 @@ app.get('/api/codex/status', async (_req, res) => {
   }
 });
 
-app.post('/api/codex/start-login', (_req, res) => {
+app.post('/api/codex/start-login', (req, res) => {
   try {
     const pkce = generatePkce();
     const state = randomUUID();
-    const redirectUri = `http://localhost:${PORT}/api/codex/callback`;
+    const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? req.protocol;
+    const host = req.headers.host;
+    const redirectUri = `${proto}://${host}/api/codex/callback`;
     const url = buildAuthorizeUrl({ challenge: pkce.challenge, state, redirectUri });
     pendingCodexPkce = { verifier: pkce.verifier, state, redirectUri };
     res.json({ url });
