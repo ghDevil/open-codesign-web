@@ -9,6 +9,7 @@ ENV HUSKY=0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/ packages/
 COPY apps/desktop/package.json apps/desktop/
+COPY apps/desktop/scripts/ apps/desktop/scripts/
 COPY apps/web-server/package.json apps/web-server/
 
 RUN pnpm install --frozen-lockfile
