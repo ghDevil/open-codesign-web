@@ -241,56 +241,9 @@ async function liveTestEndpoint(input: {
 }
 
 async function beginCodexLogin(): Promise<CodexOAuthStatus> {
-  codexLoginCancelled = false;
-  const start = await apiJson<{ url: string }>('/api/codex/start-login', { method: 'POST' });
-  codexLoginPopup = window.open(
-    start.url,
-    'open-codesign-codex-login',
-    'popup=yes,width=560,height=760',
+  throw new Error(
+    'ChatGPT subscription sign-in is not supported in the hosted web app yet. OpenAI Codex OAuth for this app uses a localhost desktop callback flow. Use the desktop app for ChatGPT subscription login, or configure an API-key provider such as OpenAI or OpenRouter in Settings.',
   );
-  if (!codexLoginPopup) {
-    throw new Error('Failed to open login popup. Check your popup blocker.');
-  }
-
-  return new Promise<CodexOAuthStatus>((resolve, reject) => {
-    const poll = window.setInterval(() => {
-      if (codexLoginCancelled) {
-        window.clearInterval(poll);
-        codexLoginPopup?.close();
-        codexLoginPopup = null;
-        reject(new Error('Codex login cancelled'));
-        return;
-      }
-
-      if (codexLoginPopup?.closed) {
-        void apiJson<CodexOAuthStatus>('/api/codex/status')
-          .then((status) => {
-            window.clearInterval(poll);
-            codexLoginPopup = null;
-            if (status.loggedIn) resolve(status);
-            else reject(new Error('Codex OAuth callback aborted'));
-          })
-          .catch((err) => {
-            window.clearInterval(poll);
-            codexLoginPopup = null;
-            reject(err);
-          });
-        return;
-      }
-
-      void apiJson<CodexOAuthStatus>('/api/codex/status')
-        .then((status) => {
-          if (!status.loggedIn) return;
-          window.clearInterval(poll);
-          codexLoginPopup?.close();
-          codexLoginPopup = null;
-          resolve(status);
-        })
-        .catch(() => {
-          // Ignore transient poll failures while the popup is active.
-        });
-    }, 1000);
-  });
 }
 
 function installWebCodesign(): void {
