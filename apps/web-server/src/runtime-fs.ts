@@ -1,0 +1,121 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { DESIGN_SKILLS, FRAME_TEMPLATES, type CoreLogger } from '@open-codesign/core';
+import type BetterSqlite3 from 'better-sqlite3';
+import { getDesign, normalizeDesignFilePath, upsertDesignFile } from './snapshots-db.js';
+
+interface Options {
+  db: BetterSqlite3.Database | null;
+  generationId: string;
+  designId: string | null;
+  previousHtml: string | null;
+  sendEvent: (event: Record<string, unknown>) => void;
+  logger: Pick<CoreLogger, 'error'>;
+}
+
+export function createRuntimeTextEditorFs({ db, generationId, designId, previousHtml, sendEvent, logger }: Options) {
+  const baseCtx = { designId: designId ?? '', generationId } as const;
+  const fsMap = new Map<string, string>();
+
+  if (previousHtml && previousHtml.trim().length > 0) {
+    fsMap.set('index.html', previousHtml);
+  }
+  for (const [name, content] of FRAME_TEMPLATES) {
+    fsMap.set(`frames/${name}`, content);
+  }
+  for (const [name, content] of DESIGN_SKILLS) {
+    fsMap.set(`skills/${name}`, content);
+  }
+
+  function resolveLocalAssetRefs(source: string): string {
+    let resolved = source;
+    for (const [path, content] of fsMap.entries()) {
+      if (!path.startsWith('assets/') || !content.startsWith('data:')) continue;
+      resolved = resolved.replace(new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), content);
+    }
+    return resolved;
+  }
+
+  function emitFsUpdated(filePath: string, content: string): void {
+    if (designId === null) return;
+    const resolved = filePath === 'index.html' ? resolveLocalAssetRefs(content) : content;
+    sendEvent({ ...baseCtx, type: 'fs_updated', path: filePath, content: resolved } as Record<string, unknown>);
+  }
+
+  function emitIndexIfAssetChanged(filePath: string): void {
+    if (!filePath.startsWith('assets/')) return;
+    const index = fsMap.get('index.html');
+    if (index !== undefined) emitFsUpdated('index.html', index);
+  }
+
+  async function persistMutation(filePath: string, content: string): Promise<void> {
+    if (designId === null || db === null) return;
+    const normalizedPath = normalizeDesignFilePath(filePath);
+    const design = getDesign(db, designId) as { workspace_path?: string | null } | null;
+    if (design?.workspace_path) {
+      const destinationPath = join(design.workspace_path, normalizedPath);
+      try {
+        await mkdir(dirname(destinationPath), { recursive: true });
+        await writeFile(destinationPath, content, 'utf8');
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error('runtime.fs.writeThrough.fail', { designId, filePath, workspacePath: design.workspace_path, message });
+        throw new Error(`Workspace write-through failed for ${filePath}: ${message}`);
+      }
+    }
+    upsertDesignFile(db, designId, normalizedPath, content);
+  }
+
+  const fs = {
+    view(path: string) {
+      const content = fsMap.get(path);
+      if (content === undefined) return null;
+      return { content, numLines: content.split('\n').length };
+    },
+    async create(path: string, content: string) {
+      await persistMutation(path, content);
+      fsMap.set(path, content);
+      emitFsUpdated(path, content);
+      emitIndexIfAssetChanged(path);
+      return { path };
+    },
+    async strReplace(path: string, oldStr: string, newStr: string) {
+      const current = fsMap.get(path);
+      if (current === undefined) throw new Error(`File not found: ${path}`);
+      const idx = current.indexOf(oldStr);
+      if (idx === -1) throw new Error(`old_str not found in ${path}`);
+      if (current.indexOf(oldStr, idx + oldStr.length) !== -1) throw new Error(`old_str is ambiguous in ${path}`);
+      const next = current.slice(0, idx) + newStr + current.slice(idx + oldStr.length);
+      await persistMutation(path, next);
+      fsMap.set(path, next);
+      emitFsUpdated(path, next);
+      emitIndexIfAssetChanged(path);
+      return { path };
+    },
+    async insert(path: string, line: number, text: string) {
+      const current = fsMap.get(path) ?? '';
+      const lines = current.split('\n');
+      const clamped = Math.max(0, Math.min(line, lines.length));
+      lines.splice(clamped, 0, text);
+      const next = lines.join('\n');
+      await persistMutation(path, next);
+      fsMap.set(path, next);
+      emitFsUpdated(path, next);
+      emitIndexIfAssetChanged(path);
+      return { path };
+    },
+    listDir(dir: string) {
+      const prefix = dir.length === 0 || dir === '.' ? '' : `${dir.replace(/\/+$/, '')}/`;
+      const entries = new Set<string>();
+      for (const p of fsMap.keys()) {
+        if (!p.startsWith(prefix)) continue;
+        const rest = p.slice(prefix.length);
+        const firstSegment = rest.split('/')[0];
+        if (firstSegment) entries.add(firstSegment);
+      }
+      return [...entries].sort();
+    },
+  };
+
+  return { fs, fsMap };
+}

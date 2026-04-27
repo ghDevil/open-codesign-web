@@ -1,0 +1,16 @@
+services:
+  open-codesign:
+    image: ghcr.io/ghdevil/open-codesign-web:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      DATA_DIR: /data/open-codesign
+      USE_AGENT_RUNTIME: '1'
+    volumes:
+      - open-codesign-data:/data/open-codesign
+    expose:
+      - '3000'
+
+volumes:
+  open-codesign-data:
