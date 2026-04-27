@@ -53,9 +53,10 @@ import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 
 import { buildAuthHeadersForWire } from './auth-headers.js';
 import {
+  appendChatMessage,
+  createComment,
   createDesign,
   createSnapshot,
-  createComment,
   deleteComment,
   deleteSnapshot,
   duplicateDesign,
@@ -75,7 +76,6 @@ import {
   updateChatToolCallStatus,
   updateComment,
   upsertDesignFile,
-  appendChatMessage,
 } from './db-queries.js';
 import { scanDesignSystem } from './design-system.js';
 import {
@@ -559,10 +559,9 @@ app.post('/api/config/list-endpoint-models', async (req, res) => {
   }
 });
 
-async function testStoredProvider(providerId: string): Promise<
-  | { ok: true }
-  | { ok: false; code: string; message: string; hint: string }
-> {
+async function testStoredProvider(
+  providerId: string,
+): Promise<{ ok: true } | { ok: false; code: string; message: string; hint: string }> {
   const cfg = getCachedConfig();
   if (!cfg) {
     return {

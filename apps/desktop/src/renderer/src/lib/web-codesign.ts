@@ -1,4 +1,8 @@
-import type { CodesignApi, CodexOAuthStatus, ImageGenerationSettingsView } from '../../../preload/index';
+import type {
+  CodesignApi,
+  CodexOAuthStatus,
+  ImageGenerationSettingsView,
+} from '../../../preload/index';
 
 const LOCALE_KEY = 'open-codesign.locale';
 const IMAGE_SETTINGS_KEY = 'open-codesign.image-generation';
@@ -217,8 +221,7 @@ async function liveTestEndpoint(input: {
   baseUrl: string;
   apiKey: string;
 }): Promise<
-  | { ok: true; modelCount: number; models: string[] }
-  | { ok: false; error: string; message: string }
+  { ok: true; modelCount: number; models: string[] } | { ok: false; error: string; message: string }
 > {
   const result = await apiJson<{ ok: true; models: string[] } | { ok: false; error: string }>(
     '/api/config/list-endpoint-models',
@@ -332,8 +335,7 @@ function installWebCodesign(): void {
         NonNullable<CodesignApi['clearDesignSystem']>
       >,
     export: async ({ format, htmlContent, defaultFilename }) => {
-      const filename =
-        defaultFilename ?? `open-codesign.${format === 'markdown' ? 'md' : format}`;
+      const filename = defaultFilename ?? `open-codesign.${format === 'markdown' ? 'md' : format}`;
       if (format === 'html') {
         downloadText(filename, htmlContent, 'text/html;charset=utf-8');
         return { status: 'saved', path: filename };
@@ -358,7 +360,7 @@ function installWebCodesign(): void {
     checkForUpdates: async () => undefined,
     downloadUpdate: async () => undefined,
     installUpdate: async () => undefined,
-    onUpdateAvailable: ((() => () => {}) as unknown) as CodesignApi['onUpdateAvailable'],
+    onUpdateAvailable: (() => () => {}) as unknown as CodesignApi['onUpdateAvailable'],
     onboarding: {
       getState: () => apiJson('/api/onboarding/state'),
       validateKey: (input) =>
@@ -399,8 +401,7 @@ function installWebCodesign(): void {
     config: {
       setProviderAndModels: (input) =>
         apiJson('/api/config/set-provider-and-models', { method: 'POST', body: input }),
-      addProvider: (input) =>
-        apiJson('/api/config/add-provider', { method: 'POST', body: input }),
+      addProvider: (input) => apiJson('/api/config/add-provider', { method: 'POST', body: input }),
       updateProvider: (input) =>
         apiJson('/api/config/update-provider', { method: 'POST', body: input }),
       removeProvider: (id: string) =>
@@ -534,7 +535,8 @@ function installWebCodesign(): void {
           method: 'POST',
           body: input,
         }),
-      delete: (id: string) => apiJson(`/api/snapshots/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(() => {}),
+      delete: (id: string) =>
+        apiJson(`/api/snapshots/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(() => {}),
       pickWorkspaceFolder: async () => null,
       updateWorkspace: async (
         designId: string,

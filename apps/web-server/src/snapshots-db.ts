@@ -282,8 +282,9 @@ export function normalizeDesignFilePath(p: string): string {
 
 export function listDesigns(db: BetterSqlite3.Database) {
   return (
-    db.prepare('SELECT * FROM designs WHERE deleted_at IS NULL ORDER BY updated_at DESC').all() as
-      DesignRowDb[]
+    db
+      .prepare('SELECT * FROM designs WHERE deleted_at IS NULL ORDER BY updated_at DESC')
+      .all() as DesignRowDb[]
   ).map(rowToDesign);
 }
 
@@ -329,7 +330,9 @@ export function softDeleteDesign(db: BetterSqlite3.Database, id: string): void {
 }
 
 export function duplicateDesign(db: BetterSqlite3.Database, id: string): Design | null {
-  const original = db.prepare('SELECT * FROM designs WHERE id = ?').get(id) as DesignRowDb | undefined;
+  const original = db.prepare('SELECT * FROM designs WHERE id = ?').get(id) as
+    | DesignRowDb
+    | undefined;
   if (!original) throw new Error(`Design ${id} not found`);
   const newId = uuid();
   const ts = now();
@@ -457,7 +460,8 @@ export function updateChatToolCallStatus(
     .get(designId, seq) as ChatMessageRowDb | undefined;
   if (!row) throw new Error(`Chat message ${designId}:${seq} not found`);
   const parsed = rowToChatMessage(row);
-  if (parsed.kind !== 'tool_call') throw new Error(`Chat message ${designId}:${seq} is not tool_call`);
+  if (parsed.kind !== 'tool_call')
+    throw new Error(`Chat message ${designId}:${seq} is not tool_call`);
   const prev = (parsed.payload ?? {}) as ChatToolCallPayload;
   const next: ChatToolCallPayload = {
     ...prev,
@@ -540,9 +544,13 @@ export function listComments(
   const rows = (
     snapshotId
       ? db
-          .prepare('SELECT * FROM comments WHERE design_id = ? AND snapshot_id = ? ORDER BY created_at ASC')
+          .prepare(
+            'SELECT * FROM comments WHERE design_id = ? AND snapshot_id = ? ORDER BY created_at ASC',
+          )
           .all(designId, snapshotId)
-      : db.prepare('SELECT * FROM comments WHERE design_id = ? ORDER BY created_at ASC').all(designId)
+      : db
+          .prepare('SELECT * FROM comments WHERE design_id = ? ORDER BY created_at ASC')
+          .all(designId)
   ) as CommentRowDb[];
   return rows.map(rowToComment);
 }
@@ -573,7 +581,9 @@ export function updateComment(
     values.push(patch.status);
   }
   if (fields.length === 0) {
-    const row = db.prepare('SELECT * FROM comments WHERE id = ?').get(id) as CommentRowDb | undefined;
+    const row = db.prepare('SELECT * FROM comments WHERE id = ?').get(id) as
+      | CommentRowDb
+      | undefined;
     return row ? rowToComment(row) : null;
   }
   values.push(id);
