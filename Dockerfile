@@ -40,6 +40,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/ packages/
 COPY apps/web-server/package.json apps/web-server/
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/web-server/node_modules ./apps/web-server/node_modules
 
 # Copy built artifacts
 COPY --from=server-build /app/apps/web-server/dist ./apps/web-server/dist
