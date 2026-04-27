@@ -55,6 +55,7 @@ import {
   createSnapshot,
   initInMemoryDb,
   updateDesignWorkspace,
+  viewDesignFile,
 } from './snapshots-db';
 import {
   registerSnapshotsIpc,
@@ -953,6 +954,34 @@ describe('snapshots:v1:workspace:open', () => {
       throw new Error('expected throw');
     } catch (err) {
       expect((err as CodesignError).code).toBe('IPC_BAD_INPUT');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// codesign:files:v1:write
+// ---------------------------------------------------------------------------
+
+describe('codesign:files:v1:write', () => {
+  it('writes through to the bound workspace and mirrors design_files', async () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'codesign-files-write-'));
+    try {
+      const design = createDesign(db, 'Writable');
+      updateDesignWorkspace(db, design.id, workspace);
+      const content =
+        'const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{"accent":"#f97316"}/*EDITMODE-END*/;';
+
+      const result = (await callAsync(
+        'codesign:files:v1:write',
+        v1({ designId: design.id, path: 'index.html', content }),
+      )) as { path: string; content: string };
+
+      expect(result.path).toBe('index.html');
+      expect(result.content).toBe(content);
+      expect(readFileSync(path.join(workspace, 'index.html'), 'utf8')).toBe(content);
+      expect(viewDesignFile(db, design.id, 'index.html')?.content).toBe(content);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
     }
   });
 });
