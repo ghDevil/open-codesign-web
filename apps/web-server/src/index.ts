@@ -4,15 +4,30 @@
  * Agent event streaming uses Server-Sent Events instead of IPC.
  */
 
-import { createRequire } from 'node:module';
-import { basename, dirname, join } from 'node:path';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import cors from 'cors';
-import express, { type Request, type Response, type NextFunction } from 'express';
-import multer from 'multer';
-import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
+import {
+  type CoreLogger,
+  DESIGN_SKILLS,
+  FRAME_TEMPLATES,
+  applyComment,
+  generate,
+  generateTitle,
+  generateViaAgent,
+} from '@open-codesign/core';
+import type { AgentEvent } from '@open-codesign/core';
+import { pingProvider } from '@open-codesign/providers';
+import {
+  CodexTokenStore,
+  type StoredCodexAuth,
+  buildAuthorizeUrl,
+  decodeJwtClaims,
+  exchangeCode,
+  generatePkce,
+} from '@open-codesign/providers/codex';
 import {
   BUILTIN_PROVIDERS,
   CHATGPT_CODEX_PROVIDER_ID,
@@ -30,42 +45,41 @@ import {
   parseConfigFlexible,
   toPersistedV3,
 } from '@open-codesign/shared';
-import {
-  DESIGN_SKILLS,
-  FRAME_TEMPLATES,
-  type CoreLogger,
-  generate,
-  generateTitle,
-  generateViaAgent,
-  applyComment,
-} from '@open-codesign/core';
-import type { AgentEvent } from '@open-codesign/core';
-import { pingProvider } from '@open-codesign/providers';
-import {
-  CodexTokenStore,
-  type StoredCodexAuth,
-  buildAuthorizeUrl,
-  exchangeCode,
-  generatePkce,
-  decodeJwtClaims,
-} from '@open-codesign/providers/codex';
-import BetterSqlite3 from 'better-sqlite3';
+import type BetterSqlite3 from 'better-sqlite3';
+import cors from 'cors';
+import express, { type Request, type Response, type NextFunction } from 'express';
+import multer from 'multer';
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 
+import { buildAuthHeadersForWire } from './auth-headers.js';
+import {
+  createDesign,
+  createSnapshot,
+  deleteSnapshot,
+  duplicateDesign,
+  getDesign,
+  getSnapshot,
+  listDesigns,
+  listSnapshots,
+  normalizeDesignFilePath,
+  renameDesign,
+  setDesignThumbnail,
+  softDeleteDesign,
+  upsertDesignFile,
+} from './db-queries.js';
+import { scanDesignSystem } from './design-system.js';
+import {
+  armGenerationTimeout,
+  cancelGenerationRequest,
+  extractGenerationTimeoutError,
+} from './generation-ipc.js';
+import { buildSecretRef, decryptSecret, migrateSecrets } from './keychain.js';
+import { readPreferences, writePreferences } from './preferences.js';
+import { resolveActiveModel } from './provider-settings.js';
 // ── Re-use logic from desktop main process (no electron deps) ─────────────────
 import { resolveActiveApiKey, resolveApiKeyWithKeylessFallback } from './resolve-api-key.js';
-import { armGenerationTimeout, cancelGenerationRequest, extractGenerationTimeoutError } from './generation-ipc.js';
-import { buildSecretRef, decryptSecret, migrateSecrets } from './keychain.js';
-import { initSnapshotsDb } from './snapshots-db.js';
 import { createRuntimeTextEditorFs } from './runtime-fs.js';
-import {
-  createDesign, createSnapshot, deleteSnapshot, duplicateDesign, getDesign,
-  getSnapshot, listDesigns, listSnapshots, renameDesign, setDesignThumbnail, softDeleteDesign,
-  upsertDesignFile, normalizeDesignFilePath,
-} from './db-queries.js';
-import { readPreferences, writePreferences } from './preferences.js';
-import { scanDesignSystem } from './design-system.js';
-import { buildAuthHeadersForWire } from './auth-headers.js';
-import { resolveActiveModel } from './provider-settings.js';
+import { initSnapshotsDb } from './snapshots-db.js';
 
 // Web-safe no-op runtime verifier (no headless browser in Node)
 function makeRuntimeVerifier() {
@@ -82,7 +96,7 @@ interface AgentStreamEvent {
 
 const _require = createRequire(import.meta.url);
 
-const PORT = parseInt(process.env['PORT'] ?? '3000', 10);
+const PORT = Number.parseInt(process.env['PORT'] ?? '3000', 10);
 const USE_AGENT_RUNTIME = process.env['USE_AGENT_RUNTIME'] !== '0';
 const DATA_DIR = process.env['DATA_DIR'] ?? join(homedir(), '.config', 'open-codesign');
 
@@ -150,13 +164,20 @@ function getApiKeyForProvider(provider: string): string {
 }
 
 function toState(cfg: Config | null): OnboardingState {
-  if (cfg === null) return { hasKey: false, provider: null, modelPrimary: null, baseUrl: null, designSystem: null };
+  if (cfg === null)
+    return { hasKey: false, provider: null, modelPrimary: null, baseUrl: null, designSystem: null };
   const active = cfg.activeProvider;
   const ref = cfg.secrets[active];
   const entry = cfg.providers[active];
   const keyless = entry?.requiresApiKey === false;
   if (ref === undefined && !keyless) {
-    return { hasKey: false, provider: active, modelPrimary: null, baseUrl: null, designSystem: cfg.designSystem ?? null };
+    return {
+      hasKey: false,
+      provider: active,
+      modelPrimary: null,
+      baseUrl: null,
+      designSystem: cfg.designSystem ?? null,
+    };
   }
   return {
     hasKey: true,
@@ -207,7 +228,9 @@ app.use(express.json({ limit: '50mb' }));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 function sendError(res: Response, status: number, message: string, code?: string): void {
-  res.status(status).json({ error: { message, code: code ?? 'bad_request', type: 'invalid_request_error' } });
+  res
+    .status(status)
+    .json({ error: { message, code: code ?? 'bad_request', type: 'invalid_request_error' } });
 }
 
 function ipcErrorStatus(err: unknown): number {
@@ -215,7 +238,8 @@ function ipcErrorStatus(err: unknown): number {
     const c = err.code as string;
     if (c === ERROR_CODES.IPC_BAD_INPUT) return 400;
     if (c === ERROR_CODES.CONFIG_MISSING || c === ERROR_CODES.CONFIG_NOT_LOADED) return 503;
-    if (c === ERROR_CODES.PROVIDER_AUTH_MISSING || c === ERROR_CODES.PROVIDER_KEY_MISSING) return 401;
+    if (c === ERROR_CODES.PROVIDER_AUTH_MISSING || c === ERROR_CODES.PROVIDER_KEY_MISSING)
+      return 401;
     if (c === 'IPC_CONFLICT') return 409;
     if (c === 'IPC_DB_BUSY') return 503;
   }
@@ -247,9 +271,18 @@ app.get('/api/onboarding/state', (_req, res) => {
 
 app.post('/api/onboarding/validate-key', async (req, res) => {
   try {
-    const { provider, apiKey, baseUrl } = req.body as { provider: string; apiKey: string; baseUrl?: string };
+    const { provider, apiKey, baseUrl } = req.body as {
+      provider: string;
+      apiKey: string;
+      baseUrl?: string;
+    };
     if (!isSupportedOnboardingProvider(provider)) {
-      return sendError(res, 400, `Provider "${provider}" not supported`, ERROR_CODES.PROVIDER_NOT_SUPPORTED);
+      return sendError(
+        res,
+        400,
+        `Provider "${provider}" not supported`,
+        ERROR_CODES.PROVIDER_NOT_SUPPORTED,
+      );
     }
     const result = await pingProvider(provider, apiKey, baseUrl);
     res.json(result);
@@ -261,7 +294,13 @@ app.post('/api/onboarding/validate-key', async (req, res) => {
 app.post('/api/onboarding/save-key', async (req, res) => {
   try {
     const { provider, apiKey, modelPrimary, baseUrl } = req.body as Record<string, string>;
-    const state = await runSetProviderAndModels({ provider, apiKey, modelPrimary, baseUrl, setAsActive: true });
+    const state = await runSetProviderAndModels({
+      provider,
+      apiKey,
+      modelPrimary,
+      baseUrl,
+      setAsActive: true,
+    });
     res.json(state);
   } catch (err) {
     handleError(res, err);
@@ -270,7 +309,10 @@ app.post('/api/onboarding/save-key', async (req, res) => {
 
 app.post('/api/config/set-provider-and-models', async (req, res) => {
   try {
-    const { provider, apiKey, modelPrimary, baseUrl, setAsActive } = req.body as Record<string, unknown>;
+    const { provider, apiKey, modelPrimary, baseUrl, setAsActive } = req.body as Record<
+      string,
+      unknown
+    >;
     const state = await runSetProviderAndModels({
       provider: String(provider),
       apiKey: String(apiKey ?? ''),
@@ -286,9 +328,21 @@ app.post('/api/config/set-provider-and-models', async (req, res) => {
 
 app.post('/api/config/add-provider', async (req, res) => {
   try {
-    const { id, name, wire, baseUrl, apiKey, defaultModel, httpHeaders, queryParams, envKey, setAsActive } = req.body as Record<string, unknown>;
+    const {
+      id,
+      name,
+      wire,
+      baseUrl,
+      apiKey,
+      defaultModel,
+      httpHeaders,
+      queryParams,
+      envKey,
+      setAsActive,
+    } = req.body as Record<string, unknown>;
     const parsedWire = WireApiSchema.safeParse(wire);
-    if (!parsedWire.success) return sendError(res, 400, `Unsupported wire: ${wire}`, ERROR_CODES.IPC_BAD_INPUT);
+    if (!parsedWire.success)
+      return sendError(res, 400, `Unsupported wire: ${wire}`, ERROR_CODES.IPC_BAD_INPUT);
     const entry: ProviderEntry = {
       id: String(id),
       name: String(name),
@@ -296,8 +350,12 @@ app.post('/api/config/add-provider', async (req, res) => {
       wire: parsedWire.data,
       baseUrl: String(baseUrl),
       defaultModel: String(defaultModel),
-      ...(httpHeaders && typeof httpHeaders === 'object' ? { httpHeaders: httpHeaders as Record<string, string> } : {}),
-      ...(queryParams && typeof queryParams === 'object' ? { queryParams: queryParams as Record<string, string> } : {}),
+      ...(httpHeaders && typeof httpHeaders === 'object'
+        ? { httpHeaders: httpHeaders as Record<string, string> }
+        : {}),
+      ...(queryParams && typeof queryParams === 'object'
+        ? { queryParams: queryParams as Record<string, string> }
+        : {}),
       ...(typeof envKey === 'string' && envKey ? { envKey } : {}),
     };
     const secretRef = buildSecretRef(String(apiKey ?? ''));
@@ -305,10 +363,14 @@ app.post('/api/config/add-provider', async (req, res) => {
     const next = hydrateConfig({
       version: 3,
       activeProvider: shouldActivate ? entry.id : (cachedConfig?.activeProvider ?? entry.id),
-      activeModel: shouldActivate ? entry.defaultModel : (cachedConfig?.activeModel ?? entry.defaultModel),
+      activeModel: shouldActivate
+        ? entry.defaultModel
+        : (cachedConfig?.activeModel ?? entry.defaultModel),
       secrets: { ...(cachedConfig?.secrets ?? {}), [entry.id]: secretRef },
       providers: { ...(cachedConfig?.providers ?? {}), [entry.id]: entry },
-      ...(cachedConfig?.designSystem !== undefined ? { designSystem: cachedConfig.designSystem } : {}),
+      ...(cachedConfig?.designSystem !== undefined
+        ? { designSystem: cachedConfig.designSystem }
+        : {}),
     });
     await saveConfig(next);
     setCachedConfig(next);
@@ -320,19 +382,36 @@ app.post('/api/config/add-provider', async (req, res) => {
 
 app.post('/api/config/update-provider', async (req, res) => {
   try {
-    const { id, name, baseUrl, defaultModel, wire, apiKey, httpHeaders, queryParams, reasoningLevel } = req.body as Record<string, unknown>;
+    const {
+      id,
+      name,
+      baseUrl,
+      defaultModel,
+      wire,
+      apiKey,
+      httpHeaders,
+      queryParams,
+      reasoningLevel,
+    } = req.body as Record<string, unknown>;
     const cfg = getCachedConfig();
     if (!cfg) return sendError(res, 503, 'No config', ERROR_CODES.CONFIG_MISSING);
     const existing = cfg.providers[String(id)];
-    if (!existing) return sendError(res, 400, `Provider "${id}" not found`, ERROR_CODES.IPC_BAD_INPUT);
+    if (!existing)
+      return sendError(res, 400, `Provider "${id}" not found`, ERROR_CODES.IPC_BAD_INPUT);
     const updated: ProviderEntry = {
       ...existing,
       ...(typeof name === 'string' ? { name } : {}),
       ...(typeof baseUrl === 'string' ? { baseUrl } : {}),
       ...(typeof defaultModel === 'string' ? { defaultModel } : {}),
-      ...(typeof wire === 'string' && WireApiSchema.safeParse(wire).success ? { wire: wire as WireApi } : {}),
-      ...(httpHeaders && typeof httpHeaders === 'object' ? { httpHeaders: httpHeaders as Record<string, string> } : {}),
-      ...(queryParams && typeof queryParams === 'object' ? { queryParams: queryParams as Record<string, string> } : {}),
+      ...(typeof wire === 'string' && WireApiSchema.safeParse(wire).success
+        ? { wire: wire as WireApi }
+        : {}),
+      ...(httpHeaders && typeof httpHeaders === 'object'
+        ? { httpHeaders: httpHeaders as Record<string, string> }
+        : {}),
+      ...(queryParams && typeof queryParams === 'object'
+        ? { queryParams: queryParams as Record<string, string> }
+        : {}),
     };
     if (reasoningLevel === null) updated.reasoningLevel = undefined;
     else if (typeof reasoningLevel === 'string') updated.reasoningLevel = reasoningLevel as never;
@@ -438,13 +517,20 @@ app.post('/api/config/list-endpoint-models', async (req, res) => {
       return res.json({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }
     const headers = buildAuthHeadersForWire(parsedWire.data, apiKey, undefined, baseUrl);
-    const response = await fetch(url, { method: 'GET', headers, signal: AbortSignal.timeout(10_000) });
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    });
     if (!response.ok) return res.json({ ok: false, error: `HTTP ${response.status}` });
     const body = (await response.json()) as Record<string, unknown>;
     const data = body['data'] ?? body['models'];
     if (!Array.isArray(data)) return res.json({ ok: false, error: 'unexpected response shape' });
     const ids = data
-      .filter((it) => typeof it === 'object' && it !== null && typeof (it as { id?: unknown }).id === 'string')
+      .filter(
+        (it) =>
+          typeof it === 'object' && it !== null && typeof (it as { id?: unknown }).id === 'string',
+      )
       .map((it) => (it as { id: string }).id);
     res.json({ ok: true, models: ids });
   } catch (err) {
@@ -462,14 +548,15 @@ async function runSetProviderAndModels(input: {
   const nextProviders: Record<string, ProviderEntry> = { ...(cachedConfig?.providers ?? {}) };
   const existing = nextProviders[input.provider];
   const builtin = BUILTIN_PROVIDERS[input.provider as keyof typeof BUILTIN_PROVIDERS];
-  const seed: ProviderEntry = existing ?? builtin ?? {
-    id: input.provider,
-    name: input.provider,
-    builtin: false,
-    wire: 'openai-chat',
-    baseUrl: input.baseUrl ?? 'https://api.openai.com/v1',
-    defaultModel: input.modelPrimary,
-  };
+  const seed: ProviderEntry = existing ??
+    builtin ?? {
+      id: input.provider,
+      name: input.provider,
+      builtin: false,
+      wire: 'openai-chat',
+      baseUrl: input.baseUrl ?? 'https://api.openai.com/v1',
+      defaultModel: input.modelPrimary,
+    };
   nextProviders[input.provider] = {
     ...seed,
     baseUrl: input.baseUrl ?? seed.baseUrl,
@@ -488,7 +575,9 @@ async function runSetProviderAndModels(input: {
     activeModel: activate ? input.modelPrimary : (cachedConfig?.activeModel ?? input.modelPrimary),
     secrets: nextSecrets,
     providers: nextProviders,
-    ...(cachedConfig?.designSystem !== undefined ? { designSystem: cachedConfig.designSystem } : {}),
+    ...(cachedConfig?.designSystem !== undefined
+      ? { designSystem: cachedConfig.designSystem }
+      : {}),
   });
   await saveConfig(next);
   setCachedConfig(next);
@@ -514,7 +603,12 @@ app.post('/api/generate', async (req: Request, res: Response) => {
 
   const cfg = getCachedConfig();
   if (!cfg) {
-    return sendError(res, 503, 'No configuration. Complete onboarding first.', ERROR_CODES.CONFIG_MISSING);
+    return sendError(
+      res,
+      503,
+      'No configuration. Complete onboarding first.',
+      ERROR_CODES.CONFIG_MISSING,
+    );
   }
 
   const active = resolveActiveModel(cfg, payload.model);
@@ -569,10 +663,15 @@ app.post('/api/generate', async (req: Request, res: Response) => {
     history: payload.history as never,
     model: active.model,
     apiKey,
-    ...(isCodex ? { getApiKey: () => resolveApiKeyWithKeylessFallback(active.model.provider, allowKeyless, {
-      getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
-      getApiKeyForProvider,
-    }) } : {}),
+    ...(isCodex
+      ? {
+          getApiKey: () =>
+            resolveApiKeyWithKeylessFallback(active.model.provider, allowKeyless, {
+              getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
+              getApiKeyForProvider,
+            }),
+        }
+      : {}),
     attachments: payload.attachments as never,
     referenceUrl: payload.referenceUrl ? { url: payload.referenceUrl } : undefined,
     designSystem: cfg.designSystem ?? null,
@@ -587,7 +686,12 @@ app.post('/api/generate', async (req: Request, res: Response) => {
   };
 
   const prefs = await readPreferences(DATA_DIR);
-  const clearTimeout = await armGenerationTimeout(id, controller, async () => prefs.generationTimeoutSec, console);
+  const clearTimeout = await armGenerationTimeout(
+    id,
+    controller,
+    async () => prefs.generationTimeoutSec,
+    console,
+  );
 
   try {
     let result: Awaited<ReturnType<typeof generate>>;
@@ -606,8 +710,15 @@ app.post('/api/generate', async (req: Request, res: Response) => {
             sendEvent({ ...baseCtx, type: 'turn_start' });
           } else if (event.type === 'message_update') {
             const ame = event.assistantMessageEvent;
-            if (ame.type === 'text_delta' && typeof (ame as { delta?: unknown }).delta === 'string') {
-              sendEvent({ ...baseCtx, type: 'text_delta', delta: (ame as { delta: string }).delta });
+            if (
+              ame.type === 'text_delta' &&
+              typeof (ame as { delta?: unknown }).delta === 'string'
+            ) {
+              sendEvent({
+                ...baseCtx,
+                type: 'text_delta',
+                delta: (ame as { delta: string }).delta,
+              });
             }
           } else if (event.type === 'tool_execution_start') {
             sendEvent({
@@ -629,7 +740,10 @@ app.post('/api/generate', async (req: Request, res: Response) => {
           } else if (event.type === 'turn_end') {
             const msg = event.message as { content?: Array<{ type: string; text?: string }> };
             const rawText = (msg.content ?? [])
-              .filter((c): c is { type: 'text'; text: string } => c.type === 'text' && typeof c.text === 'string')
+              .filter(
+                (c): c is { type: 'text'; text: string } =>
+                  c.type === 'text' && typeof c.text === 'string',
+              )
               .map((c) => c.text)
               .join('');
             const finalText = rawText.replace(/<artifact[\s\S]*?<\/artifact>/g, '').trim();
@@ -672,11 +786,18 @@ app.post('/api/generate/title', async (req, res) => {
     const { prompt } = req.body as { prompt: string };
     const cfg = getCachedConfig();
     if (!cfg) return sendError(res, 503, 'No config', ERROR_CODES.CONFIG_MISSING);
-    const active = resolveActiveModel(cfg, { provider: cfg.activeProvider, modelId: cfg.activeModel });
-    const apiKey = await resolveApiKeyWithKeylessFallback(active.model.provider, active.allowKeyless, {
-      getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
-      getApiKeyForProvider,
+    const active = resolveActiveModel(cfg, {
+      provider: cfg.activeProvider,
+      modelId: cfg.activeModel,
     });
+    const apiKey = await resolveApiKeyWithKeylessFallback(
+      active.model.provider,
+      active.allowKeyless,
+      {
+        getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
+        getApiKeyForProvider,
+      },
+    );
     const title = await generateTitle({
       prompt,
       model: active.model,
@@ -705,10 +826,14 @@ app.post('/api/apply-comment', async (req, res) => {
     if (!cfg) return sendError(res, 503, 'No config', ERROR_CODES.CONFIG_MISSING);
     const hint = payload.model ?? { provider: cfg.provider, modelId: cfg.modelPrimary };
     const active = resolveActiveModel(cfg, hint as never);
-    const apiKey = await resolveApiKeyWithKeylessFallback(active.model.provider, active.allowKeyless, {
-      getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
-      getApiKeyForProvider,
-    });
+    const apiKey = await resolveApiKeyWithKeylessFallback(
+      active.model.provider,
+      active.allowKeyless,
+      {
+        getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
+        getApiKeyForProvider,
+      },
+    );
     const result = await applyComment({
       html: payload.html,
       comment: payload.comment,
@@ -928,7 +1053,11 @@ app.get('/api/codex/callback', async (req, res) => {
     if (!code || !pendingCodexPkce || state !== pendingCodexPkce.state) {
       return res.status(400).send('Invalid OAuth callback');
     }
-    const tokens = await exchangeCode(code, pendingCodexPkce.verifier, pendingCodexPkce.redirectUri);
+    const tokens = await exchangeCode(
+      code,
+      pendingCodexPkce.verifier,
+      pendingCodexPkce.redirectUri,
+    );
     const claims = decodeJwtClaims(tokens.idToken);
     const auth: StoredCodexAuth = {
       schemaVersion: 1,
@@ -954,8 +1083,24 @@ app.get('/api/codex/callback', async (req, res) => {
         baseUrl: 'https://chatgpt.com/backend-api',
         defaultModel: 'gpt-5.3-codex',
         requiresApiKey: false,
-        capabilities: { supportsKeyless: true, supportsModelsEndpoint: false, supportsReasoning: true, requiresClaudeCodeIdentity: false, modelDiscoveryMode: 'static-hint' },
-        modelsHint: ['gpt-5.4', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2-codex', 'gpt-5.2', 'gpt-5.1-codex-max', 'gpt-5.1', 'gpt-5.4-mini', 'gpt-5.1-codex-mini'],
+        capabilities: {
+          supportsKeyless: true,
+          supportsModelsEndpoint: false,
+          supportsReasoning: true,
+          requiresClaudeCodeIdentity: false,
+          modelDiscoveryMode: 'static-hint',
+        },
+        modelsHint: [
+          'gpt-5.4',
+          'gpt-5.3-codex',
+          'gpt-5.3-codex-spark',
+          'gpt-5.2-codex',
+          'gpt-5.2',
+          'gpt-5.1-codex-max',
+          'gpt-5.1',
+          'gpt-5.4-mini',
+          'gpt-5.1-codex-mini',
+        ],
       };
       const next = hydrateConfig({
         version: 3,
@@ -969,7 +1114,9 @@ app.get('/api/codex/callback', async (req, res) => {
       setCachedConfig(next);
     }
 
-    res.send('<html><body><script>window.close();</script><p>Login successful! You may close this tab.</p></body></html>');
+    res.send(
+      '<html><body><script>window.close();</script><p>Login successful! You may close this tab.</p></body></html>',
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).send(`OAuth error: ${msg}`);
@@ -1010,7 +1157,14 @@ app.post('/api/design-system/scan', async (req, res) => {
     const snapshot = await scanDesignSystem(rootPath);
     const cfg = getCachedConfig();
     if (!cfg) return sendError(res, 503, 'No config', ERROR_CODES.CONFIG_MISSING);
-    const next = hydrateConfig({ version: 3, activeProvider: cfg.activeProvider, activeModel: cfg.activeModel, secrets: cfg.secrets, providers: cfg.providers, designSystem: snapshot });
+    const next = hydrateConfig({
+      version: 3,
+      activeProvider: cfg.activeProvider,
+      activeModel: cfg.activeModel,
+      secrets: cfg.secrets,
+      providers: cfg.providers,
+      designSystem: snapshot,
+    });
     await saveConfig(next);
     setCachedConfig(next);
     res.json(toState(cachedConfig));
@@ -1023,7 +1177,13 @@ app.delete('/api/design-system', async (_req, res) => {
   try {
     const cfg = getCachedConfig();
     if (!cfg) return sendError(res, 503, 'No config', ERROR_CODES.CONFIG_MISSING);
-    const next = hydrateConfig({ version: 3, activeProvider: cfg.activeProvider, activeModel: cfg.activeModel, secrets: cfg.secrets, providers: cfg.providers });
+    const next = hydrateConfig({
+      version: 3,
+      activeProvider: cfg.activeProvider,
+      activeModel: cfg.activeModel,
+      secrets: cfg.secrets,
+      providers: cfg.providers,
+    });
     await saveConfig(next);
     setCachedConfig(next);
     res.json(toState(cachedConfig));
@@ -1072,7 +1232,10 @@ function resolveLocalAssetRefs(source: string, files: Map<string, string>): stri
   let resolved = source;
   for (const [path, content] of files.entries()) {
     if (!path.startsWith('assets/') || !content.startsWith('data:')) continue;
-    resolved = resolved.replace(new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), content);
+    resolved = resolved.replace(
+      new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
+      content,
+    );
   }
   return resolved;
 }

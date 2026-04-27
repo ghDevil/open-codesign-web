@@ -29,5 +29,9 @@ export async function readPreferences(dataDir: string): Promise<Preferences> {
 
 export async function writePreferences(dataDir: string, prefs: Preferences): Promise<void> {
   await mkdir(dataDir, { recursive: true });
-  await writeFile(join(dataDir, 'preferences.json'), JSON.stringify({ schemaVersion: 5, ...prefs }, null, 2), 'utf8');
+  await writeFile(
+    join(dataDir, 'preferences.json'),
+    JSON.stringify({ schemaVersion: 5, ...prefs }, null, 2),
+    'utf8',
+  );
 }

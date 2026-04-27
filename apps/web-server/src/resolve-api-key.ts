@@ -44,7 +44,8 @@ export async function resolveApiKeyWithKeylessFallback(
       allowKeyless &&
       providerId !== CHATGPT_CODEX_PROVIDER_ID &&
       err instanceof CodesignError &&
-      (err.code === ERROR_CODES.PROVIDER_AUTH_MISSING || err.code === ERROR_CODES.PROVIDER_KEY_MISSING)
+      (err.code === ERROR_CODES.PROVIDER_AUTH_MISSING ||
+        err.code === ERROR_CODES.PROVIDER_KEY_MISSING)
     ) {
       return '';
     }

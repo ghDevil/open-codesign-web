@@ -8,7 +8,8 @@ export function buildAuthHeadersForWire(
   baseUrl?: string,
 ): Record<string, string> {
   if (apiKey.length === 0) {
-    const base: Record<string, string> = wire === 'anthropic' ? { 'anthropic-version': '2023-06-01' } : {};
+    const base: Record<string, string> =
+      wire === 'anthropic' ? { 'anthropic-version': '2023-06-01' } : {};
     return withClaudeCodeIdentity(wire, baseUrl, { ...base, ...(extraHeaders ?? {}) });
   }
   const isOAuth = wire === 'anthropic' && looksLikeClaudeOAuthToken(apiKey);

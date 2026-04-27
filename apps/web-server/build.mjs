@@ -1,11 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 /**
  * esbuild script for the web server.
  * Handles Vite's `?raw` suffix as a plugin (reads file content as a string).
  */
 import { build } from 'esbuild';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -44,8 +44,5 @@ await build({
   sourcemap: true,
   logLevel: 'info',
   // Allow esbuild to resolve workspace packages via the monorepo node_modules
-  nodePaths: [
-    join(__dirname, '../../node_modules'),
-    join(__dirname, 'node_modules'),
-  ],
+  nodePaths: [join(__dirname, '../../node_modules'), join(__dirname, 'node_modules')],
 });

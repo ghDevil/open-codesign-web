@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import BetterSqlite3 from 'better-sqlite3';
+import type BetterSqlite3 from 'better-sqlite3';
 
 const require = createRequire(import.meta.url);
 
@@ -137,77 +137,119 @@ export function normalizeDesignFilePath(p: string): string {
 }
 
 export function listDesigns(db: BetterSqlite3.Database) {
-  return db.prepare(`SELECT * FROM designs WHERE deleted_at IS NULL ORDER BY updated_at DESC`).all();
+  return db
+    .prepare('SELECT * FROM designs WHERE deleted_at IS NULL ORDER BY updated_at DESC')
+    .all();
 }
 
 export function getDesign(db: BetterSqlite3.Database, id: string) {
-  return db.prepare(`SELECT * FROM designs WHERE id = ?`).get(id) ?? null;
+  return db.prepare('SELECT * FROM designs WHERE id = ?').get(id) ?? null;
 }
 
 export function createDesign(db: BetterSqlite3.Database, input: { name?: string }): unknown {
   const id = uuid();
   const ts = now();
-  db.prepare(`INSERT INTO designs (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`).run(
-    id, input.name ?? 'Untitled design', ts, ts,
+  db.prepare('INSERT INTO designs (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
+    id,
+    input.name ?? 'Untitled design',
+    ts,
+    ts,
   );
   return getDesign(db, id);
 }
 
 export function renameDesign(db: BetterSqlite3.Database, id: string, name: string): void {
-  db.prepare(`UPDATE designs SET name = ?, updated_at = ? WHERE id = ?`).run(name, now(), id);
+  db.prepare('UPDATE designs SET name = ?, updated_at = ? WHERE id = ?').run(name, now(), id);
 }
 
-export function setDesignThumbnail(db: BetterSqlite3.Database, id: string, thumbnail: string): void {
-  db.prepare(`UPDATE designs SET thumbnail_text = ?, updated_at = ? WHERE id = ?`).run(thumbnail, now(), id);
+export function setDesignThumbnail(
+  db: BetterSqlite3.Database,
+  id: string,
+  thumbnail: string,
+): void {
+  db.prepare('UPDATE designs SET thumbnail_text = ?, updated_at = ? WHERE id = ?').run(
+    thumbnail,
+    now(),
+    id,
+  );
 }
 
 export function softDeleteDesign(db: BetterSqlite3.Database, id: string): void {
-  db.prepare(`UPDATE designs SET deleted_at = ?, updated_at = ? WHERE id = ?`).run(now(), now(), id);
+  db.prepare('UPDATE designs SET deleted_at = ?, updated_at = ? WHERE id = ?').run(
+    now(),
+    now(),
+    id,
+  );
 }
 
 export function duplicateDesign(db: BetterSqlite3.Database, id: string): unknown {
-  const original = db.prepare(`SELECT * FROM designs WHERE id = ?`).get(id) as { name: string } | undefined;
+  const original = db.prepare('SELECT * FROM designs WHERE id = ?').get(id) as
+    | { name: string }
+    | undefined;
   if (!original) throw new Error(`Design ${id} not found`);
   const newId = uuid();
   const ts = now();
-  db.prepare(`INSERT INTO designs (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`)
-    .run(newId, `${original.name} (copy)`, ts, ts);
+  db.prepare('INSERT INTO designs (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
+    newId,
+    `${original.name} (copy)`,
+    ts,
+    ts,
+  );
   return getDesign(db, newId);
 }
 
 export function listSnapshots(db: BetterSqlite3.Database, designId: string) {
-  return db.prepare(`SELECT * FROM design_snapshots WHERE design_id = ? ORDER BY created_at DESC`).all(designId);
+  return db
+    .prepare('SELECT * FROM design_snapshots WHERE design_id = ? ORDER BY created_at DESC')
+    .all(designId);
 }
 
 export function getSnapshot(db: BetterSqlite3.Database, id: string) {
-  return db.prepare(`SELECT * FROM design_snapshots WHERE id = ?`).get(id) ?? null;
+  return db.prepare('SELECT * FROM design_snapshots WHERE id = ?').get(id) ?? null;
 }
 
-export function createSnapshot(db: BetterSqlite3.Database, input: {
-  designId: string;
-  parentId?: string | null;
-  type: 'initial' | 'edit' | 'fork';
-  prompt?: string | null;
-  artifactType: 'html' | 'react' | 'svg';
-  artifactSource: string;
-  message?: string | null;
-}): unknown {
+export function createSnapshot(
+  db: BetterSqlite3.Database,
+  input: {
+    designId: string;
+    parentId?: string | null;
+    type: 'initial' | 'edit' | 'fork';
+    prompt?: string | null;
+    artifactType: 'html' | 'react' | 'svg';
+    artifactSource: string;
+    message?: string | null;
+  },
+): unknown {
   const id = uuid();
   const ts = now();
   db.prepare(`
     INSERT INTO design_snapshots (id, design_id, parent_id, type, prompt, artifact_type, artifact_source, created_at, message)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, input.designId, input.parentId ?? null, input.type, input.prompt ?? null,
-    input.artifactType, input.artifactSource, ts, input.message ?? null);
-  db.prepare(`UPDATE designs SET updated_at = ? WHERE id = ?`).run(ts, input.designId);
+  `).run(
+    id,
+    input.designId,
+    input.parentId ?? null,
+    input.type,
+    input.prompt ?? null,
+    input.artifactType,
+    input.artifactSource,
+    ts,
+    input.message ?? null,
+  );
+  db.prepare('UPDATE designs SET updated_at = ? WHERE id = ?').run(ts, input.designId);
   return getSnapshot(db, id);
 }
 
 export function deleteSnapshot(db: BetterSqlite3.Database, id: string): void {
-  db.prepare(`DELETE FROM design_snapshots WHERE id = ?`).run(id);
+  db.prepare('DELETE FROM design_snapshots WHERE id = ?').run(id);
 }
 
-export function upsertDesignFile(db: BetterSqlite3.Database, designId: string, filePath: string, content: string): void {
+export function upsertDesignFile(
+  db: BetterSqlite3.Database,
+  designId: string,
+  filePath: string,
+  content: string,
+): void {
   const ts = now();
   const id = uuid();
   db.prepare(`
@@ -218,24 +260,44 @@ export function upsertDesignFile(db: BetterSqlite3.Database, designId: string, f
 }
 
 export function listChatMessages(db: BetterSqlite3.Database, designId: string) {
-  return db.prepare(`SELECT * FROM chat_messages WHERE design_id = ? ORDER BY seq ASC`).all(designId);
+  return db
+    .prepare('SELECT * FROM chat_messages WHERE design_id = ? ORDER BY seq ASC')
+    .all(designId);
 }
 
-export function appendChatMessage(db: BetterSqlite3.Database, input: {
-  designId: string;
-  seq: number;
-  kind: string;
-  payload: unknown;
-  snapshotId?: string | null;
-}): void {
+export function appendChatMessage(
+  db: BetterSqlite3.Database,
+  input: {
+    designId: string;
+    seq: number;
+    kind: string;
+    payload: unknown;
+    snapshotId?: string | null;
+  },
+): void {
   db.prepare(`
     INSERT INTO chat_messages (design_id, seq, kind, payload, snapshot_id, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(design_id, seq) DO NOTHING
-  `).run(input.designId, input.seq, input.kind, JSON.stringify(input.payload), input.snapshotId ?? null, now());
+  `).run(
+    input.designId,
+    input.seq,
+    input.kind,
+    JSON.stringify(input.payload),
+    input.snapshotId ?? null,
+    now(),
+  );
 }
 
-export function updateChatMessagePayload(db: BetterSqlite3.Database, designId: string, seq: number, payload: unknown): void {
-  db.prepare(`UPDATE chat_messages SET payload = ? WHERE design_id = ? AND seq = ?`)
-    .run(JSON.stringify(payload), designId, seq);
+export function updateChatMessagePayload(
+  db: BetterSqlite3.Database,
+  designId: string,
+  seq: number,
+  payload: unknown,
+): void {
+  db.prepare('UPDATE chat_messages SET payload = ? WHERE design_id = ? AND seq = ?').run(
+    JSON.stringify(payload),
+    designId,
+    seq,
+  );
 }

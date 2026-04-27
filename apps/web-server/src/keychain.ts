@@ -3,14 +3,19 @@ import { CodesignError, type Config, ERROR_CODES, type SecretRef } from '@open-c
 const PLAIN_PREFIX = 'plain:';
 
 export function encryptSecret(plaintext: string): string {
-  if (plaintext.length === 0) throw new CodesignError('Cannot store empty secret', ERROR_CODES.KEYCHAIN_EMPTY_INPUT);
+  if (plaintext.length === 0)
+    throw new CodesignError('Cannot store empty secret', ERROR_CODES.KEYCHAIN_EMPTY_INPUT);
   return `${PLAIN_PREFIX}${plaintext}`;
 }
 
 export function decryptSecret(stored: string): string {
-  if (stored.length === 0) throw new CodesignError('Cannot read empty secret', ERROR_CODES.KEYCHAIN_EMPTY_INPUT);
+  if (stored.length === 0)
+    throw new CodesignError('Cannot read empty secret', ERROR_CODES.KEYCHAIN_EMPTY_INPUT);
   if (stored.startsWith(PLAIN_PREFIX)) return stored.slice(PLAIN_PREFIX.length);
-  throw new CodesignError('Legacy encrypted secret found. Re-enter your API key in Settings.', ERROR_CODES.KEYCHAIN_UNAVAILABLE);
+  throw new CodesignError(
+    'Legacy encrypted secret found. Re-enter your API key in Settings.',
+    ERROR_CODES.KEYCHAIN_UNAVAILABLE,
+  );
 }
 
 export function maskSecret(plaintext: string): string {
@@ -33,7 +38,9 @@ export function migrateSecrets(cfg: Config): { config: Config; changed: boolean 
   for (const [provider, ref] of entries) {
     if (ref.ciphertext.startsWith(PLAIN_PREFIX) && ref.mask) continue;
     if (!ref.ciphertext.startsWith(PLAIN_PREFIX)) {
-      console.warn(`[keychain] Legacy encrypted secret for "${provider}" — cannot decrypt without Electron safeStorage. Re-enter in Settings.`);
+      console.warn(
+        `[keychain] Legacy encrypted secret for "${provider}" — cannot decrypt without Electron safeStorage. Re-enter in Settings.`,
+      );
       continue;
     }
     const plaintext = ref.ciphertext.slice(PLAIN_PREFIX.length);

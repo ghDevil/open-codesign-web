@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { DESIGN_SKILLS, FRAME_TEMPLATES, type CoreLogger } from '@open-codesign/core';
+import { type CoreLogger, DESIGN_SKILLS, FRAME_TEMPLATES } from '@open-codesign/core';
 import type BetterSqlite3 from 'better-sqlite3';
 import { getDesign, normalizeDesignFilePath, upsertDesignFile } from './snapshots-db.js';
 
@@ -13,7 +13,14 @@ interface Options {
   logger: Pick<CoreLogger, 'error'>;
 }
 
-export function createRuntimeTextEditorFs({ db, generationId, designId, previousHtml, sendEvent, logger }: Options) {
+export function createRuntimeTextEditorFs({
+  db,
+  generationId,
+  designId,
+  previousHtml,
+  sendEvent,
+  logger,
+}: Options) {
   const baseCtx = { designId: designId ?? '', generationId } as const;
   const fsMap = new Map<string, string>();
 
@@ -31,7 +38,10 @@ export function createRuntimeTextEditorFs({ db, generationId, designId, previous
     let resolved = source;
     for (const [path, content] of fsMap.entries()) {
       if (!path.startsWith('assets/') || !content.startsWith('data:')) continue;
-      resolved = resolved.replace(new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), content);
+      resolved = resolved.replace(
+        new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
+        content,
+      );
     }
     return resolved;
   }
@@ -39,7 +49,10 @@ export function createRuntimeTextEditorFs({ db, generationId, designId, previous
   function emitFsUpdated(filePath: string, content: string): void {
     if (designId === null) return;
     const resolved = filePath === 'index.html' ? resolveLocalAssetRefs(content) : content;
-    sendEvent({ ...baseCtx, type: 'fs_updated', path: filePath, content: resolved } as Record<string, unknown>);
+    sendEvent({ ...baseCtx, type: 'fs_updated', path: filePath, content: resolved } as Record<
+      string,
+      unknown
+    >);
   }
 
   function emitIndexIfAssetChanged(filePath: string): void {
@@ -59,7 +72,12 @@ export function createRuntimeTextEditorFs({ db, generationId, designId, previous
         await writeFile(destinationPath, content, 'utf8');
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.error('runtime.fs.writeThrough.fail', { designId, filePath, workspacePath: design.workspace_path, message });
+        logger.error('runtime.fs.writeThrough.fail', {
+          designId,
+          filePath,
+          workspacePath: design.workspace_path,
+          message,
+        });
         throw new Error(`Workspace write-through failed for ${filePath}: ${message}`);
       }
     }
@@ -84,7 +102,8 @@ export function createRuntimeTextEditorFs({ db, generationId, designId, previous
       if (current === undefined) throw new Error(`File not found: ${path}`);
       const idx = current.indexOf(oldStr);
       if (idx === -1) throw new Error(`old_str not found in ${path}`);
-      if (current.indexOf(oldStr, idx + oldStr.length) !== -1) throw new Error(`old_str is ambiguous in ${path}`);
+      if (current.indexOf(oldStr, idx + oldStr.length) !== -1)
+        throw new Error(`old_str is ambiguous in ${path}`);
       const next = current.slice(0, idx) + newStr + current.slice(idx + oldStr.length);
       await persistMutation(path, next);
       fsMap.set(path, next);
