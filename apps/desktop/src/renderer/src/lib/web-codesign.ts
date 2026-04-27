@@ -241,9 +241,16 @@ async function liveTestEndpoint(input: {
 }
 
 async function beginCodexLogin(): Promise<CodexOAuthStatus> {
-  throw new Error(
-    'ChatGPT subscription sign-in is not supported in the hosted web app yet. OpenAI Codex OAuth for this app uses a localhost desktop callback flow. Use the desktop app for ChatGPT subscription login, or configure an API-key provider such as OpenAI or OpenRouter in Settings.',
-  );
+  try {
+    return await apiJson<CodexOAuthStatus>('/api/codex/adopt-existing-auth', {
+      method: 'POST',
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unable to connect ChatGPT subscription.';
+    throw new Error(
+      `${message} To use ChatGPT subscription login in the hosted web app, install the official Codex CLI in the container, run \`codex login\` once there, then try again.`,
+    );
+  }
 }
 
 function installWebCodesign(): void {

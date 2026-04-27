@@ -212,11 +212,105 @@ function getDb(): BetterSqlite3.Database {
 const CODEX_AUTH_PATH = join(homedir(), '.codex', 'auth.json');
 let codexTokenStore: CodexTokenStore | null = null;
 
+const CHATGPT_CODEX_PROVIDER: ProviderEntry = {
+  id: CHATGPT_CODEX_PROVIDER_ID,
+  name: 'ChatGPT Subscription',
+  builtin: false,
+  wire: 'openai-codex-responses',
+  baseUrl: 'https://chatgpt.com/backend-api',
+  defaultModel: 'gpt-5.3-codex',
+  requiresApiKey: false,
+  capabilities: {
+    supportsKeyless: true,
+    supportsModelsEndpoint: false,
+    supportsReasoning: true,
+    requiresClaudeCodeIdentity: false,
+    modelDiscoveryMode: 'static-hint',
+  },
+  modelsHint: [
+    'gpt-5.4',
+    'gpt-5.3-codex',
+    'gpt-5.3-codex-spark',
+    'gpt-5.2-codex',
+    'gpt-5.2',
+    'gpt-5.1-codex-max',
+    'gpt-5.1',
+    'gpt-5.4-mini',
+    'gpt-5.1-codex-mini',
+  ],
+};
+
 function getCodexTokenStore(): CodexTokenStore {
   if (!codexTokenStore) {
     codexTokenStore = new CodexTokenStore({ filePath: CODEX_AUTH_PATH });
   }
   return codexTokenStore;
+}
+
+async function persistProviderMutation(
+  mutate: (providers: Record<string, ProviderEntry>) => Record<string, ProviderEntry>,
+): Promise<void> {
+  const cfg = getCachedConfig();
+  const prevProviders: Record<string, ProviderEntry> = cfg?.providers ?? {};
+  const nextProviders = mutate({ ...prevProviders });
+  const next: Config = hydrateConfig({
+    version: 3,
+    activeProvider: cfg?.activeProvider ?? '',
+    activeModel: cfg?.activeModel ?? '',
+    secrets: cfg?.secrets ?? {},
+    providers: nextProviders,
+    ...(cfg?.designSystem !== undefined ? { designSystem: cfg.designSystem } : {}),
+  });
+  await saveConfig(next);
+  setCachedConfig(next);
+}
+
+async function claimActiveCodexProviderIfUnset(): Promise<void> {
+  const cfg = getCachedConfig();
+  if (cfg === null) return;
+  const current = cfg.activeProvider;
+  const hasValidActive =
+    current !== undefined &&
+    current !== null &&
+    current !== '' &&
+    cfg.providers[current] !== undefined;
+  if (hasValidActive) return;
+  const next: Config = hydrateConfig({
+    version: 3,
+    activeProvider: CHATGPT_CODEX_PROVIDER_ID,
+    activeModel: CHATGPT_CODEX_PROVIDER.defaultModel,
+    secrets: cfg.secrets,
+    providers: cfg.providers,
+    ...(cfg.designSystem !== undefined ? { designSystem: cfg.designSystem } : {}),
+  });
+  await saveConfig(next);
+  setCachedConfig(next);
+}
+
+async function ensureCodexProviderFromStoredAuth(): Promise<StoredCodexAuth | null> {
+  let stored: StoredCodexAuth | null;
+  try {
+    stored = await getCodexTokenStore().read();
+  } catch {
+    return null;
+  }
+  if (stored === null) return null;
+
+  const cfg = getCachedConfig();
+  const entry = cfg?.providers[CHATGPT_CODEX_PROVIDER_ID];
+  const needsWrite =
+    entry === undefined ||
+    entry.wire !== CHATGPT_CODEX_PROVIDER.wire ||
+    entry.baseUrl !== CHATGPT_CODEX_PROVIDER.baseUrl;
+
+  if (needsWrite) {
+    await persistProviderMutation((providers) => {
+      providers[CHATGPT_CODEX_PROVIDER_ID] = { ...CHATGPT_CODEX_PROVIDER };
+      return providers;
+    });
+  }
+  await claimActiveCodexProviderIfUnset();
+  return stored;
 }
 
 // ── SSE helpers ───────────────────────────────────────────────────────────────
@@ -1262,14 +1356,12 @@ app.patch('/api/preferences', async (req, res) => {
 
 app.get('/api/codex/status', async (_req, res) => {
   try {
-    const store = getCodexTokenStore();
-    const auth = await store.read();
+    const auth = await ensureCodexProviderFromStoredAuth();
     if (!auth) {
       res.json({ loggedIn: false, email: null, accountId: null, expiresAt: null });
     } else {
-      const now = Date.now();
       res.json({
-        loggedIn: auth.expiresAt > now,
+        loggedIn: true,
         email: auth.email,
         accountId: auth.accountId,
         expiresAt: auth.expiresAt,
@@ -1277,6 +1369,28 @@ app.get('/api/codex/status', async (_req, res) => {
     }
   } catch {
     res.json({ loggedIn: false, email: null, accountId: null, expiresAt: null });
+  }
+});
+
+app.post('/api/codex/adopt-existing-auth', async (_req, res) => {
+  try {
+    const auth = await ensureCodexProviderFromStoredAuth();
+    if (!auth) {
+      return sendError(
+        res,
+        404,
+        `No Codex auth found at ${CODEX_AUTH_PATH}. Log in with Codex CLI first.`,
+        ERROR_CODES.CODEX_TOKEN_NOT_LOGGED_IN,
+      );
+    }
+    res.json({
+      loggedIn: true,
+      email: auth.email,
+      accountId: auth.accountId,
+      expiresAt: auth.expiresAt,
+    });
+  } catch (err) {
+    handleError(res, err);
   }
 });
 
@@ -1325,39 +1439,12 @@ app.get('/api/codex/callback', async (req, res) => {
     // Register Codex provider in config
     const cfg = getCachedConfig();
     if (cfg) {
-      const codexEntry: ProviderEntry = {
-        id: CHATGPT_CODEX_PROVIDER_ID,
-        name: 'ChatGPT Subscription',
-        builtin: false,
-        wire: 'openai-codex-responses',
-        baseUrl: 'https://chatgpt.com/backend-api',
-        defaultModel: 'gpt-5.3-codex',
-        requiresApiKey: false,
-        capabilities: {
-          supportsKeyless: true,
-          supportsModelsEndpoint: false,
-          supportsReasoning: true,
-          requiresClaudeCodeIdentity: false,
-          modelDiscoveryMode: 'static-hint',
-        },
-        modelsHint: [
-          'gpt-5.4',
-          'gpt-5.3-codex',
-          'gpt-5.3-codex-spark',
-          'gpt-5.2-codex',
-          'gpt-5.2',
-          'gpt-5.1-codex-max',
-          'gpt-5.1',
-          'gpt-5.4-mini',
-          'gpt-5.1-codex-mini',
-        ],
-      };
       const next = hydrateConfig({
         version: 3,
         activeProvider: cfg.activeProvider || CHATGPT_CODEX_PROVIDER_ID,
         activeModel: cfg.activeModel || 'gpt-5.3-codex',
         secrets: cfg.secrets,
-        providers: { ...cfg.providers, [CHATGPT_CODEX_PROVIDER_ID]: codexEntry },
+        providers: { ...cfg.providers, [CHATGPT_CODEX_PROVIDER_ID]: CHATGPT_CODEX_PROVIDER },
         ...(cfg.designSystem !== undefined ? { designSystem: cfg.designSystem } : {}),
       });
       await saveConfig(next);
@@ -1495,6 +1582,17 @@ function resolveLocalAssetRefs(source: string, files: Map<string, string>): stri
 async function main(): Promise<void> {
   await loadConfig();
   console.log('[web-server] Config loaded, hasConfig:', cachedConfig !== null);
+  try {
+    const adopted = await ensureCodexProviderFromStoredAuth();
+    if (adopted) {
+      console.log('[web-server] Adopted existing Codex auth', {
+        email: adopted.email,
+        accountId: adopted.accountId,
+      });
+    }
+  } catch (err) {
+    console.warn('[web-server] Codex auth adoption skipped:', err);
+  }
 
   try {
     await mkdir(dirname(DB_PATH), { recursive: true });

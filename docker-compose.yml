@@ -9,8 +9,10 @@ services:
       USE_AGENT_RUNTIME: '1'
     volumes:
       - open-codesign-data:/data/open-codesign
+      - open-codesign-codex:/root/.codex
     expose:
       - '3000'
 
 volumes:
   open-codesign-data:
+  open-codesign-codex:

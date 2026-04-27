@@ -30,7 +30,7 @@ RUN pnpm --filter @open-codesign/web-server build
 FROM node:22-slim AS runtime
 WORKDIR /app
 
-RUN npm install -g pnpm@9.15.0
+RUN npm install -g pnpm@9.15.0 @openai/codex
 ENV HUSKY=0
 
 # Copy workspace layout plus installed modules from the build stage. This
