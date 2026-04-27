@@ -133,6 +133,7 @@ When a concern only appears under a self-contradictory configuration, a delibera
 ## Response Guidelines
 
 - **Findings first**: order by severity (Blocker / Major / Minor / Nit).
+- **Biome autofixes**: when the only problem is Biome formatting or a safe autofix, do not frame it as a behavioral finding; tell the contributor to run `pnpm lint:fix`, commit the result, and let CI rerun.
 - **Mode line**: summary must start with `Review mode: initial` or `Review mode: follow-up after new commits`.
 - **Evidence**: cite specific public repository files and line numbers using `path:line`.
 - **No private citations**: never cite `docs/**`, `.claude/**`, `.Codex/**`, local absolute paths, workflow runner temp paths, or any file absent from the public checkout.
