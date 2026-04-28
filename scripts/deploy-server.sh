@@ -56,7 +56,7 @@ docker cp apps/desktop/out/renderer "$APP_CONTAINER":/app/apps/desktop/out/rende
 
 echo "==> Ensuring runtime dependencies"
 docker exec -u 0 "$APP_CONTAINER" sh -c \
-  "apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates >/dev/null 2>&1 || true"
+  "apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates chromium >/dev/null 2>&1 || true"
 
 echo "==> Restarting container"
 docker restart "$APP_CONTAINER"
