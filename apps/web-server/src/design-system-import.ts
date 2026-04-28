@@ -2,14 +2,14 @@
  * External design-system importers.
  *
  * Closes the gap with Claude Design's "set up your design system" flow.
- * The renderer can paste a GitHub URL, a Figma file URL, or upload a zip;
- * each is normalized into a StoredDesignSystem snapshot.
+ * The renderer can paste a GitHub URL, a Figma file URL, or enter tokens
+ * manually; each path is normalized into a StoredDesignSystem snapshot.
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import {
   STORED_DESIGN_SYSTEM_SCHEMA_VERSION,
   type StoredDesignSystem,
@@ -66,6 +66,13 @@ interface FigmaFileResponse {
   components?: Record<string, { name?: string; description?: string }>;
 }
 
+interface GitHubRepoTarget {
+  cloneUrl: string;
+  repoLabel: string;
+  branch?: string;
+  subdir?: string;
+}
+
 function colorToHex(c: FigmaColor): string {
   const r = Math.round(c.r * 255).toString(16).padStart(2, '0');
   const g = Math.round(c.g * 255).toString(16).padStart(2, '0');
@@ -82,6 +89,12 @@ function colorToRgba(c: FigmaColor): string {
 function pushUnique(target: string[], value: string, max: number): void {
   if (!value || target.includes(value) || target.length >= max) return;
   target.push(value);
+}
+
+function buildRepoLabel(repoBaseUrl: string, branch?: string, subdir?: string): string {
+  if (!branch) return repoBaseUrl;
+  const suffix = subdir ? `${branch}/${subdir}` : branch;
+  return `${repoBaseUrl}/tree/${suffix}`;
 }
 
 function walkFigmaNode(
@@ -199,39 +212,140 @@ export async function importDesignSystemFromFigma(figmaUrl: string): Promise<Sto
     spacing: out.spacing,
     radius: out.radius,
     shadows: out.shadows,
+    components: out.components,
   };
 }
 
-function runGitClone(gitUrl: string, dest: string, signal?: AbortSignal): Promise<void> {
+function runGit(
+  args: string[],
+  signal?: AbortSignal,
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('git', ['clone', '--depth', '1', '--no-tags', '--single-branch', gitUrl, dest], {
+    const proc = spawn('git', args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       signal,
     });
+    let stdout = '';
     let stderr = '';
+    proc.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
     proc.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
     });
     proc.on('error', reject);
     proc.on('close', (code) => {
-      if (code === 0) return resolve();
-      reject(new Error(`git clone failed (exit ${code}): ${stderr.slice(0, 600)}`));
+      if (code === 0) return resolve({ stdout, stderr });
+      reject(new Error(`git ${args[0]} failed (exit ${code}): ${stderr.slice(0, 600)}`));
     });
   });
 }
 
+function runGitClone(
+  gitUrl: string,
+  dest: string,
+  options?: { branch?: string; signal?: AbortSignal },
+): Promise<void> {
+  const args = ['clone', '--depth', '1', '--no-tags', '--single-branch'];
+  if (options?.branch) args.push('--branch', options.branch);
+  args.push(gitUrl, dest);
+  return runGit(args, options?.signal).then(() => {});
+}
+
+async function resolveTreeUrlSpecifier(
+  cloneUrl: string,
+  treeSegments: string[],
+): Promise<{ branch: string; subdir?: string }> {
+  for (let i = treeSegments.length; i >= 1; i -= 1) {
+    const branch = treeSegments.slice(0, i).join('/');
+    const probe = await runGit(['ls-remote', '--heads', cloneUrl, `refs/heads/${branch}`]);
+    if (probe.stdout.trim().length > 0) {
+      const subdir = treeSegments.slice(i).join('/');
+      return subdir ? { branch, subdir } : { branch };
+    }
+  }
+  const [branch, ...rest] = treeSegments;
+  if (!branch) throw new Error('GitHub tree URL is missing a branch name.');
+  return rest.length > 0 ? { branch, subdir: rest.join('/') } : { branch };
+}
+
+async function parseGitHubRepoTarget(input: string): Promise<GitHubRepoTarget> {
+  const trimmed = input.trim();
+  const shorthand = trimmed.match(
+    /^(?<owner>[^/\s]+)\/(?<repo>[^/\s@:]+)(?:@(?<branch>[^:]+))?(?::(?<subdir>.+))?$/,
+  );
+  if (shorthand?.groups?.owner && shorthand.groups.repo) {
+    const repoBaseUrl = `https://github.com/${shorthand.groups.owner}/${shorthand.groups.repo}`;
+    const branch = shorthand.groups.branch?.trim();
+    const subdir = shorthand.groups.subdir?.trim().replace(/^\/+|\/+$/g, '');
+    return {
+      cloneUrl: `${repoBaseUrl}.git`,
+      repoLabel: buildRepoLabel(repoBaseUrl, branch, subdir),
+      ...(branch ? { branch } : {}),
+      ...(subdir ? { subdir } : {}),
+    };
+  }
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error(`Not a valid repo URL: ${input}`);
+  }
+  if (url.hostname !== 'github.com' && url.hostname !== 'www.github.com') {
+    throw new Error(`Not a GitHub repo URL: ${input}`);
+  }
+
+  const segments = url.pathname
+    .replace(/\/+$/g, '')
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => decodeURIComponent(segment));
+  if (segments.length < 2) throw new Error(`Not a valid repo URL: ${input}`);
+
+  const owner = segments[0]!;
+  const repo = segments[1]!.replace(/\.git$/i, '');
+  const repoBaseUrl = `https://github.com/${owner}/${repo}`;
+  const cloneUrl = `${repoBaseUrl}.git`;
+
+  if (segments.length === 2) {
+    return { cloneUrl, repoLabel: repoBaseUrl };
+  }
+
+  if (segments[2] !== 'tree') {
+    throw new Error(`Unsupported GitHub URL format: ${input}`);
+  }
+  const treeSegments = segments.slice(3);
+  if (treeSegments.length === 0) {
+    throw new Error(`GitHub tree URL is missing a branch name: ${input}`);
+  }
+  const { branch, subdir } = await resolveTreeUrlSpecifier(cloneUrl, treeSegments);
+  return {
+    cloneUrl,
+    repoLabel: buildRepoLabel(repoBaseUrl, branch, subdir),
+    branch,
+    ...(subdir ? { subdir } : {}),
+  };
+}
+
+async function resolveScanRoot(cloneRoot: string, subdir?: string): Promise<string> {
+  if (!subdir) return cloneRoot;
+  const scanRoot = resolve(cloneRoot, subdir);
+  const rel = relative(cloneRoot, scanRoot);
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`Subdirectory escapes the cloned repository: ${subdir}`);
+  }
+  try {
+    await access(scanRoot);
+  } catch {
+    throw new Error(`Subdirectory not found in repository: ${subdir}`);
+  }
+  return scanRoot;
+}
+
 /** Build a StoredDesignSystem by shallow-cloning a public GitHub repo and scanning it. */
 export async function importDesignSystemFromGithub(repoUrl: string): Promise<StoredDesignSystem> {
-  // Accept "owner/repo", "owner/repo@branch", "https://github.com/owner/repo[.git][/]", or "https://github.com/owner/repo/tree/branch"
-  let cloneUrl = repoUrl.trim();
-  if (/^[^/\s]+\/[^/\s@]+(@[\w./-]+)?$/.test(cloneUrl) && !cloneUrl.startsWith('http')) {
-    cloneUrl = `https://github.com/${cloneUrl}`;
-  }
-  cloneUrl = cloneUrl.replace(/\/tree\/[^/]+\/?$/, '').replace(/\/$/, '');
-  if (!/^https?:\/\//.test(cloneUrl)) {
-    throw new Error(`Not a valid repo URL: ${repoUrl}`);
-  }
-  if (!cloneUrl.endsWith('.git')) cloneUrl = `${cloneUrl}.git`;
+  const target = await parseGitHubRepoTarget(repoUrl);
 
   const tmpRoot = await mkdtemp(join(tmpdir(), 'ds-import-'));
   const cloneDest = join(tmpRoot, 'repo');
@@ -239,19 +353,23 @@ export async function importDesignSystemFromGithub(repoUrl: string): Promise<Sto
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 90_000);
     try {
-      await runGitClone(cloneUrl, cloneDest, controller.signal);
+      await runGitClone(target.cloneUrl, cloneDest, {
+        ...(target.branch ? { branch: target.branch } : {}),
+        signal: controller.signal,
+      });
     } finally {
       clearTimeout(timer);
     }
 
-    const snapshot = await scanDesignSystem(cloneDest);
-
-    // Replace the on-disk temp path with the original repo URL so the user-facing summary stays meaningful.
-    const repoLabel = cloneUrl.replace(/\.git$/, '');
+    const scanRoot = await resolveScanRoot(cloneDest, target.subdir);
+    const snapshot = await scanDesignSystem(scanRoot);
     return {
       ...snapshot,
-      rootPath: repoLabel,
-      summary: snapshot.summary.replace(/under [^.]+/, `under ${repoLabel.split('/').slice(-2).join('/')}`),
+      rootPath: target.repoLabel,
+      summary: snapshot.summary.replace(
+        /under [^.]+/,
+        `under ${target.repoLabel.replace(/^https:\/\/github\.com\//, '')}`,
+      ),
     };
   } finally {
     await rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
@@ -274,6 +392,7 @@ export function importDesignSystemFromManual(input: {
   const spacing = (input.spacing ?? []).slice(0, 16);
   const radius = (input.radius ?? []).slice(0, 16);
   const shadows = (input.shadows ?? []).slice(0, 16);
+  const components = (input.components ?? []).slice(0, 32);
   const summaryParts: string[] = [
     input.summary?.trim() ||
       `Manually configured design system${input.name ? ` "${input.name}"` : ''}.`,
@@ -282,6 +401,7 @@ export function importDesignSystemFromManual(input: {
   if (fonts.length > 0) summaryParts.push(`Typography: ${fonts.slice(0, 4).join(', ')}.`);
   if (spacing.length > 0) summaryParts.push(`Spacing: ${spacing.slice(0, 4).join(', ')}.`);
   if (radius.length > 0) summaryParts.push(`Radius: ${radius.slice(0, 4).join(', ')}.`);
+  if (components.length > 0) summaryParts.push(`Components: ${components.slice(0, 8).join(', ')}.`);
 
   return {
     schemaVersion: STORED_DESIGN_SYSTEM_SCHEMA_VERSION,
@@ -294,5 +414,6 @@ export function importDesignSystemFromManual(input: {
     spacing,
     radius,
     shadows,
+    components,
   };
 }

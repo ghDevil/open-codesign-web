@@ -82,6 +82,7 @@ const StoredDesignSystemShape = z.object({
   spacing: z.array(z.string().min(1)).max(16).default([]),
   radius: z.array(z.string().min(1)).max(16).default([]),
   shadows: z.array(z.string().min(1)).max(16).default([]),
+  components: z.array(z.string().min(1)).max(32).default([]),
 });
 
 export const StoredDesignSystem = z.preprocess((raw) => {

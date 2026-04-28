@@ -159,6 +159,25 @@ function collectLooseValues(
   }
 }
 
+function collectComponentClues(relativePath: string, components: string[]): void {
+  const normalized = relativePath.replace(/\\/g, '/');
+  const componentMatch = normalized.match(
+    /(?:^|\/)(?:components?|ui|views|widgets|blocks)\/([^/]+)\.[A-Za-z0-9]+$/i,
+  );
+  const fileName = componentMatch?.[1] ?? basename(normalized, extname(normalized));
+  if (!fileName || /^index$|^styles?$|^theme$|^tokens?$|^variables?$|^global$/i.test(fileName)) {
+    return;
+  }
+  const cleaned = fileName
+    .replace(/\.(test|spec|stories)$/i, '')
+    .replace(/[-_]/g, ' ')
+    .trim();
+  if (!cleaned) return;
+  if (/^[A-Z]/.test(fileName) || componentMatch) {
+    pushUnique(components, cleaned, 32);
+  }
+}
+
 function buildSummary(
   snapshot: Omit<StoredDesignSystem, 'schemaVersion' | 'summary' | 'extractedAt'>,
 ): string {
@@ -176,6 +195,8 @@ function buildSummary(
     parts.push(`Corner radius cues: ${snapshot.radius.slice(0, 4).join(', ')}.`);
   if (snapshot.shadows.length > 0)
     parts.push(`Shadow cues: ${snapshot.shadows.slice(0, 4).join(', ')}.`);
+  if (snapshot.components.length > 0)
+    parts.push(`Component clues: ${snapshot.components.slice(0, 6).join(', ')}.`);
   if (parts.length === 1) {
     parts.push(
       'No strong structured tokens were extracted, so lean on the referenced styling files and keep the output conservative and cohesive.',
@@ -197,6 +218,7 @@ export async function scanDesignSystem(rootPath: string): Promise<StoredDesignSy
   const spacing: string[] = [];
   const radius: string[] = [];
   const shadows: string[] = [];
+  const components: string[] = [];
 
   for (const file of selected) {
     let raw = '';
@@ -208,6 +230,7 @@ export async function scanDesignSystem(rootPath: string): Promise<StoredDesignSy
     const snippet = raw.slice(0, MAX_FILE_CHARS);
     collectCssVarValues(snippet, colors, spacing, radius, shadows);
     collectLooseValues(snippet, colors, fonts, spacing, radius, shadows);
+    collectComponentClues(file.relativePath, components);
   }
 
   const baseSnapshot = {
@@ -218,6 +241,7 @@ export async function scanDesignSystem(rootPath: string): Promise<StoredDesignSy
     spacing,
     radius,
     shadows,
+    components,
   };
 
   return {

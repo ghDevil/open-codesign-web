@@ -8,7 +8,7 @@ interface DesignSystemSummary {
   extractedAt: string;
   colors: string[];
   fonts: string[];
-  components?: string[];
+  components: string[];
 }
 
 type Mode = 'github' | 'figma' | 'manual';
@@ -20,7 +20,8 @@ const MODE_LABEL: Record<Mode, string> = {
 };
 
 const MODE_HINT: Record<Mode, string> = {
-  github: 'Paste a public GitHub URL or "owner/repo". We clone it shallow, extract design tokens (colors, fonts, spacing, radius, shadows), then discard the clone.',
+  github:
+    'Paste a public GitHub URL, "owner/repo", "owner/repo@branch", or "owner/repo@branch:path/to/subdir". We shallow-clone, scan likely design-system files, then discard the clone.',
   figma: 'Paste a figma.com/file or /design URL. We pull color & text styles, components, and frame styles via the Figma REST API.',
   manual: 'Paste your tokens directly. One value per line.',
 };
@@ -73,6 +74,7 @@ export function DesignSystemsTab() {
   const [manualSpacing, setManualSpacing] = useState('');
   const [manualRadius, setManualRadius] = useState('');
   const [manualShadows, setManualShadows] = useState('');
+  const [manualComponents, setManualComponents] = useState('');
 
   useEffect(() => {
     void refresh();
@@ -83,7 +85,11 @@ export function DesignSystemsTab() {
       const result = await getJson<{ designSystem: DesignSystemSummary | null }>(
         '/api/design-system',
       );
-      setSnapshot(result.designSystem);
+      setSnapshot(
+        result.designSystem
+          ? { ...result.designSystem, components: result.designSystem.components ?? [] }
+          : null,
+      );
     } catch {
       setSnapshot(null);
     }
@@ -136,6 +142,7 @@ export function DesignSystemsTab() {
         spacing: splitLines(manualSpacing),
         radius: splitLines(manualRadius),
         shadows: splitLines(manualShadows),
+        components: splitLines(manualComponents),
       });
       await refresh();
     } catch (err) {
@@ -210,7 +217,7 @@ export function DesignSystemsTab() {
                         style={{ backgroundColor: c }}
                       />
                     ) : null}
-                    {c.length > 18 ? `${c.slice(0, 16)}…` : c}
+                    {c.length > 18 ? `${c.slice(0, 16)}...` : c}
                   </span>
                 );
               })}
@@ -221,11 +228,17 @@ export function DesignSystemsTab() {
               <span className="font-medium">Fonts:</span> {snapshot.fonts.slice(0, 6).join(', ')}
             </p>
           ) : null}
+          {snapshot.components.length > 0 ? (
+            <p className="text-[var(--text-xs)] text-[var(--color-text-secondary)]">
+              <span className="font-medium">Components:</span>{' '}
+              {snapshot.components.slice(0, 8).join(', ')}
+            </p>
+          ) : null}
         </div>
       ) : (
         <div className="rounded-[var(--radius-lg)] border border-dashed border-[var(--color-border)] p-4">
           <p className="text-[var(--text-sm)] text-[var(--color-text-secondary)]">
-            No design system yet. Add one below — every new generation will use these tokens by
+            No design system yet. Add one below - every new generation will use these tokens by
             default.
           </p>
         </div>
@@ -265,7 +278,7 @@ export function DesignSystemsTab() {
                   type="text"
                   value={repoUrl}
                   onChange={(e) => setRepoUrl(e.target.value)}
-                  placeholder="https://github.com/owner/repo  or  owner/repo"
+                  placeholder="https://github.com/owner/repo/tree/main/packages/ui"
                   disabled={busy}
                   className="flex-1 h-9 px-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--text-sm)] focus:border-[var(--color-accent)] focus:outline-none"
                 />
@@ -278,7 +291,7 @@ export function DesignSystemsTab() {
               className="inline-flex items-center gap-1.5 h-9 px-4 rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[var(--text-sm)] font-medium hover:opacity-90 disabled:opacity-50"
             >
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-              {busy ? 'Scanning…' : 'Scan repo'}
+              {busy ? 'Scanning...' : 'Scan repo'}
             </button>
           </div>
         ) : null}
@@ -308,7 +321,7 @@ export function DesignSystemsTab() {
               className="inline-flex items-center gap-1.5 h-9 px-4 rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[var(--text-sm)] font-medium hover:opacity-90 disabled:opacity-50"
             >
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-              {busy ? 'Importing…' : 'Import from Figma'}
+              {busy ? 'Importing...' : 'Import from Figma'}
             </button>
           </div>
         ) : null}
@@ -339,6 +352,7 @@ export function DesignSystemsTab() {
                 setManualShadows,
                 '0 1px 2px rgba(0,0,0,0.06)\n0 6px 24px rgba(0,0,0,0.12)',
               ],
+              ['Components', manualComponents, setManualComponents, 'Primary Button\nCard\nTop Nav'],
             ].map(([label, value, setValue, placeholder]) => (
               <label key={label as string} className="block">
                 <span className="text-[var(--text-xs)] uppercase tracking-[0.04em] text-[var(--color-text-muted)]">
@@ -361,7 +375,7 @@ export function DesignSystemsTab() {
               className="inline-flex items-center gap-1.5 h-9 px-4 rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[var(--text-sm)] font-medium hover:opacity-90 disabled:opacity-50"
             >
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-              {busy ? 'Saving…' : 'Save manually'}
+              {busy ? 'Saving...' : 'Save manually'}
             </button>
           </div>
         ) : null}
