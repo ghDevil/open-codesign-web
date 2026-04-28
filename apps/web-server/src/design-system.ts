@@ -12,9 +12,12 @@ const IGNORED_DIRS = new Set([
   '.next',
   '.turbo',
   '.vscode',
+  '__mocks__',
+  '__tests__',
   'build',
   'coverage',
   'dist',
+  'fixtures',
   'node_modules',
   'out',
 ]);
@@ -68,6 +71,8 @@ function cleanValue(value: string): string {
 function scoreCandidate(relativePath: string): number {
   const fileName = basename(relativePath);
   let score = 1;
+  if (/(^|\/)__tests__\/|(^|\/)__mocks__\/|(^|\/)fixtures?\//i.test(relativePath)) score -= 40;
+  if (/(?:^|[-_.])(test|spec|stories)$/i.test(basename(fileName, extname(fileName)))) score -= 30;
   for (const pattern of PRIORITY_PATTERNS) {
     if (pattern.test(relativePath) || pattern.test(fileName)) score += 20;
   }
@@ -101,6 +106,8 @@ async function collectCandidateFiles(
       continue;
     }
     if (!entry.isFile()) continue;
+    const stem = basename(entry.name, extname(entry.name));
+    if (/(?:^|[-_.])(test|spec|stories)$/i.test(stem)) continue;
     const extension = extname(entry.name).toLowerCase();
     if (!CANDIDATE_EXTS.has(extension) && !/tailwind\.config/i.test(entry.name)) continue;
     const relativePath = relative(rootPath, fullPath).replace(/\\/g, '/');
@@ -169,7 +176,7 @@ function collectComponentClues(relativePath: string, components: string[]): void
     return;
   }
   const cleaned = fileName
-    .replace(/\.(test|spec|stories)$/i, '')
+    .replace(/[-_.](test|spec|stories)$/i, '')
     .replace(/[-_]/g, ' ')
     .trim();
   if (!cleaned) return;
