@@ -154,6 +154,78 @@ function WorkspaceSection() {
   );
 }
 
+function ProjectInstructionsSection() {
+  const t = useT();
+  const currentDesignId = useCodesignStore((s) => s.currentDesignId);
+  const designs = useCodesignStore((s) => s.designs);
+  const isGenerating = useCodesignStore((s) => s.isGenerating);
+  const generatingDesignId = useCodesignStore((s) => s.generatingDesignId);
+  const currentDesign = designs.find((d) => d.id === currentDesignId) ?? null;
+  const persisted = currentDesign?.projectInstructions ?? '';
+  const [draft, setDraft] = useState(persisted);
+  const [saving, setSaving] = useState(false);
+  const dirty = draft.trim() !== persisted.trim();
+
+  useEffect(() => {
+    setDraft(persisted);
+  }, [persisted, currentDesignId]);
+
+  async function handleSave(): Promise<void> {
+    if (!currentDesignId || !window.codesign?.snapshots.setProjectInstructions) return;
+    try {
+      setSaving(true);
+      const updated = await window.codesign.snapshots.setProjectInstructions(
+        currentDesignId,
+        draft.trim().length > 0 ? draft.trim() : null,
+      );
+      useCodesignStore.setState((state) => ({
+        designs: state.designs.map((design) => (design.id === updated.id ? updated : design)),
+      }));
+      useCodesignStore.getState().pushToast({
+        variant: 'success',
+        title: t('canvas.projectInstructions.saved'),
+      });
+    } catch (err) {
+      useCodesignStore.getState().pushToast({
+        variant: 'error',
+        title: t('canvas.projectInstructions.saveFailed'),
+        description: err instanceof Error ? err.message : t('errors.unknown'),
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="border-b border-[var(--color-border-muted)] px-[var(--space-4)] py-[var(--space-4)]">
+      <div className="mb-[var(--space-2)] flex items-center justify-between gap-[var(--space-3)]">
+        <div>
+          <h2 className="m-0 text-[10px] uppercase tracking-[var(--tracking-label)] text-[var(--color-text-muted)] font-medium">
+            {t('canvas.projectInstructions.title')}
+          </h2>
+          <p className="mt-[var(--space-1)] text-[11px] leading-[var(--leading-body)] text-[var(--color-text-muted)]">
+            {t('canvas.projectInstructions.hint')}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={!dirty || saving || (isGenerating && generatingDesignId === currentDesignId)}
+          className="h-7 shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-[var(--space-2_5)] text-[10px] uppercase tracking-[var(--tracking-label)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {saving ? t('common.loading') : t('canvas.projectInstructions.save')}
+        </button>
+      </div>
+      <textarea
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        placeholder={t('canvas.projectInstructions.placeholder')}
+        className="min-h-[112px] w-full resize-y rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-[var(--space-3)] py-[var(--space-3)] text-[12px] leading-[var(--leading-body)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
+      />
+    </section>
+  );
+}
+
 function formatBytes(n: number | undefined): string {
   if (n === undefined) return '';
   if (n < 1024) return `${n} B`;
@@ -176,6 +248,7 @@ export function FilesTabView() {
   }, [files]);
 
   const [selectedPath, setSelectedPath] = useState<string | null>(defaultPath);
+  const [selectedFileContent, setSelectedFileContent] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedPath || !files.find((f) => f.path === selectedPath)) {
@@ -183,7 +256,7 @@ export function FilesTabView() {
     }
   }, [defaultPath, files, selectedPath]);
 
-  const selectedSource = selectedPath === 'index.html' ? previewHtml : null;
+  const selectedSource = selectedPath === 'index.html' ? (previewHtml ?? selectedFileContent) : null;
   const srcDoc = useMemo(
     () => (selectedSource ? buildSrcdoc(selectedSource) : null),
     [selectedSource],
@@ -191,14 +264,36 @@ export function FilesTabView() {
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentDesignId || !selectedPath || !window.codesign?.files?.view) {
+      setSelectedFileContent(null);
+      return;
+    }
+    window.codesign.files
+      .view(currentDesignId, selectedPath)
+      .then((file) => {
+        if (cancelled) return;
+        setSelectedFileContent(file?.content ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSelectedFileContent(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentDesignId, selectedPath]);
+
   if (files.length === 0) {
     return (
       <div className="flex h-full min-h-0">
-        <aside className="w-[35%] shrink-0 border-r border-[var(--color-border-muted)] bg-[var(--color-background)] overflow-y-auto flex flex-col">
-          <WorkspaceSection />
-          <div className="flex-1 flex items-center justify-center text-[var(--text-sm)] text-[var(--color-text-muted)] px-[var(--space-6)]">
-            {t('canvas.filesTabEmpty')}
-          </div>
+      <aside className="w-[35%] shrink-0 border-r border-[var(--color-border-muted)] bg-[var(--color-background)] overflow-y-auto flex flex-col">
+        <WorkspaceSection />
+        <ProjectInstructionsSection />
+        <div className="flex-1 flex items-center justify-center text-[var(--text-sm)] text-[var(--color-text-muted)] px-[var(--space-6)]">
+          {t('canvas.filesTabEmpty')}
+        </div>
         </aside>
         <div className="flex-1 min-w-0 h-full bg-[var(--color-background-secondary)] flex items-center justify-center text-[var(--text-sm)] text-[var(--color-text-muted)]">
           {t('canvas.filesTabEmpty')}
@@ -213,6 +308,7 @@ export function FilesTabView() {
     <div className="flex h-full min-h-0">
       <aside className="w-[35%] shrink-0 border-r border-[var(--color-border-muted)] bg-[var(--color-background)] overflow-y-auto flex flex-col">
         <WorkspaceSection />
+        <ProjectInstructionsSection />
         <div className="px-[var(--space-6)] py-[var(--space-6)]">
           <div className="mb-[var(--space-4)] flex items-center gap-[var(--space-2)]">
             <h2 className="text-[11px] uppercase tracking-[var(--tracking-label)] text-[var(--color-text-muted)] font-medium m-0">
@@ -319,9 +415,13 @@ export function FilesTabView() {
               }}
               className="w-full h-full bg-white border-0 block"
             />
+          ) : selectedFileContent !== null ? (
+            <pre className="m-0 h-full overflow-auto bg-[var(--color-background)] p-[var(--space-4)] text-[12px] leading-[1.5] text-[var(--color-text-primary)]">
+              <code>{selectedFileContent}</code>
+            </pre>
           ) : (
             <div className="h-full flex items-center justify-center text-[var(--text-sm)] text-[var(--color-text-muted)]">
-              {t('canvas.filesTabEmpty')}
+              {t('canvas.files.previewUnavailable')}
             </div>
           )}
         </div>

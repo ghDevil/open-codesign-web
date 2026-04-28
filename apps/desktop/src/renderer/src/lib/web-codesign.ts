@@ -4,7 +4,7 @@ import type {
   DesignSystemLibraryItem,
   ImageGenerationSettingsView,
 } from '../../../preload/index';
-import type { Design } from '@open-codesign/shared';
+import type { Design, DesignFile } from '@open-codesign/shared';
 import {
   buildHostedWorkspaceDisplayPath,
   normalizeHostedWorkspaceUploadPath,
@@ -668,6 +668,11 @@ function installWebCodesign(): void {
           method: 'PATCH',
           body: { name },
         }),
+      setProjectInstructions: (id: string, projectInstructions: string | null) =>
+        apiJson(`/api/designs/${encodeURIComponent(id)}/project-instructions`, {
+          method: 'PATCH',
+          body: { projectInstructions },
+        }),
       setThumbnail: (id: string, thumbnailText: string | null) =>
         apiJson(`/api/designs/${encodeURIComponent(id)}/thumbnail`, {
           method: 'PATCH',
@@ -722,6 +727,14 @@ function installWebCodesign(): void {
         );
         return { exists: Boolean(design?.workspacePath) };
       },
+    },
+    files: {
+      list: (designId: string) =>
+        apiJson<DesignFile[]>(`/api/designs/${encodeURIComponent(designId)}/files`),
+      view: (designId: string, path: string) =>
+        apiJson<DesignFile>(
+          `/api/designs/${encodeURIComponent(designId)}/files/view?path=${encodeURIComponent(path)}`,
+        ),
     },
     chat: {
       list: (designId: string) => apiJson(`/api/designs/${encodeURIComponent(designId)}/chat`),

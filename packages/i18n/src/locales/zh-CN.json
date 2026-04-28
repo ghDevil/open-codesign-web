@@ -47,7 +47,8 @@
     "files": {
       "sectionTitle": "设计文件",
       "sectionSubtitle": "共 {{count}} 个文件",
-      "empty": "还没有文件。发送一个 prompt 让 AI 生成设计后，文件会出现在这里。"
+      "empty": "还没有文件。发送一个 prompt 让 AI 生成设计后，文件会出现在这里。",
+      "previewUnavailable": "???????????"
     },
     "newDesignDialog": {
       "title": "新建项目",
@@ -79,6 +80,14 @@
       "collapse": "折叠文件",
       "expand": "展开文件",
       "empty": "还没有文件"
+    },
+    "projectInstructions": {
+      "title": "????",
+      "hint": "???????????????????????????????",
+      "placeholder": "??????????????????????? Claude ????????????????",
+      "save": "????",
+      "saved": "???????",
+      "saveFailed": "????????"
     }
   },
   "preview": {
@@ -295,8 +304,8 @@
         "apiKey": "API Key",
         "apiKeyEditPlaceholder": "留空则保留 {{mask}}",
         "defaultModel": "默认模型",
-        "compatibilityHintTitle": "\u517c\u5bb9\u6027\u63d0\u793a",
-        "compatibilityHintBody": "\u90e8\u5206 coding plan\uff0c\u534f\u8bae\u8f6c\u6362\u670d\u52a1\u6216 OpenAI \u517c\u5bb9\u7f51\u5173\u53ea\u5141\u8bb8\u7279\u5b9a\u5ba2\u6237\u7aef\uff08\u5982 Claude Code\uff0copenclaw\uff0cHermes\uff09\u8bbf\u95ee\u3002\u5373\u4f7f API \u770b\u8d77\u6765\u517c\u5bb9\uff0cOpen CoDesign \u4e5f\u53ef\u80fd\u56e0\u4e3a\u5e94\u7528\u767d\u540d\u5355\u800c\u65e0\u6cd5\u4f7f\u7528\u3002",
+        "compatibilityHintTitle": "兼容性提示",
+        "compatibilityHintBody": "部分 coding plan，协议转换服务或 OpenAI 兼容网关只允许特定客户端（如 Claude Code，openclaw，Hermes）访问。即使 API 看起来兼容，Open CoDesign 也可能因为应用白名单而无法使用。",
         "switchToManual": "手动输入",
         "switchToDropdown": "从列表选择",
         "discoveringModels": "正在发现模型…",
@@ -901,8 +910,8 @@
     "testAgain": "再次测试",
     "showLog": "查看完整日志",
     "showLogFailed": "无法打开日志文件夹",
-    "gatewayAllowlistHintTitle": "\u8fd9\u4e2a\u7aef\u70b9\u53ef\u80fd\u9650\u5236\u53ef\u63a5\u5165\u7684\u5e94\u7528",
-    "gatewayAllowlistHintBody": "\u90e8\u5206 coding plan \u548c\u534f\u8bae\u8f6c\u6362\u7f51\u5173\u4f1a\u914d\u7f6e\u5e94\u7528\u767d\u540d\u5355\u3002\u5b83\u4eec\u5373\u4f7f\u58f0\u79f0\u63d0\u4f9b OpenAI \u517c\u5bb9 API\uff0c\u4e5f\u53ef\u80fd\u5728\u6ca1\u6709\u663e\u5f0f\u5141\u8bb8 Open CoDesign \u7684\u60c5\u51b5\u4e0b\u62d2\u7edd\u8bf7\u6c42\u3002",
+    "gatewayAllowlistHintTitle": "这个端点可能限制可接入的应用",
+    "gatewayAllowlistHintBody": "部分 coding plan 和协议转换网关会配置应用白名单。它们即使声称提供 OpenAI 兼容 API，也可能在没有显式允许 Open CoDesign 的情况下拒绝请求。",
     "dismiss": "关闭",
     "report": {
       "title": "上报问题",

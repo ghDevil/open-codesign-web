@@ -47,7 +47,8 @@
     "files": {
       "sectionTitle": "Arquivos de design",
       "sectionSubtitle": "{{count}} arquivos",
-      "empty": "Nenhum arquivo ainda. Envie um prompt para o agente gerar um design — os arquivos vão aparecer aqui."
+      "empty": "Nenhum arquivo ainda. Envie um prompt para o agente gerar um design — os arquivos vão aparecer aqui.",
+      "previewUnavailable": "Pr?-visualiza??o indispon?vel para este tipo de arquivo"
     },
     "newDesignDialog": {
       "title": "Novo design",
@@ -79,6 +80,14 @@
       "collapse": "Recolher arquivos",
       "expand": "Expandir arquivos",
       "empty": "Nenhum arquivo ainda"
+    },
+    "projectInstructions": {
+      "title": "Instru??es do projeto",
+      "hint": "Defina orienta??es persistentes para este design, para que futuras gera??es e edi??es continuem alinhadas.",
+      "placeholder": "Registre restri??es do produto, p?blico, objetivos, tom ou qualquer contexto que o Claude deva lembrar em cada etapa.",
+      "save": "Salvar instru??es",
+      "saved": "Instru??es do projeto salvas",
+      "saveFailed": "Falha ao salvar instru??es do projeto"
     }
   },
   "preview": {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useCodesignStore } from '../store';
+import type { DesignFile } from '@open-codesign/shared';
 
 export type DesignFileKind = 'html' | 'asset';
 
@@ -16,56 +16,54 @@ export interface UseDesignFilesResult {
   backend: 'snapshots' | 'files-ipc';
 }
 
-// TODO: Workstream E — swap the implementation of this hook to call
-// `window.codesign.files.list(designId)` once the files-ipc namespace lands.
-// The hook signature (DesignFileEntry[]) stays stable, so consumers do not
-// change. Until then we derive a single virtual `index.html` file from the
-// latest snapshot in `design_snapshots`.
+function classifyKind(path: string): DesignFileKind {
+  return /\.html?$/i.test(path) ? 'html' : 'asset';
+}
+
+function toEntry(file: DesignFile): DesignFileEntry {
+  return {
+    path: file.path,
+    kind: classifyKind(file.path),
+    updatedAt: file.updatedAt,
+    size: file.content.length,
+  };
+}
+
 export function useDesignFiles(designId: string | null): UseDesignFilesResult {
-  const previewHtml = useCodesignStore((s) => s.previewHtml);
-  const designs = useCodesignStore((s) => s.designs);
-  const [latestSnapshotAt, setLatestSnapshotAt] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [files, setFiles] = useState<DesignFileEntry[]>([]);
+  const [loading, setLoading] = useState(false);
   const filesIpcAvailable =
     typeof window !== 'undefined' &&
     Boolean((window.codesign as unknown as { files?: unknown })?.files);
 
-  // Look up the latest snapshot timestamp for the current design so the Files
-  // panel can show "N minutes ago" next to the sole `index.html` row. We
-  // debounce on designId + previewHtml so a fresh generation refreshes it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: previewHtml is intentionally listed as a fresh-generation signal
   useEffect(() => {
     let cancelled = false;
-    if (!designId || !window.codesign) {
-      setLatestSnapshotAt(null);
+    if (!designId || !window.codesign?.files?.list) {
+      setFiles([]);
+      setLoading(false);
       return;
     }
+
     setLoading(true);
-    window.codesign.snapshots
+    window.codesign.files
       .list(designId)
-      .then((snaps) => {
+      .then((result) => {
         if (cancelled) return;
-        setLatestSnapshotAt(snaps[0]?.createdAt ?? null);
+        setFiles(result.map(toEntry));
       })
       .catch(() => {
         if (cancelled) return;
-        setLatestSnapshotAt(null);
+        setFiles([]);
       })
       .finally(() => {
         if (cancelled) return;
         setLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
-  }, [designId, previewHtml]);
-
-  const files: DesignFileEntry[] = [];
-  if (designId && previewHtml) {
-    const design = designs.find((d) => d.id === designId);
-    const updatedAt = latestSnapshotAt ?? design?.updatedAt ?? new Date().toISOString();
-    files.push({ path: 'index.html', kind: 'html', updatedAt, size: previewHtml.length });
-  }
+  }, [designId]);
 
   return {
     files,
@@ -74,7 +72,6 @@ export function useDesignFiles(designId: string | null): UseDesignFilesResult {
   };
 }
 
-// Format an ISO timestamp as "22h ago" / "3d ago". Pure for testability.
 export function formatRelativeTime(isoTime: string, now: Date = new Date()): string {
   const then = new Date(isoTime).getTime();
   if (Number.isNaN(then)) return '';
@@ -93,7 +90,6 @@ export function formatRelativeTime(isoTime: string, now: Date = new Date()): str
   return `${years}y ago`;
 }
 
-// Precise tooltip form: "Modified Apr 20, 2026, 14:32".
 export function formatAbsoluteTime(isoTime: string): string {
   const date = new Date(isoTime);
   if (Number.isNaN(date.getTime())) return '';

@@ -78,6 +78,7 @@ import {
   getSnapshot,
   listChatMessages,
   listComments,
+  listDesignFiles,
   listDesigns,
   listPendingEdits,
   listSnapshots,
@@ -89,8 +90,10 @@ import {
   softDeleteDesign,
   updateChatToolCallStatus,
   updateComment,
+  updateDesignProjectInstructions,
   updateDesignWorkspace,
   upsertDesignFile,
+  viewDesignFile,
 } from './db-queries.js';
 import { scanDesignSystem } from './design-system.js';
 import {
@@ -1253,6 +1256,8 @@ app.post('/api/generate', async (req: Request, res: Response) => {
     (payload as { designSystemId?: string }).designSystemId,
   );
   const workspaceContext = buildHostedWorkspaceContext(db, designId);
+  const projectInstructions =
+    designId !== null ? getDesign(db, designId)?.projectInstructions ?? null : null;
 
   const generateInput = {
     prompt: steeredPrompt,
@@ -1270,6 +1275,7 @@ app.post('/api/generate', async (req: Request, res: Response) => {
     attachments: payload.attachments as never,
     referenceUrl: payload.referenceUrl ? { url: payload.referenceUrl } : undefined,
     designSystem: resolvedDesignSystem,
+    ...(projectInstructions ? { projectInstructions: { instructions: projectInstructions } } : {}),
     workspaceContext,
     ...(baseUrl !== undefined ? { baseUrl } : {}),
     wire: active.wire,
@@ -1432,7 +1438,11 @@ app.post('/api/clarify-prompt', async (req, res) => {
       buildResolveActiveApiKeyDeps(),
     );
     const resolvedDesignSystem = await resolveDesignSystemForRequest(payload.designSystemId);
-    const workspaceContext = buildHostedWorkspaceContext(getDb(), payload.designId);
+    const db = getDb();
+    const workspaceContext = buildHostedWorkspaceContext(db, payload.designId);
+    const projectInstructions = payload.designId
+      ? getDesign(db, payload.designId)?.projectInstructions ?? null
+      : null;
     const result = await clarifyPrompt({
       prompt: payload.prompt,
       model: active.model,
@@ -1446,6 +1456,7 @@ app.post('/api/clarify-prompt', async (req, res) => {
       attachments: payload.attachments as never,
       referenceUrl: payload.referenceUrl ? { url: payload.referenceUrl } : undefined,
       designSystem: resolvedDesignSystem,
+      ...(projectInstructions ? { projectInstructions: { instructions: projectInstructions } } : {}),
       workspaceContext,
     });
     res.json(result);
@@ -1476,7 +1487,11 @@ app.post('/api/apply-comment', async (req, res) => {
       buildResolveActiveApiKeyDeps(),
     );
     const resolvedDesignSystem = await resolveDesignSystemForRequest(payload.designSystemId);
-    const workspaceContext = buildHostedWorkspaceContext(getDb(), payload.designId);
+    const db = getDb();
+    const workspaceContext = buildHostedWorkspaceContext(db, payload.designId);
+    const projectInstructions = payload.designId
+      ? getDesign(db, payload.designId)?.projectInstructions ?? null
+      : null;
     const result = await applyComment({
       html: payload.html,
       comment: payload.comment,
@@ -1486,6 +1501,7 @@ app.post('/api/apply-comment', async (req, res) => {
       attachments: payload.attachments as never,
       referenceUrl: payload.referenceUrl ? { url: payload.referenceUrl } : undefined,
       designSystem: resolvedDesignSystem,
+      ...(projectInstructions ? { projectInstructions: { instructions: projectInstructions } } : {}),
       workspaceContext,
       ...(active.baseUrl ? { baseUrl: active.baseUrl } : {}),
       wire: active.wire,
@@ -1540,6 +1556,24 @@ app.get('/api/designs/:id', (req, res) => {
   }
 });
 
+app.patch('/api/designs/:id/project-instructions', (req, res) => {
+  try {
+    const designId = req.params.id;
+    const rawInstructions = (req.body as { projectInstructions?: unknown }).projectInstructions;
+    const projectInstructions =
+      typeof rawInstructions === 'string' ? rawInstructions.trim() : '';
+    const updated = updateDesignProjectInstructions(
+      getDb(),
+      designId,
+      projectInstructions.length > 0 ? projectInstructions : null,
+    );
+    if (!updated) return sendError(res, 404, 'Design not found', 'not_found');
+    res.json(updated);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 app.patch('/api/designs/:id/rename', (req, res) => {
   try {
     const { name } = req.body as { name: string };
@@ -1573,6 +1607,34 @@ app.post('/api/designs/:id/duplicate', (req, res) => {
   try {
     const design = duplicateDesign(getDb(), req.params.id);
     res.json(design);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get('/api/designs/:id/files', (req, res) => {
+  try {
+    const designId = req.params.id;
+    const design = getDesign(getDb(), designId);
+    if (!design) return sendError(res, 404, 'Design not found', 'not_found');
+    res.json(listDesignFiles(getDb(), designId));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get('/api/designs/:id/files/view', (req, res) => {
+  try {
+    const designId = req.params.id;
+    const design = getDesign(getDb(), designId);
+    if (!design) return sendError(res, 404, 'Design not found', 'not_found');
+    const pathValue = Array.isArray(req.query['path']) ? req.query['path'][0] : req.query['path'];
+    if (typeof pathValue !== 'string' || pathValue.trim().length === 0) {
+      return sendError(res, 400, 'path is required', 'bad_request');
+    }
+    const file = viewDesignFile(getDb(), designId, normalizeDesignFilePath(pathValue.trim()));
+    if (!file) return sendError(res, 404, 'File not found', 'not_found');
+    res.json(file);
   } catch (err) {
     handleError(res, err);
   }

@@ -47,7 +47,8 @@
     "files": {
       "sectionTitle": "Design files",
       "sectionSubtitle": "{{count}} files",
-      "empty": "No files yet. Send a prompt to have the agent generate a design — files will show up here."
+      "empty": "No files yet. Send a prompt to have the agent generate a design — files will show up here.",
+      "previewUnavailable": "Preview unavailable for this file type"
     },
     "newDesignDialog": {
       "title": "New design",
@@ -79,6 +80,14 @@
       "collapse": "Collapse files",
       "expand": "Expand files",
       "empty": "No files yet"
+    },
+    "projectInstructions": {
+      "title": "Project instructions",
+      "hint": "Set persistent guidance for this design so future generations and edits stay aligned.",
+      "placeholder": "Capture product constraints, audience, goals, voice, or anything Claude should keep in mind for every turn.",
+      "save": "Save instructions",
+      "saved": "Project instructions saved",
+      "saveFailed": "Failed to save project instructions"
     }
   },
   "preview": {

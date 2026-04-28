@@ -23,6 +23,7 @@ export const DesignV1 = z.object({
   thumbnailText: z.string().nullable().default(null),
   deletedAt: z.string().nullable().default(null),
   workspacePath: z.string().nullable().default(null),
+  projectInstructions: z.string().nullable().default(null),
 });
 export type Design = z.infer<typeof DesignV1>;
 

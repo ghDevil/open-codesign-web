@@ -91,7 +91,8 @@ function applySchema(db: Database): void {
       schema_version INTEGER NOT NULL DEFAULT 1,
       name          TEXT NOT NULL DEFAULT 'Untitled design',
       created_at    TEXT NOT NULL,
-      updated_at    TEXT NOT NULL
+      updated_at    TEXT NOT NULL,
+      project_instructions TEXT
     );
 
     CREATE TABLE IF NOT EXISTS design_snapshots (
@@ -210,6 +211,9 @@ function applyAdditiveMigrations(db: Database): void {
   }
   if (!designCols.includes('workspace_path')) {
     db.exec('ALTER TABLE designs ADD COLUMN workspace_path TEXT');
+  }
+  if (!designCols.includes('project_instructions')) {
+    db.exec('ALTER TABLE designs ADD COLUMN project_instructions TEXT');
   }
 
   // Comments v2 — add scope ('element'|'global') and parent_outer_html for
@@ -356,6 +360,7 @@ interface DesignRow {
   thumbnail_text: string | null;
   deleted_at: string | null;
   workspace_path: string | null;
+  project_instructions: string | null;
 }
 
 interface SnapshotRow {
@@ -393,6 +398,7 @@ function rowToDesign(row: DesignRow): Design {
     thumbnailText: row.thumbnail_text ?? null,
     deletedAt: row.deleted_at ?? null,
     workspacePath: row.workspace_path ?? null,
+    projectInstructions: row.project_instructions ?? null,
   };
 }
 
@@ -496,6 +502,19 @@ export function clearDesignWorkspace(db: Database, id: string): Design | null {
   return getDesign(db, id);
 }
 
+export function updateDesignProjectInstructions(
+  db: Database,
+  id: string,
+  projectInstructions: string | null,
+): Design | null {
+  const now = new Date().toISOString();
+  const result = db
+    .prepare('UPDATE designs SET project_instructions = ?, updated_at = ? WHERE id = ?')
+    .run(projectInstructions, now, id);
+  if (result.changes === 0) return null;
+  return getDesign(db, id);
+}
+
 /**
  * Duplicate a design row + all its messages + all its snapshots. Snapshot
  * parent_id references are remapped to point at the freshly-cloned snapshots
@@ -511,8 +530,8 @@ export function duplicateDesign(db: Database, sourceId: string, newName: string)
 
   const tx = db.transaction(() => {
     db.prepare(
-      'INSERT INTO designs (id, schema_version, name, created_at, updated_at, thumbnail_text, deleted_at, workspace_path) VALUES (?, 1, ?, ?, ?, ?, NULL, NULL)',
-    ).run(newId, trimmed, now, now, source.thumbnailText);
+      'INSERT INTO designs (id, schema_version, name, created_at, updated_at, thumbnail_text, deleted_at, workspace_path, project_instructions) VALUES (?, 1, ?, ?, ?, ?, NULL, NULL, ?)',
+    ).run(newId, trimmed, now, now, source.thumbnailText, source.projectInstructions);
 
     const messages = db
       .prepare('SELECT * FROM design_messages WHERE design_id = ? ORDER BY ordinal ASC')

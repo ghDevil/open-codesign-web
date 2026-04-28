@@ -57,6 +57,7 @@ import type {
   AttachmentContext,
   GenerateInput,
   GenerateOutput,
+  ProjectInstructionsContext,
   ReferenceUrlContext,
   WorkspaceContext,
 } from './index.js';
@@ -152,6 +153,15 @@ ${payload}
 </untrusted_scanned_content>`;
 }
 
+function formatProjectInstructions(
+  projectInstructions: ProjectInstructionsContext | null | undefined,
+): string | null {
+  const instructions = projectInstructions?.instructions?.trim();
+  if (!instructions) return null;
+  return `## Project instructions
+${instructions}`;
+}
+
 function formatAttachments(attachments: AttachmentContext[]): string | null {
   if (attachments.length === 0) return null;
   const body = attachments
@@ -176,12 +186,15 @@ function formatReferenceUrl(referenceUrl: ReferenceUrlContext | null | undefined
 
 function buildContextSections(input: {
   designSystem?: StoredDesignSystem | null | undefined;
+  projectInstructions?: ProjectInstructionsContext | null | undefined;
   workspaceContext?: WorkspaceContext | null | undefined;
   attachments?: AttachmentContext[] | undefined;
   referenceUrl?: ReferenceUrlContext | null | undefined;
 }): string[] {
   const sections: string[] = [];
   if (input.designSystem) sections.push(formatDesignSystem(input.designSystem));
+  const projectInstructionsSection = formatProjectInstructions(input.projectInstructions);
+  if (projectInstructionsSection) sections.push(projectInstructionsSection);
   if (input.workspaceContext) sections.push(formatWorkspaceContext(input.workspaceContext));
   const attachmentSection = formatAttachments(input.attachments ?? []);
   if (attachmentSection) sections.push(attachmentSection);
@@ -795,6 +808,9 @@ export async function generateViaAgent(
     input.prompt,
     buildContextSections({
       ...(input.designSystem !== undefined ? { designSystem: input.designSystem } : {}),
+      ...(input.projectInstructions !== undefined
+        ? { projectInstructions: input.projectInstructions }
+        : {}),
       ...(input.workspaceContext !== undefined ? { workspaceContext: input.workspaceContext } : {}),
       ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
       ...(input.referenceUrl !== undefined ? { referenceUrl: input.referenceUrl } : {}),

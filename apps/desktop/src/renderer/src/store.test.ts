@@ -449,6 +449,7 @@ describe('useCodesignStore design management', () => {
         thumbnailText: null,
         deletedAt: null,
         workspacePath: null,
+      projectInstructions: null,
       },
       {
         schemaVersion: 1 as const,
@@ -459,6 +460,7 @@ describe('useCodesignStore design management', () => {
         thumbnailText: null,
         deletedAt: null,
         workspacePath: null,
+      projectInstructions: null,
       },
     ];
 
@@ -492,6 +494,7 @@ describe('useCodesignStore design management', () => {
         thumbnailText: null,
         deletedAt: null,
         workspacePath: null,
+      projectInstructions: null,
       },
       {
         schemaVersion: 1 as const,
@@ -502,6 +505,7 @@ describe('useCodesignStore design management', () => {
         thumbnailText: null,
         deletedAt: null,
         workspacePath: null,
+      projectInstructions: null,
       },
     ];
 
@@ -556,6 +560,8 @@ describe('useCodesignStore design management', () => {
       updatedAt: '2024-01-01T00:00:00.000Z',
       thumbnailText: null,
       deletedAt: null,
+    workspacePath: null,
+    projectInstructions: null,
     };
 
     vi.stubGlobal('window', {
@@ -641,6 +647,7 @@ describe('useCodesignStore design management', () => {
       thumbnailText: null,
       deletedAt: null,
       workspacePath: null,
+    projectInstructions: null,
     };
     const clone = {
       ...source,
@@ -706,6 +713,7 @@ describe('useCodesignStore artifact persistence', () => {
       thumbnailText: null,
       deletedAt: null,
       workspacePath: null,
+    projectInstructions: null,
     };
 
     // Stand-in for the SQLite-backed snapshots table.
@@ -806,6 +814,8 @@ describe('loadDesigns startup', () => {
         updatedAt: '2024-01-02T00:00:00.000Z',
         thumbnailText: null,
         deletedAt: null,
+      workspacePath: null,
+      projectInstructions: null,
       },
       {
         schemaVersion: 1 as const,
@@ -815,6 +825,8 @@ describe('loadDesigns startup', () => {
         updatedAt: '2024-01-01T00:00:00.000Z',
         thumbnailText: null,
         deletedAt: null,
+      workspacePath: null,
+      projectInstructions: null,
       },
     ];
 
@@ -1158,6 +1170,7 @@ describe('useCodesignStore workspace rebind confirmation flow', () => {
     thumbnailText: null,
     deletedAt: null,
     workspacePath: '/old/path',
+  projectInstructions: null,
   };
 
   it('requestWorkspaceRebind sets pending state with design and new path', () => {
@@ -1285,6 +1298,7 @@ describe('useCodesignStore generation-blocking workspace guards', () => {
     thumbnailText: null,
     deletedAt: null,
     workspacePath: null,
+  projectInstructions: null,
   };
 
   it('blocks requestWorkspaceRebind when current design is generating', () => {

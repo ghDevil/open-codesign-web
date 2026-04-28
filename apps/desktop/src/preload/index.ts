@@ -8,6 +8,7 @@ import type {
   CommentRow,
   CommentStatus,
   Design,
+  DesignFile,
   DesignSnapshot,
   ExternalConfigsDetection,
   GeneratePayloadV1,
@@ -488,6 +489,12 @@ const api = {
         id,
         name,
       }) as Promise<Design>,
+    setProjectInstructions: (id: string, projectInstructions: string | null) =>
+      ipcRenderer.invoke('snapshots:v1:set-project-instructions', {
+        schemaVersion: 1,
+        id,
+        projectInstructions,
+      }) as Promise<Design>,
     setThumbnail: (id: string, thumbnailText: string | null) =>
       ipcRenderer.invoke('snapshots:v1:set-thumbnail', {
         schemaVersion: 1,
@@ -542,6 +549,19 @@ const api = {
         schemaVersion: 1,
         designId,
       }) as Promise<{ exists: boolean }>,
+  },
+  files: {
+    list: (designId: string) =>
+      ipcRenderer.invoke('files:v1:list', {
+        schemaVersion: 1,
+        designId,
+      }) as Promise<DesignFile[]>,
+    view: (designId: string, path: string) =>
+      ipcRenderer.invoke('files:v1:view', {
+        schemaVersion: 1,
+        designId,
+        path,
+      }) as Promise<DesignFile | null>,
   },
   chat: {
     list: (designId: string) =>

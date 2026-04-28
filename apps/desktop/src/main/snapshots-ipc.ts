@@ -9,7 +9,7 @@
  * initSnapshotsDb().
  */
 
-import type { Design, DesignSnapshot, SnapshotCreateInput } from '@open-codesign/shared';
+import type { Design, DesignFile, DesignSnapshot, SnapshotCreateInput } from '@open-codesign/shared';
 import { CodesignError } from '@open-codesign/shared';
 import type BetterSqlite3 from 'better-sqlite3';
 import type { BrowserWindow } from 'electron';
@@ -22,12 +22,15 @@ import {
   deleteSnapshot,
   duplicateDesign,
   getDesign,
+  listDesignFiles,
   getSnapshot,
   listDesigns,
   listSnapshots,
   renameDesign,
   setDesignThumbnail,
   softDeleteDesign,
+  updateDesignProjectInstructions,
+  viewDesignFile,
 } from './snapshots-db';
 
 type Database = BetterSqlite3.Database;
@@ -305,6 +308,36 @@ export function registerSnapshotsIpc(db: Database): void {
     return updated;
   });
 
+  ipcMain.handle(
+    'snapshots:v1:set-project-instructions',
+    (_e: unknown, raw: unknown): Design => {
+      if (typeof raw !== 'object' || raw === null) {
+        throw new CodesignError(
+          'snapshots:v1:set-project-instructions expects { id, projectInstructions }',
+          'IPC_BAD_INPUT',
+        );
+      }
+      const r = raw as Record<string, unknown>;
+      requireSchemaV1(r, 'snapshots:v1:set-project-instructions');
+      if (typeof r['id'] !== 'string' || r['id'].trim().length === 0) {
+        throw new CodesignError('id must be a non-empty string', 'IPC_BAD_INPUT');
+      }
+      const rawValue = r['projectInstructions'];
+      if (rawValue !== null && rawValue !== undefined && typeof rawValue !== 'string') {
+        throw new CodesignError('projectInstructions must be a string or null', 'IPC_BAD_INPUT');
+      }
+      const normalized =
+        typeof rawValue === 'string' && rawValue.trim().length > 0 ? rawValue.trim() : null;
+      const updated = runDb('set-project-instructions', () =>
+        updateDesignProjectInstructions(db, r['id'] as string, normalized),
+      );
+      if (updated === null) {
+        throw new CodesignError('Design not found', 'IPC_NOT_FOUND');
+      }
+      return updated;
+    },
+  );
+
   ipcMain.handle('snapshots:v1:soft-delete-design', (_e: unknown, raw: unknown): Design => {
     const id = parseIdPayload(raw, 'soft-delete-design');
     const updated = runDb('soft-delete-design', () => softDeleteDesign(db, id));
@@ -338,6 +371,35 @@ export function registerSnapshotsIpc(db: Database): void {
     }
     logger.info('design.duplicated', { sourceId: r['id'], newId: cloned.id });
     return cloned;
+  });
+
+  ipcMain.handle('files:v1:list', (_e: unknown, raw: unknown): DesignFile[] => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new CodesignError('files:v1:list expects an object with designId', 'IPC_BAD_INPUT');
+    }
+    const r = raw as Record<string, unknown>;
+    requireSchemaV1(r, 'files:v1:list');
+    if (typeof r['designId'] !== 'string' || r['designId'].trim().length === 0) {
+      throw new CodesignError('designId must be a non-empty string', 'IPC_BAD_INPUT');
+    }
+    return runDb('files:list', () => listDesignFiles(db, r['designId'] as string));
+  });
+
+  ipcMain.handle('files:v1:view', (_e: unknown, raw: unknown): DesignFile | null => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new CodesignError('files:v1:view expects { designId, path }', 'IPC_BAD_INPUT');
+    }
+    const r = raw as Record<string, unknown>;
+    requireSchemaV1(r, 'files:v1:view');
+    if (typeof r['designId'] !== 'string' || r['designId'].trim().length === 0) {
+      throw new CodesignError('designId must be a non-empty string', 'IPC_BAD_INPUT');
+    }
+    if (typeof r['path'] !== 'string' || r['path'].trim().length === 0) {
+      throw new CodesignError('path must be a non-empty string', 'IPC_BAD_INPUT');
+    }
+    return runDb('files:view', () =>
+      viewDesignFile(db, r['designId'] as string, r['path'] as string),
+    );
   });
 }
 

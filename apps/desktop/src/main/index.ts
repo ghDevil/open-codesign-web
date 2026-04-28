@@ -997,6 +997,9 @@ function registerIpcHandlers(db: Database | null): void {
         designSystem: resolvedDesignSystem,
         workspacePath: workspacePathForDesign(db, payload.designId),
       });
+      const projectInstructions = db && payload.designId
+        ? getDesign(db, payload.designId)?.projectInstructions ?? null
+        : null;
 
       logIpc.info('generate', {
         generationId: id,
@@ -1031,6 +1034,9 @@ function registerIpcHandlers(db: Database | null): void {
             attachments: promptContext.attachments,
             referenceUrl: promptContext.referenceUrl,
             designSystem: promptContext.designSystem ?? null,
+            ...(projectInstructions
+              ? { projectInstructions: { instructions: projectInstructions } }
+              : {}),
             workspaceContext: promptContext.workspaceContext,
             ...(baseUrl !== undefined ? { baseUrl } : {}),
             wire: active.wire,
@@ -1141,6 +1147,9 @@ function registerIpcHandlers(db: Database | null): void {
         designSystem: resolvedDesignSystem,
         workspacePath: null,
       });
+      const projectInstructions = db && payload.designId
+        ? getDesign(db, payload.designId)?.projectInstructions ?? null
+        : null;
 
       logIpc.info('generate', {
         generationId: id,
@@ -1175,6 +1184,9 @@ function registerIpcHandlers(db: Database | null): void {
             attachments: promptContext.attachments,
             referenceUrl: promptContext.referenceUrl,
             designSystem: promptContext.designSystem ?? null,
+            ...(projectInstructions
+              ? { projectInstructions: { instructions: projectInstructions } }
+              : {}),
             workspaceContext: promptContext.workspaceContext,
             ...(baseUrl !== undefined ? { baseUrl } : {}),
             wire: active.wire,
@@ -1251,6 +1263,9 @@ function registerIpcHandlers(db: Database | null): void {
         designSystem: resolvedDesignSystem,
         workspacePath: workspacePathForDesign(db, payload.designId),
       });
+      const projectInstructions = db && payload.designId
+        ? getDesign(db, payload.designId)?.projectInstructions ?? null
+        : null;
 
       logIpc.info('applyComment', {
         provider: active.model.provider,
@@ -1277,6 +1292,9 @@ function registerIpcHandlers(db: Database | null): void {
           attachments: promptContext.attachments,
           referenceUrl: promptContext.referenceUrl,
           designSystem: promptContext.designSystem ?? null,
+          ...(projectInstructions
+            ? { projectInstructions: { instructions: projectInstructions } }
+            : {}),
           workspaceContext: promptContext.workspaceContext,
           ...(baseUrl !== undefined ? { baseUrl } : {}),
           wire: active.wire,
@@ -1400,6 +1418,9 @@ function registerIpcHandlers(db: Database | null): void {
           designSystem: resolvedDesignSystem,
           workspacePath: workspacePathForDesign(db, designId),
         });
+        const projectInstructions = db && designId
+          ? getDesign(db, designId)?.projectInstructions ?? null
+          : null;
         const clarifyLogger: CoreLogger = {
           info: (event, data) => logIpc.info(event, data),
           warn: (event, data) => logIpc.warn(event, data),
@@ -1417,6 +1438,9 @@ function registerIpcHandlers(db: Database | null): void {
             explicitCapabilities: active.explicitCapabilities,
             ...(allowKeyless ? { allowKeyless: true } : {}),
             designSystem: promptContext.designSystem,
+            ...(projectInstructions
+              ? { projectInstructions: { instructions: projectInstructions } }
+              : {}),
             workspaceContext: promptContext.workspaceContext,
             attachments: promptContext.attachments,
             referenceUrl: promptContext.referenceUrl,

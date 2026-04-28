@@ -15,6 +15,7 @@ import type {
   CommentScope,
   CommentStatus,
   Design,
+  DesignFile,
   DesignSnapshot,
 } from '@open-codesign/shared';
 import type BetterSqlite3 from 'better-sqlite3';
@@ -51,7 +52,8 @@ function applySchema(db: BetterSqlite3.Database): void {
       updated_at    TEXT NOT NULL,
       thumbnail_text TEXT,
       deleted_at    TEXT,
-      workspace_path TEXT
+      workspace_path TEXT,
+      project_instructions TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_designs_deleted_at ON designs(deleted_at);
 
@@ -126,6 +128,18 @@ function applySchema(db: BetterSqlite3.Database): void {
       context_json    TEXT
     );
   `);
+
+  applyAdditiveMigrations(db);
+}
+
+function applyAdditiveMigrations(db: BetterSqlite3.Database): void {
+  type ColumnInfo = { name: string };
+  const designCols = (db.prepare('PRAGMA table_info(designs)').all() as ColumnInfo[]).map(
+    (c) => c.name,
+  );
+  if (!designCols.includes('project_instructions')) {
+    db.exec('ALTER TABLE designs ADD COLUMN project_instructions TEXT');
+  }
 }
 
 export function initSnapshotsDb(dbPath: string): BetterSqlite3.Database {
@@ -153,6 +167,7 @@ interface DesignRowDb {
   thumbnail_text: string | null;
   deleted_at: string | null;
   workspace_path: string | null;
+  project_instructions: string | null;
 }
 
 interface SnapshotRowDb {
@@ -166,6 +181,15 @@ interface SnapshotRowDb {
   artifact_source: string;
   created_at: string;
   message: string | null;
+}
+
+interface DesignFileRowDb {
+  id: string;
+  design_id: string;
+  path: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
 }
 
 interface ChatMessageRowDb {
@@ -206,6 +230,7 @@ function rowToDesign(row: DesignRowDb): Design {
     thumbnailText: row.thumbnail_text,
     deletedAt: row.deleted_at,
     workspacePath: row.workspace_path,
+    projectInstructions: row.project_instructions,
   };
 }
 
@@ -221,6 +246,18 @@ function rowToSnapshot(row: SnapshotRowDb): DesignSnapshot {
     artifactSource: row.artifact_source,
     createdAt: row.created_at,
     ...(row.message ? { message: row.message } : {}),
+  };
+}
+
+function rowToDesignFile(row: DesignFileRowDb): DesignFile {
+  return {
+    schemaVersion: 1,
+    id: row.id,
+    designId: row.design_id,
+    path: row.path,
+    content: row.content,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -278,6 +315,26 @@ function rowToComment(row: CommentRowDb): CommentRow {
 
 export function normalizeDesignFilePath(p: string): string {
   return p.replace(/^\/+/, '');
+}
+
+export function viewDesignFile(
+  db: BetterSqlite3.Database,
+  designId: string,
+  filePath: string,
+): DesignFile | null {
+  const normalizedPath = normalizeDesignFilePath(filePath);
+  const row = db
+    .prepare('SELECT * FROM design_files WHERE design_id = ? AND path = ?')
+    .get(designId, normalizedPath) as DesignFileRowDb | undefined;
+  return row ? rowToDesignFile(row) : null;
+}
+
+export function listDesignFiles(db: BetterSqlite3.Database, designId: string): DesignFile[] {
+  return (
+    db
+      .prepare('SELECT * FROM design_files WHERE design_id = ? ORDER BY path ASC')
+      .all(designId) as DesignFileRowDb[]
+  ).map(rowToDesignFile);
 }
 
 export function listDesigns(db: BetterSqlite3.Database) {
@@ -349,6 +406,18 @@ export function clearDesignWorkspace(db: BetterSqlite3.Database, id: string): De
   return getDesign(db, id);
 }
 
+export function updateDesignProjectInstructions(
+  db: BetterSqlite3.Database,
+  id: string,
+  projectInstructions: string | null,
+): Design | null {
+  const result = db
+    .prepare('UPDATE designs SET project_instructions = ?, updated_at = ? WHERE id = ?')
+    .run(projectInstructions, now(), id);
+  if (result.changes === 0) return null;
+  return getDesign(db, id);
+}
+
 export function duplicateDesign(db: BetterSqlite3.Database, id: string): Design | null {
   const original = db.prepare('SELECT * FROM designs WHERE id = ?').get(id) as
     | DesignRowDb
@@ -356,11 +425,15 @@ export function duplicateDesign(db: BetterSqlite3.Database, id: string): Design 
   if (!original) throw new Error(`Design ${id} not found`);
   const newId = uuid();
   const ts = now();
-  db.prepare('INSERT INTO designs (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
+  db.prepare(
+    'INSERT INTO designs (id, name, created_at, updated_at, thumbnail_text, project_instructions) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(
     newId,
     `${original.name} (copy)`,
     ts,
     ts,
+    original.thumbnail_text,
+    original.project_instructions,
   );
   return getDesign(db, newId);
 }
