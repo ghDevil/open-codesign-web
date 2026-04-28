@@ -121,7 +121,7 @@ export interface ReportableErrorToastSpec {
 export type Theme = 'light' | 'dark';
 export type AppView = 'hub' | 'workspace' | 'settings';
 export type SettingsTab = 'models' | 'appearance' | 'storage' | 'diagnostics' | 'advanced';
-export type HubTab = 'recent' | 'your' | 'examples' | 'designSystems';
+export type HubTab = 'recent' | 'your' | 'templates' | 'examples' | 'designSystems';
 export type InteractionMode = 'default' | 'comment';
 
 export type PreviewViewport = 'desktop' | 'tablet' | 'mobile';

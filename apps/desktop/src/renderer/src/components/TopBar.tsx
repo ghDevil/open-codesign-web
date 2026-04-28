@@ -1,6 +1,6 @@
 import { useT } from '@open-codesign/i18n';
 import { IconButton, Wordmark } from '@open-codesign/ui';
-import { AlertCircle, ArrowLeft, BookOpen, Home, Layers, Settings as SettingsIcon } from 'lucide-react';
+import { AlertCircle, ArrowLeft, FolderOpen, Home, Layers, LayoutTemplate, Settings as SettingsIcon } from 'lucide-react';
 import { type CSSProperties, useEffect } from 'react';
 import { type HubTab, useCodesignStore } from '../store';
 import { LanguageToggle } from './LanguageToggle';
@@ -18,7 +18,8 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { tab: 'recent', icon: Home, labelKey: 'hub.nav.home' },
-  { tab: 'examples', icon: BookOpen, labelKey: 'hub.nav.examples' },
+  { tab: 'your', icon: FolderOpen, labelKey: 'hub.nav.projects' },
+  { tab: 'templates', icon: LayoutTemplate, labelKey: 'hub.nav.templates' },
   { tab: 'designSystems', icon: Layers, labelKey: 'hub.nav.designSystems' },
 ];
 
@@ -70,7 +71,9 @@ export function TopBar() {
         ) : view === 'hub' ? (
           <nav className="flex items-center gap-[2px] h-full" aria-label="Main navigation">
             {NAV_ITEMS.map(({ tab, icon: Icon, labelKey }) => {
-              const active = tab === hubTab || (tab === 'recent' && (hubTab === 'recent' || hubTab === 'your'));
+              const active =
+                tab === hubTab ||
+                (tab === 'templates' && hubTab === 'examples');
               return (
                 <button
                   key={tab}

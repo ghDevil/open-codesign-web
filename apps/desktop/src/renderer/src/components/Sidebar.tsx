@@ -1,12 +1,10 @@
 import { useT } from '@open-codesign/i18n';
 import type { LocalInputFile, OnboardingState } from '@open-codesign/shared';
-import { FileCode2, FolderOpen, Link2, Paperclip, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useAgentStream } from '../hooks/useAgentStream';
-import { workspacePathComparisonKey } from '../lib/workspace-path';
 import { useCodesignStore } from '../store';
 import { ModelSwitcher } from './ModelSwitcher';
-import { AddMenu } from './chat/AddMenu';
+import { ProjectContextPanel } from './ProjectContextPanel';
 import { ChatMessageList } from './chat/ChatMessageList';
 import { ClarificationCard } from './chat/ClarificationCard';
 import { CommentChipBar } from './chat/CommentChipBar';
@@ -72,38 +70,13 @@ export function buildComposerContextItems(input: {
   return items;
 }
 
-function ContextIcon({ icon }: { icon: ComposerContextItem['icon'] }) {
-  if (icon === 'file') return <Paperclip className="w-3.5 h-3.5" aria-hidden />;
-  if (icon === 'url') return <Link2 className="w-3.5 h-3.5" aria-hidden />;
-  if (icon === 'workspace') return <FileCode2 className="w-3.5 h-3.5" aria-hidden />;
-  return <FolderOpen className="w-3.5 h-3.5" aria-hidden />;
-}
-
-/**
- * Sidebar v2 — chat-style conversation pane.
- *
- * Replaces the single-shot prompt box with a chat history backed by the
- * chat_messages SQLite table. See docs/plans/2026-04-20-agentic-sidebar-
- * custom-endpoint-design.md §5 for the full spec. Multi-design switcher
- * stays deferred; the design name + "+" header shows the single current
- * design only.
- */
 export function Sidebar({ prompt, setPrompt, onSubmit }: SidebarProps) {
   const t = useT();
-  const config = useCodesignStore((s) => s.config);
   const isGenerating = useCodesignStore(
     (s) => s.isGenerating && s.generatingDesignId === s.currentDesignId,
   );
   const cancelGeneration = useCodesignStore((s) => s.cancelGeneration);
-  const inputFiles = useCodesignStore((s) => s.inputFiles);
-  const referenceUrl = useCodesignStore((s) => s.referenceUrl);
-  const setReferenceUrl = useCodesignStore((s) => s.setReferenceUrl);
-  const pickInputFiles = useCodesignStore((s) => s.pickInputFiles);
-  const removeInputFile = useCodesignStore((s) => s.removeInputFile);
-  const pickDesignSystemDirectory = useCodesignStore((s) => s.pickDesignSystemDirectory);
-  const clearDesignSystem = useCodesignStore((s) => s.clearDesignSystem);
   const lastUsage = useCodesignStore((s) => s.lastUsage);
-
   const chatMessages = useCodesignStore((s) => s.chatMessages);
   const chatLoaded = useCodesignStore((s) => s.chatLoaded);
   const isClarifying = useCodesignStore((s) => s.isClarifying);
@@ -113,16 +86,10 @@ export function Sidebar({ prompt, setPrompt, onSubmit }: SidebarProps) {
   const loadChatForCurrentDesign = useCodesignStore((s) => s.loadChatForCurrentDesign);
   const currentDesignId = useCodesignStore((s) => s.currentDesignId);
   const designs = useCodesignStore((s) => s.designs);
-  const requestWorkspaceRebind = useCodesignStore((s) => s.requestWorkspaceRebind);
   const submitPendingClarification = useCodesignStore((s) => s.submitPendingClarification);
   const skipPendingClarification = useCodesignStore((s) => s.skipPendingClarification);
-  const sidebarCollapsed = useCodesignStore((s) => s.sidebarCollapsed);
-  const setSidebarCollapsed = useCodesignStore((s) => s.setSidebarCollapsed);
-  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [sidebarPane, setSidebarPane] = useState<'chat' | 'context'>('chat');
 
-  // Mount useAgentStream here so streaming events route into the chat
-  // as soon as the Sidebar is in the tree — matches the lifecycle of
-  // chat visibility without needing an app-level hook.
   useAgentStream();
 
   const promptInputRef = useRef<PromptInputHandle>(null);
@@ -131,19 +98,11 @@ export function Sidebar({ prompt, setPrompt, onSubmit }: SidebarProps) {
     promptInputRef.current?.focus();
   };
 
-  const designSystem = config?.designSystem ?? null;
   const currentDesign = designs.find((d) => d.id === currentDesignId) ?? null;
-  const workspacePath = currentDesign?.workspacePath ?? null;
   const activeClarification =
     pendingClarification && pendingClarification.designId === currentDesignId
       ? pendingClarification
       : null;
-  const contextItems = buildComposerContextItems({
-    inputFiles,
-    referenceUrl,
-    workspacePath,
-    config,
-  });
 
   useEffect(() => {
     if (currentDesignId && !chatLoaded) {
@@ -151,196 +110,125 @@ export function Sidebar({ prompt, setPrompt, onSubmit }: SidebarProps) {
     }
   }, [currentDesignId, chatLoaded, loadChatForCurrentDesign]);
 
-  const activeModelLine =
-    config?.hasKey && config.modelPrimary ? config.modelPrimary : t('sidebar.chat.noModel');
   const lastTokens = lastUsage ? lastUsage.inputTokens + lastUsage.outputTokens : null;
-
-  async function handleBindWorkspace(): Promise<void> {
-    if (!window.codesign?.snapshots.pickWorkspaceFolder || !currentDesign || !currentDesignId) return;
-    if (isGenerating) {
-      useCodesignStore.getState().pushToast({
-        variant: 'info',
-        title: t('canvas.workspace.busyGenerating'),
-      });
-      return;
-    }
-
-    try {
-      setWorkspaceLoading(true);
-      const path = await window.codesign.snapshots.pickWorkspaceFolder();
-      if (!path) return;
-
-      if (
-        currentDesign.workspacePath &&
-        workspacePathComparisonKey(currentDesign.workspacePath) !== workspacePathComparisonKey(path)
-      ) {
-        requestWorkspaceRebind(currentDesign, path);
-        return;
-      }
-
-      if (currentDesign.workspacePath === null) {
-        await window.codesign.snapshots.updateWorkspace(currentDesignId, path, false);
-        const updated = await window.codesign.snapshots.listDesigns();
-        useCodesignStore.setState({ designs: updated });
-      }
-    } catch (err) {
-      useCodesignStore.getState().pushToast({
-        variant: 'error',
-        title: t('canvas.workspace.updateFailed'),
-        description: err instanceof Error ? err.message : t('errors.unknown'),
-      });
-    } finally {
-      setWorkspaceLoading(false);
-    }
-  }
 
   return (
     <aside
-      className="flex flex-col h-full overflow-x-hidden border-r border-[var(--color-border)] bg-[var(--color-background-secondary)]"
+      className="flex h-full flex-col overflow-x-hidden border-r border-[var(--color-border)] bg-[var(--color-background-secondary)]"
       style={{ minHeight: 0, minWidth: 0 }}
       aria-label={t('sidebar.ariaLabel')}
     >
-      {/* Header — clean, no collapse */}
-      <div className="h-[var(--space-3)] shrink-0" />
-
-      <>
-        {/* Chat scroll area */}
-        <div className="flex-1 overflow-y-auto px-[var(--space-4)] py-[var(--space-4)]">
-          <ChatMessageList
-            messages={chatMessages}
-            loading={!chatLoaded}
-            isGenerating={isGenerating}
-            pendingToolCalls={pendingToolCalls}
-            streamingText={
-              streamingAssistantText && streamingAssistantText.designId === currentDesignId
-                ? streamingAssistantText.text
-                : null
-            }
-            empty={<EmptyState onPickStarter={handlePickStarter} />}
-          />
-        </div>
-
-        {/* Skill chips + prompt input + model/tokens line */}
-        <div className="border-t border-[var(--color-border-subtle)] px-[var(--space-4)] pt-[var(--space-3)] pb-[var(--space-3)] space-y-[10px] bg-[var(--color-background-secondary)]">
-          <CommentChipBar />
-          {isClarifying && !activeClarification ? (
-            <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-[var(--space-3)] py-[var(--space-2)] text-[12px] text-[var(--color-text-secondary)]">
-              {t('sidebar.clarify.loading')}
+      <div className="shrink-0 border-b border-[var(--color-border-subtle)] px-[var(--space-4)] py-[var(--space-3)]">
+        <div className="space-y-3">
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-medium text-[var(--color-text-primary)]">
+              {currentDesign?.name ?? t('sidebar.noDesign')}
             </div>
-          ) : null}
-          {activeClarification ? (
-            <ClarificationCard
-              intro={activeClarification.intro}
-              questions={activeClarification.questions}
-              onSubmit={(answers) => {
-                void submitPendingClarification(answers);
-              }}
-              onSkip={() => {
-                void skipPendingClarification();
-              }}
-            />
-          ) : null}
-          <PromptInput
-            ref={promptInputRef}
-            prompt={prompt}
-            setPrompt={setPrompt}
-            onSubmit={onSubmit}
-            onCancel={cancelGeneration}
-            isGenerating={isGenerating}
-            disabled={isClarifying || activeClarification !== null}
-            {...(() => {
-              const disabledReason =
-                activeClarification !== null
-                  ? t('sidebar.clarify.disabledReason')
-                  : isClarifying
-                    ? t('sidebar.clarify.loading')
-                    : null;
-              return disabledReason ? { disabledReason } : {};
-            })()}
-            contextSummary={
-              contextItems.length > 0 ? (
-                <div className="flex flex-wrap gap-[8px]">
-                  {inputFiles.map((file) => (
-                    <span
-                      key={file.path}
-                      className="inline-flex max-w-full items-center gap-[6px] rounded-full border border-[var(--color-border)] bg-[var(--color-background-secondary)] px-[10px] py-[5px] text-[11px] text-[var(--color-text-secondary)]"
-                      title={file.path}
-                    >
-                      <ContextIcon icon="file" />
-                      <span className="truncate max-w-[180px]">{file.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeInputFile(file.path)}
-                        aria-label={t('sidebar.removeFile', { name: file.name })}
-                        className="inline-flex items-center justify-center rounded-full text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-                      >
-                        <X className="w-3 h-3" aria-hidden />
-                      </button>
-                    </span>
-                  ))}
-                  {referenceUrl.trim() ? (
-                    <span
-                      className="inline-flex max-w-full items-center gap-[6px] rounded-full border border-[var(--color-border)] bg-[var(--color-background-secondary)] px-[10px] py-[5px] text-[11px] text-[var(--color-text-secondary)]"
-                      title={referenceUrl.trim()}
-                    >
-                      <ContextIcon icon="url" />
-                      <span className="truncate max-w-[220px]">{referenceUrl.trim()}</span>
-                    </span>
-                  ) : null}
-                  {designSystem ? (
-                    <span
-                      className="inline-flex max-w-full items-center gap-[6px] rounded-full border border-[var(--color-border)] bg-[var(--color-background-secondary)] px-[10px] py-[5px] text-[11px] text-[var(--color-text-secondary)]"
-                      title={designSystem.rootPath}
-                    >
-                      <ContextIcon icon="designSystem" />
-                      <span className="truncate max-w-[220px]">{designSystem.summary}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void clearDesignSystem();
-                        }}
-                        aria-label={t('sidebar.clear')}
-                        className="inline-flex items-center justify-center rounded-full text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-                      >
-                        <X className="w-3 h-3" aria-hidden />
-                      </button>
-                    </span>
-                  ) : null}
-                </div>
-              ) : null
-            }
-            leadingAction={
-              <AddMenu
-                onAttachFiles={() => {
-                  void pickInputFiles();
-                }}
-                  onBindWorkspace={() => {
-                    void handleBindWorkspace();
-                  }}
-                onLinkDesignSystem={() => {
-                  void pickDesignSystemDirectory();
-                }}
-                referenceUrl={referenceUrl}
-                onReferenceUrlChange={setReferenceUrl}
-                  hasWorkspace={Boolean(workspacePath)}
-                hasDesignSystem={Boolean(designSystem)}
-                  disabled={isGenerating || workspaceLoading}
-              />
-            }
-          />
-          <div className="flex items-center justify-between gap-[var(--space-2)] px-[2px]">
-            <ModelSwitcher variant="sidebar" />
-            {lastTokens !== null ? (
-              <span
-                className="shrink-0 tabular-nums text-[10.5px] text-[var(--color-text-muted)]"
-                style={{ fontFamily: 'var(--font-mono)' }}
-              >
-                {t('sidebar.chat.tokensLine', { count: lastTokens })}
-              </span>
-            ) : null}
+            <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+              {sidebarPane === 'chat'
+                ? t('sidebar.contextPanel.chatMode')
+                : t('sidebar.contextPanel.contextMode')}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1">
+            {(['chat', 'context'] as const).map((pane) => {
+              const active = sidebarPane === pane;
+              const label =
+                pane === 'chat'
+                  ? t('sidebar.contextPanel.chatTab')
+                  : t('sidebar.contextPanel.contextTab');
+              return (
+                <button
+                  key={pane}
+                  type="button"
+                  onClick={() => setSidebarPane(pane)}
+                  aria-pressed={active}
+                  className={`h-8 rounded-[var(--radius-sm)] text-[12px] font-medium transition-colors ${
+                    active
+                      ? 'bg-[var(--color-background)] text-[var(--color-text-primary)] shadow-[var(--shadow-soft)]'
+                      : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-secondary)]'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
         </div>
-      </>
+      </div>
+
+      {sidebarPane === 'chat' ? (
+        <>
+          <div className="flex-1 overflow-y-auto px-[var(--space-4)] py-[var(--space-4)]">
+            <ChatMessageList
+              messages={chatMessages}
+              loading={!chatLoaded}
+              isGenerating={isGenerating}
+              pendingToolCalls={pendingToolCalls}
+              streamingText={
+                streamingAssistantText && streamingAssistantText.designId === currentDesignId
+                  ? streamingAssistantText.text
+                  : null
+              }
+              empty={<EmptyState onPickStarter={handlePickStarter} />}
+            />
+          </div>
+
+          <div className="space-y-[10px] border-t border-[var(--color-border-subtle)] bg-[var(--color-background-secondary)] px-[var(--space-4)] pt-[var(--space-3)] pb-[var(--space-3)]">
+            <CommentChipBar />
+            {isClarifying && !activeClarification ? (
+              <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-[var(--space-3)] py-[var(--space-2)] text-[12px] text-[var(--color-text-secondary)]">
+                {t('sidebar.clarify.loading')}
+              </div>
+            ) : null}
+            {activeClarification ? (
+              <ClarificationCard
+                intro={activeClarification.intro}
+                questions={activeClarification.questions}
+                onSubmit={(answers) => {
+                  void submitPendingClarification(answers);
+                }}
+                onSkip={() => {
+                  void skipPendingClarification();
+                }}
+              />
+            ) : null}
+            <PromptInput
+              ref={promptInputRef}
+              prompt={prompt}
+              setPrompt={setPrompt}
+              onSubmit={onSubmit}
+              onCancel={cancelGeneration}
+              isGenerating={isGenerating}
+              disabled={isClarifying || activeClarification !== null}
+              {...(() => {
+                const disabledReason =
+                  activeClarification !== null
+                    ? t('sidebar.clarify.disabledReason')
+                    : isClarifying
+                      ? t('sidebar.clarify.loading')
+                      : null;
+                return disabledReason ? { disabledReason } : {};
+              })()}
+            />
+            <div className="flex items-center justify-between gap-[var(--space-2)] px-[2px]">
+              <ModelSwitcher variant="sidebar" />
+              {lastTokens !== null ? (
+                <span
+                  className="shrink-0 tabular-nums text-[10.5px] text-[var(--color-text-muted)]"
+                  style={{ fontFamily: 'var(--font-mono)' }}
+                >
+                  {t('sidebar.chat.tokensLine', { count: lastTokens })}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="flex-1 overflow-y-auto">
+          <ProjectContextPanel />
+        </div>
+      )}
     </aside>
   );
 }

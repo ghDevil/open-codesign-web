@@ -65,6 +65,7 @@ const mockDesign = (overrides?: Partial<Design>): Design => ({
   thumbnailText: null,
   deletedAt: null,
   projectInstructions: null,
+folderId: null,
   ...overrides,
 });
 

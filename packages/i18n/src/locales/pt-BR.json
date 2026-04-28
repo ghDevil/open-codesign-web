@@ -191,6 +191,27 @@
     "comments": {
       "title": "Modo de comentário",
       "body": "Comentários inline no canvas chegam na v0.2.1. Você poderá clicar em qualquer elemento da pré-visualização para deixar uma nota ou instrução de edição."
+    },
+    "contextPanel": {
+      "title": "Contexto do projeto",
+      "subtitle": "Mantenha arquivos, instrucoes, referencias, workspace e sistema de design organizados em um so lugar.",
+      "chatTab": "Chat",
+      "contextTab": "Contexto",
+      "chatMode": "Converse, esclareca e refine este design.",
+      "contextMode": "Conhecimento do projeto, arquivos, workspace e sistema de design.",
+      "filesHint": "Anexe briefs, notas ou materiais de origem que devem acompanhar este design.",
+      "filesEmpty": "Nenhum arquivo anexado a este design ainda.",
+      "workspaceHint": "Conecte um workspace local para que o modelo possa consultar seu codigo e arquivos como contexto do projeto.",
+      "referenceHint": "Mantenha uma URL de referencia principal no projeto em vez de misturar isso no composer.",
+      "designSystemHint": "Escolha qual sistema de design este projeto deve seguir ou use a selecao padrao da biblioteca.",
+      "refresh": "Atualizar sistemas",
+      "manage": "Gerenciar biblioteca",
+      "current": "Sistema atual",
+      "none": "Nenhum sistema de design selecionado",
+      "pinnedToDesign": "Fixado neste design",
+      "usingDefault": "Usando o sistema de design padrao",
+      "selection": "Sistema para este design",
+      "useDefault": "Usar o sistema de design padrao"
     }
   },
   "settings": {
@@ -1013,7 +1034,8 @@
       "recent": "Recentes",
       "your": "Seus designs",
       "examples": "Exemplos",
-      "designSystems": "Design systems"
+      "designSystems": "Design systems",
+      "templates": "Templates"
     },
     "recent": {
       "title": "Recentes",
@@ -1042,7 +1064,39 @@
       "createdAt": "Criado {{date}}",
       "moreActions": "Mais ações para {{name}}",
       "rename": "Renomear",
-      "delete": "Excluir"
+      "delete": "Excluir",
+      "moveToFolder": "Mover para pasta",
+      "noFolder": "Sem pasta",
+      "noFolders": "Ainda nao ha pastas",
+      "currentFolder": "Atual",
+      "saveAsTemplate": "Salvar como template",
+      "removeFromTemplates": "Remover dos templates",
+      "useTemplate": "Usar template"
+    },
+    "nav": {
+      "projects": "Projetos",
+      "templates": "Templates"
+    },
+    "projects": {
+      "subtitle": "Os designs em andamento ficam aqui, agrupados em pastas para o trabalho ativo ficar mais organizado.",
+      "newFolder": "Nova pasta",
+      "newFolderPlaceholder": "Nome da pasta",
+      "newFolderFallback": "Nova pasta",
+      "createFolder": "Criar",
+      "renameFolder": "Renomear pasta",
+      "deleteFolder": "Excluir pasta",
+      "emptyFolder": "Pasta vazia",
+      "uncategorized": "Sem categoria"
+    },
+    "templates": {
+      "subtitle": "Separe templates reutilizaveis dos projetos ativos para a biblioteca ficar mais clara.",
+      "savedTitle": "Templates salvos",
+      "savedHint": "Salve qualquer design como ponto de partida reutilizavel e use-o para criar uma copia nova.",
+      "savedEmpty": "Ainda nao ha templates salvos. Abra o menu de qualquer projeto e escolha Salvar como template.",
+      "startersTitle": "Exemplos iniciais",
+      "startersHint": "Exemplos integrados para explorar e se inspirar rapidamente.",
+      "savedBadge": "Template",
+      "useAria": "Usar template {{name}}"
     }
   },
   "create": {

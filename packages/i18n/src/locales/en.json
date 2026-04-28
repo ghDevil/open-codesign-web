@@ -191,6 +191,27 @@
     "comments": {
       "title": "Comment mode",
       "body": "Inline comments are live. Click any element in the preview to leave a note or an edit instruction. If a comment doesn't stick, paste it into chat."
+    },
+    "contextPanel": {
+      "title": "Project context",
+      "subtitle": "Keep files, instructions, references, workspace context, and brand settings organized in one place.",
+      "chatTab": "Chat",
+      "contextTab": "Context",
+      "chatMode": "Prompt, clarify, and iterate on this design.",
+      "contextMode": "Project knowledge, files, workspace, and design system.",
+      "filesHint": "Attach briefs, notes, or source material that should travel with this design.",
+      "filesEmpty": "No files attached to this design yet.",
+      "workspaceHint": "Bind a local workspace so the model can reference your codebase and files as project context.",
+      "referenceHint": "Keep one primary reference URL with the project instead of mixing it into the composer.",
+      "designSystemHint": "Pick the design system this project should follow, or fall back to the default library selection.",
+      "refresh": "Refresh design systems",
+      "manage": "Manage library",
+      "current": "Current system",
+      "none": "No design system selected",
+      "pinnedToDesign": "Pinned to this design",
+      "usingDefault": "Using the default design system",
+      "selection": "System for this design",
+      "useDefault": "Use the default design system"
     }
   },
   "settings": {
@@ -1066,13 +1087,16 @@
     "nav": {
       "home": "Home",
       "examples": "Examples",
-      "designSystems": "Design systems"
+      "designSystems": "Design systems",
+      "projects": "Projects",
+      "templates": "Templates"
     },
     "tabs": {
       "recent": "Recent",
       "your": "Your designs",
       "examples": "Examples",
-      "designSystems": "Design systems"
+      "designSystems": "Design systems",
+      "templates": "Templates"
     },
     "recent": {
       "title": "Recent",
@@ -1102,7 +1126,35 @@
       "createdAt": "Created {{date}}",
       "moreActions": "More actions for {{name}}",
       "rename": "Rename",
-      "delete": "Delete"
+      "delete": "Delete",
+      "moveToFolder": "Move to folder",
+      "noFolder": "No folder",
+      "noFolders": "No folders yet",
+      "currentFolder": "Current",
+      "saveAsTemplate": "Save as template",
+      "removeFromTemplates": "Remove from templates",
+      "useTemplate": "Use template"
+    },
+    "projects": {
+      "subtitle": "Working designs stay here, grouped into folders so active work feels tidy.",
+      "newFolder": "New folder",
+      "newFolderPlaceholder": "Folder name",
+      "newFolderFallback": "New folder",
+      "createFolder": "Create",
+      "renameFolder": "Rename folder",
+      "deleteFolder": "Delete folder",
+      "emptyFolder": "Empty folder",
+      "uncategorized": "Uncategorized"
+    },
+    "templates": {
+      "subtitle": "Separate reusable templates from active projects so the library stays easy to scan.",
+      "savedTitle": "Saved templates",
+      "savedHint": "Save any design as a reusable starting point, then use it to spin up a fresh copy.",
+      "savedEmpty": "No saved templates yet. Open any project menu and choose Save as template.",
+      "startersTitle": "Starter examples",
+      "startersHint": "Built-in examples for fast exploration and inspiration.",
+      "savedBadge": "Template",
+      "useAria": "Use template {{name}}"
     }
   },
   "create": {

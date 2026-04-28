@@ -450,6 +450,7 @@ describe('useCodesignStore design management', () => {
         deletedAt: null,
         workspacePath: null,
       projectInstructions: null,
+folderId: null,
       },
       {
         schemaVersion: 1 as const,
@@ -461,6 +462,7 @@ describe('useCodesignStore design management', () => {
         deletedAt: null,
         workspacePath: null,
       projectInstructions: null,
+folderId: null,
       },
     ];
 
@@ -495,6 +497,7 @@ describe('useCodesignStore design management', () => {
         deletedAt: null,
         workspacePath: null,
       projectInstructions: null,
+folderId: null,
       },
       {
         schemaVersion: 1 as const,
@@ -506,6 +509,7 @@ describe('useCodesignStore design management', () => {
         deletedAt: null,
         workspacePath: null,
       projectInstructions: null,
+folderId: null,
       },
     ];
 
@@ -562,6 +566,7 @@ describe('useCodesignStore design management', () => {
       deletedAt: null,
     workspacePath: null,
     projectInstructions: null,
+folderId: null,
     };
 
     vi.stubGlobal('window', {
@@ -648,6 +653,7 @@ describe('useCodesignStore design management', () => {
       deletedAt: null,
       workspacePath: null,
     projectInstructions: null,
+folderId: null,
     };
     const clone = {
       ...source,
@@ -714,6 +720,7 @@ describe('useCodesignStore artifact persistence', () => {
       deletedAt: null,
       workspacePath: null,
     projectInstructions: null,
+folderId: null,
     };
 
     // Stand-in for the SQLite-backed snapshots table.
@@ -816,6 +823,7 @@ describe('loadDesigns startup', () => {
         deletedAt: null,
       workspacePath: null,
       projectInstructions: null,
+folderId: null,
       },
       {
         schemaVersion: 1 as const,
@@ -827,6 +835,7 @@ describe('loadDesigns startup', () => {
         deletedAt: null,
       workspacePath: null,
       projectInstructions: null,
+folderId: null,
       },
     ];
 
@@ -1171,6 +1180,7 @@ describe('useCodesignStore workspace rebind confirmation flow', () => {
     deletedAt: null,
     workspacePath: '/old/path',
   projectInstructions: null,
+folderId: null,
   };
 
   it('requestWorkspaceRebind sets pending state with design and new path', () => {
@@ -1299,6 +1309,7 @@ describe('useCodesignStore generation-blocking workspace guards', () => {
     deletedAt: null,
     workspacePath: null,
   projectInstructions: null,
+folderId: null,
   };
 
   it('blocks requestWorkspaceRebind when current design is generating', () => {

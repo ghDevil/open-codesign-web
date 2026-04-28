@@ -361,6 +361,7 @@ interface DesignRow {
   deleted_at: string | null;
   workspace_path: string | null;
   project_instructions: string | null;
+  folder_id: string | null;
 }
 
 interface SnapshotRow {
@@ -399,6 +400,7 @@ function rowToDesign(row: DesignRow): Design {
     deletedAt: row.deleted_at ?? null,
     workspacePath: row.workspace_path ?? null,
     projectInstructions: row.project_instructions ?? null,
+    folderId: row.folder_id ?? null,
   };
 }
 

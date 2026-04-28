@@ -1,32 +1,44 @@
-import { useT } from '@open-codesign/i18n';
-import type { LocalizedExample } from '@open-codesign/templates';
-import { getCurrentLocale, useTranslation } from '@open-codesign/i18n';
-import { getExamples, type ExampleCategory } from '@open-codesign/templates';
-import { useMemo, useRef, useState } from 'react';
+import { useT, getCurrentLocale, useTranslation } from '@open-codesign/i18n';
+import type { Design } from '@open-codesign/shared';
+import { getExamples, type ExampleCategory, type LocalizedExample } from '@open-codesign/templates';
+import { ChevronRight, FolderPlus, Pencil, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { readTemplateDesignIds, writeTemplateDesignFlag } from '../lib/template-library';
 import { useCodesignStore } from '../store';
 import { DesignSystemsTab } from './hub/DesignSystemsTab';
 import { DesignGrid } from './hub/DesignGrid';
 import { ExampleCard } from './hub/ExampleCard';
-import { ChevronRight, FolderPlus, Pencil, Plus, Trash2 } from 'lucide-react';
 
 export interface HubViewProps {
   onUseExamplePrompt?: (prompt: string) => void;
 }
 
-type HubSection = 'home' | 'examples' | 'designSystems';
+type HubSection = 'home' | 'projects' | 'templates' | 'designSystems';
 
 const EXAMPLE_FILTERS: Array<'all' | ExampleCategory> = [
-  'all', 'ui', 'dashboard', 'marketing', 'mobile', 'animation', 'presentation', 'document', 'email',
+  'all',
+  'ui',
+  'dashboard',
+  'marketing',
+  'mobile',
+  'animation',
+  'presentation',
+  'document',
+  'email',
 ];
 
 function FolderSection({
   id,
   name,
   designs,
+  templateIds,
+  onSetTemplate,
 }: {
   id: string;
   name: string;
-  designs: import('@open-codesign/shared').Design[];
+  designs: Design[];
+  templateIds: Set<string>;
+  onSetTemplate: (designId: string, next: boolean) => void;
 }) {
   const t = useT();
   const [collapsed, setCollapsed] = useState(false);
@@ -54,10 +66,10 @@ function FolderSection({
         <button
           type="button"
           onClick={() => setCollapsed((c) => !c)}
-          className="inline-flex items-center gap-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
+          className="inline-flex items-center gap-1 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-secondary)]"
         >
           <ChevronRight
-            className={`w-4 h-4 transition-transform duration-150 ${collapsed ? '' : 'rotate-90'}`}
+            className={`h-4 w-4 transition-transform duration-150 ${collapsed ? '' : 'rotate-90'}`}
             aria-hidden
           />
         </button>
@@ -67,55 +79,62 @@ function FolderSection({
             ref={inputRef}
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
-            onBlur={() => void commitEdit()}
+            onBlur={() => {
+              void commitEdit();
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void commitEdit();
               if (e.key === 'Escape') setEditing(false);
             }}
-            className="flex-1 h-6 px-1 rounded border border-[var(--color-accent)] bg-[var(--color-surface)] text-[var(--text-sm)] font-medium text-[var(--color-text-primary)] focus:outline-none"
+            className="h-6 flex-1 rounded border border-[var(--color-accent)] bg-[var(--color-surface)] px-1 text-[var(--text-sm)] font-medium text-[var(--color-text-primary)] focus:outline-none"
             autoFocus
           />
         ) : (
           <span
-            className="text-[var(--text-sm)] font-medium text-[var(--color-text-secondary)] uppercase tracking-[0.06em] cursor-default select-none"
+            className="cursor-default select-none text-[var(--text-sm)] font-medium uppercase tracking-[0.06em] text-[var(--color-text-secondary)]"
             onDoubleClick={startEdit}
           >
             {name}
           </span>
         )}
 
-        <span className="text-[var(--text-xs)] text-[var(--color-text-muted)]">
-          {designs.length}
-        </span>
+        <span className="text-[var(--text-xs)] text-[var(--color-text-muted)]">{designs.length}</span>
 
         <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100">
           <button
             type="button"
             onClick={startEdit}
-            className="inline-flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-            title="Rename folder"
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
+            title={t('hub.projects.renameFolder')}
           >
-            <Pencil className="w-3 h-3" aria-hidden />
+            <Pencil className="h-3 w-3" aria-hidden />
           </button>
           <button
             type="button"
-            onClick={() => void deleteFolder(id)}
-            className="inline-flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-error)] transition-colors"
-            title="Delete folder"
+            onClick={() => {
+              void deleteFolder(id);
+            }}
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-error)]"
+            title={t('hub.projects.deleteFolder')}
           >
-            <Trash2 className="w-3 h-3" aria-hidden />
+            <Trash2 className="h-3 w-3" aria-hidden />
           </button>
         </div>
       </div>
 
       {!collapsed ? (
         designs.length === 0 ? (
-          <p className="pl-6 text-[var(--text-xs)] text-[var(--color-text-muted)] italic">
-            Empty folder
+          <p className="pl-6 text-[var(--text-xs)] italic text-[var(--color-text-muted)]">
+            {t('hub.projects.emptyFolder')}
           </p>
         ) : (
           <div className="pl-6">
-            <DesignGrid designs={designs} emptyLabel="" />
+            <DesignGrid
+              designs={designs}
+              emptyLabel=""
+              templateIds={templateIds}
+              onSetTemplate={onSetTemplate}
+            />
           </div>
         )
       ) : null}
@@ -140,20 +159,52 @@ export function HubView({ onUseExamplePrompt }: HubViewProps = {}) {
   const [exampleFilter, setExampleFilter] = useState<'all' | ExampleCategory>('all');
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [templateIds, setTemplateIds] = useState<Set<string>>(() => new Set(readTemplateDesignIds()));
   const examples = useMemo(() => getExamples(i18n.language || getCurrentLocale()), [i18n.language]);
-  const visibleExamples = exampleFilter === 'all' ? examples : examples.filter((e) => e.category === exampleFilter);
+  const visibleExamples =
+    exampleFilter === 'all' ? examples : examples.filter((e) => e.category === exampleFilter);
 
-  const allDesigns = [...designs]
-    .filter((d) => d.deletedAt === null)
-    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  const allDesigns = useMemo(
+    () =>
+      [...designs]
+        .filter((d) => d.deletedAt === null)
+        .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
+    [designs],
+  );
 
-  const unfolderedDesigns = allDesigns.filter((d) => !d.folderId);
+  useEffect(() => {
+    const validIds = new Set(allDesigns.map((design) => design.id));
+    setTemplateIds((current) => {
+      const next = new Set([...current].filter((id) => validIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [allDesigns]);
 
-  // Map old tab names to new sections
+  function handleSetTemplate(designId: string, next: boolean): void {
+    writeTemplateDesignFlag(designId, next);
+    setTemplateIds((current) => {
+      const updated = new Set(current);
+      if (next) {
+        updated.add(designId);
+      } else {
+        updated.delete(designId);
+      }
+      return updated;
+    });
+  }
+
+  const projectDesigns = allDesigns.filter((design) => !templateIds.has(design.id));
+  const savedTemplates = allDesigns.filter((design) => templateIds.has(design.id));
+  const unfolderedProjectDesigns = projectDesigns.filter((design) => !design.folderId);
+
   const section: HubSection =
-    hubTab === 'examples' ? 'examples' :
-    hubTab === 'designSystems' ? 'designSystems' :
-    'home';
+    hubTab === 'your'
+      ? 'projects'
+      : hubTab === 'templates' || hubTab === 'examples'
+        ? 'templates'
+        : hubTab === 'designSystems'
+          ? 'designSystems'
+          : 'home';
 
   const newDesignTile = (
     <button
@@ -161,24 +212,24 @@ export function HubView({ onUseExamplePrompt }: HubViewProps = {}) {
       onClick={() => openNewDesignDialog()}
       disabled={isGenerating}
       aria-label={t('hub.newDesign')}
-      className="group relative flex w-full text-left disabled:opacity-50 disabled:cursor-not-allowed"
+      className="group relative flex w-full text-left disabled:cursor-not-allowed disabled:opacity-50"
     >
-      <div className="relative w-full aspect-[4/3] flex flex-col items-center justify-center gap-[var(--space-4)] rounded-[var(--radius-lg)] border-[1.5px] border-dashed border-[var(--color-border)] bg-[linear-gradient(135deg,var(--color-background-secondary)_0%,var(--color-accent-soft)_100%)] transition-[transform,border-color] duration-[var(--duration-base)] ease-[var(--ease-out)] group-hover:-translate-y-[2px] group-hover:border-[var(--color-accent)] group-disabled:translate-y-0 group-disabled:border-[var(--color-border)] overflow-hidden">
+      <div className="relative flex aspect-[4/3] w-full flex-col items-center justify-center gap-[var(--space-4)] overflow-hidden rounded-[var(--radius-lg)] border-[1.5px] border-dashed border-[var(--color-border)] bg-[linear-gradient(135deg,var(--color-background-secondary)_0%,var(--color-accent-soft)_100%)] transition-[transform,border-color] duration-[var(--duration-base)] ease-[var(--ease-out)] group-hover:-translate-y-[2px] group-hover:border-[var(--color-accent)] group-disabled:translate-y-0 group-disabled:border-[var(--color-border)]">
         <span
           aria-hidden
-          className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,var(--color-accent-soft)_0%,transparent_60%)] opacity-0 group-hover:opacity-100 transition-opacity duration-[var(--duration-base)]"
+          className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,var(--color-accent-soft)_0%,transparent_60%)] opacity-0 transition-opacity duration-[var(--duration-base)] group-hover:opacity-100"
         />
-        <span className="relative inline-flex items-center justify-center w-[56px] h-[56px] rounded-full bg-[var(--color-surface)] border border-[var(--color-border-muted)] text-[var(--color-accent)] shadow-[var(--shadow-soft)] group-hover:scale-110 group-hover:shadow-[var(--shadow-card)] transition-[transform,box-shadow] duration-[var(--duration-base)] ease-[var(--ease-out)]">
-          <Plus className="w-[24px] h-[24px]" strokeWidth={2} aria-hidden />
+        <span className="relative inline-flex h-[56px] w-[56px] items-center justify-center rounded-full border border-[var(--color-border-muted)] bg-[var(--color-surface)] text-[var(--color-accent)] shadow-[var(--shadow-soft)] transition-[transform,box-shadow] duration-[var(--duration-base)] ease-[var(--ease-out)] group-hover:scale-110 group-hover:shadow-[var(--shadow-card)]">
+          <Plus className="h-[24px] w-[24px]" strokeWidth={2} aria-hidden />
         </span>
         <div className="relative flex flex-col items-center gap-[var(--space-1)] px-[var(--space-4)] text-center">
           <span
-            className="text-[var(--text-md)] text-[var(--color-text-primary)] tracking-[var(--tracking-tight)]"
+            className="text-[var(--text-md)] tracking-[var(--tracking-tight)] text-[var(--color-text-primary)]"
             style={{ fontFamily: 'var(--font-display)', fontWeight: 500 }}
           >
             {t('hub.newDesignCardTitle')}
           </span>
-          <span className="text-[11px] text-[var(--color-text-muted)] leading-[var(--leading-ui)]">
+          <span className="text-[11px] leading-[var(--leading-ui)] text-[var(--color-text-muted)]">
             {t('hub.newDesignCardSub')}
           </span>
         </div>
@@ -187,7 +238,7 @@ export function HubView({ onUseExamplePrompt }: HubViewProps = {}) {
   );
 
   async function handleCreateFolder() {
-    const name = newFolderName.trim() || 'New folder';
+    const name = newFolderName.trim() || t('hub.projects.newFolderFallback');
     await createFolder(name);
     await loadFolders();
     setCreatingFolder(false);
@@ -195,11 +246,9 @@ export function HubView({ onUseExamplePrompt }: HubViewProps = {}) {
   }
 
   return (
-    <div className="h-full flex flex-col bg-[var(--color-background)] overflow-hidden">
-      <main className="flex-1 min-h-0 overflow-y-auto">
+    <div className="flex h-full flex-col overflow-hidden bg-[var(--color-background)]">
+      <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1400px] px-[var(--space-8)] py-[var(--space-8)]">
-
-          {/* HOME section */}
           {section === 'home' ? (
             <div className="flex flex-col gap-[var(--space-10)]">
               <section className="flex flex-col gap-[var(--space-5)]">
@@ -219,35 +268,37 @@ export function HubView({ onUseExamplePrompt }: HubViewProps = {}) {
                     type="button"
                     onClick={() => openNewDesignDialog()}
                     disabled={isGenerating}
-                    className="shrink-0 inline-flex items-center gap-[var(--space-2)] h-9 px-[var(--space-4)] rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[var(--text-sm)] font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+                    className="inline-flex h-9 shrink-0 items-center gap-[var(--space-2)] rounded-[var(--radius-md)] bg-[var(--color-accent)] px-[var(--space-4)] text-[var(--text-sm)] font-medium text-[var(--color-on-accent)] transition-opacity hover:opacity-90 disabled:opacity-50"
                   >
-                    <Plus className="w-4 h-4" aria-hidden />
+                    <Plus className="h-4 w-4" aria-hidden />
                     {t('hub.newDesign')}
                   </button>
                 </div>
               </section>
 
               <section className="flex flex-col gap-[var(--space-4)]">
-                {allDesigns.length > 0 ? (
+                {projectDesigns.length > 0 ? (
                   <>
                     <div className="flex items-center justify-between">
-                      <h2 className="text-[var(--text-sm)] font-medium text-[var(--color-text-secondary)] uppercase tracking-[0.06em]">
+                      <h2 className="text-[var(--text-sm)] font-medium uppercase tracking-[0.06em] text-[var(--color-text-secondary)]">
                         {t('hub.home.recentLabel')}
                       </h2>
-                      {allDesigns.length > 6 ? (
+                      {projectDesigns.length > 6 ? (
                         <button
                           type="button"
                           onClick={() => setHubTab('your')}
-                          className="text-[var(--text-xs)] text-[var(--color-accent)] hover:opacity-80 transition-opacity"
+                          className="text-[var(--text-xs)] text-[var(--color-accent)] transition-opacity hover:opacity-80"
                         >
-                          {t('hub.home.seeAll')} ({allDesigns.length})
+                          {t('hub.home.seeAll')} ({projectDesigns.length})
                         </button>
                       ) : null}
                     </div>
                     <DesignGrid
-                      designs={allDesigns.slice(0, 6)}
+                      designs={projectDesigns.slice(0, 6)}
                       emptyLabel=""
                       prefixTile={newDesignTile}
+                      templateIds={templateIds}
+                      onSetTemplate={handleSetTemplate}
                     />
                   </>
                 ) : (
@@ -261,13 +312,13 @@ export function HubView({ onUseExamplePrompt }: HubViewProps = {}) {
 
               <section className="flex flex-col gap-[var(--space-4)]">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-[var(--text-sm)] font-medium text-[var(--color-text-secondary)] uppercase tracking-[0.06em]">
+                  <h2 className="text-[var(--text-sm)] font-medium uppercase tracking-[0.06em] text-[var(--color-text-secondary)]">
                     {t('hub.home.startFromLabel')}
                   </h2>
                   <button
                     type="button"
-                    onClick={() => setHubTab('examples')}
-                    className="text-[var(--text-xs)] text-[var(--color-accent)] hover:opacity-80 transition-opacity"
+                    onClick={() => setHubTab('templates')}
+                    className="text-[var(--text-xs)] text-[var(--color-accent)] transition-opacity hover:opacity-80"
                   >
                     {t('hub.home.browseAll')}
                   </button>
@@ -285,39 +336,42 @@ export function HubView({ onUseExamplePrompt }: HubViewProps = {}) {
             </div>
           ) : null}
 
-          {/* YOUR DESIGNS — full list with folders */}
-          {hubTab === 'your' ? (
+          {section === 'projects' ? (
             <div className="flex flex-col gap-[var(--space-8)]">
               <div className="flex items-center gap-4">
-                <h1
-                  className="text-[28px] leading-[1.2] tracking-[-0.02em] text-[var(--color-text-primary)] flex-1"
-                  style={{ fontFamily: 'var(--font-display)', fontWeight: 500 }}
-                >
-                  {t('hub.tabs.your')}
-                </h1>
+                <div className="flex-1">
+                  <h1
+                    className="text-[28px] leading-[1.2] tracking-[-0.02em] text-[var(--color-text-primary)]"
+                    style={{ fontFamily: 'var(--font-display)', fontWeight: 500 }}
+                  >
+                    {t('hub.tabs.your')}
+                  </h1>
+                  <p className="mt-1 text-[var(--text-sm)] text-[var(--color-text-secondary)]">
+                    {t('hub.projects.subtitle')}
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
                     setCreatingFolder(true);
                     setNewFolderName('');
                   }}
-                  className="inline-flex items-center gap-[var(--space-2)] h-9 px-[var(--space-3)] rounded-[var(--radius-md)] border border-[var(--color-border)] text-[var(--color-text-secondary)] text-[var(--text-sm)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors"
+                  className="inline-flex h-9 items-center gap-[var(--space-2)] rounded-[var(--radius-md)] border border-[var(--color-border)] px-[var(--space-3)] text-[var(--text-sm)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
                 >
-                  <FolderPlus className="w-4 h-4" aria-hidden />
-                  New folder
+                  <FolderPlus className="h-4 w-4" aria-hidden />
+                  {t('hub.projects.newFolder')}
                 </button>
                 <button
                   type="button"
                   onClick={() => openNewDesignDialog()}
                   disabled={isGenerating}
-                  className="inline-flex items-center gap-[var(--space-2)] h-9 px-[var(--space-4)] rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[var(--text-sm)] font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+                  className="inline-flex h-9 items-center gap-[var(--space-2)] rounded-[var(--radius-md)] bg-[var(--color-accent)] px-[var(--space-4)] text-[var(--text-sm)] font-medium text-[var(--color-on-accent)] transition-opacity hover:opacity-90 disabled:opacity-50"
                 >
-                  <Plus className="w-4 h-4" aria-hidden />
+                  <Plus className="h-4 w-4" aria-hidden />
                   {t('hub.newDesign')}
                 </button>
               </div>
 
-              {/* New folder creation row */}
               {creatingFolder ? (
                 <div className="flex items-center gap-2">
                   <input
@@ -325,119 +379,156 @@ export function HubView({ onUseExamplePrompt }: HubViewProps = {}) {
                     type="text"
                     value={newFolderName}
                     onChange={(e) => setNewFolderName(e.target.value)}
-                    placeholder="Folder name"
+                    placeholder={t('hub.projects.newFolderPlaceholder')}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') void handleCreateFolder();
-                      if (e.key === 'Escape') { setCreatingFolder(false); setNewFolderName(''); }
+                      if (e.key === 'Escape') {
+                        setCreatingFolder(false);
+                        setNewFolderName('');
+                      }
                     }}
-                    className="h-9 px-3 rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-surface)] text-[var(--text-sm)] text-[var(--color-text-primary)] focus:outline-none w-64"
+                    className="h-9 w-64 rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-surface)] px-3 text-[var(--text-sm)] text-[var(--color-text-primary)] focus:outline-none"
                   />
                   <button
                     type="button"
-                    onClick={() => void handleCreateFolder()}
-                    className="h-9 px-3 rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[var(--text-sm)] font-medium hover:opacity-90 transition-opacity"
+                    onClick={() => {
+                      void handleCreateFolder();
+                    }}
+                    className="h-9 rounded-[var(--radius-md)] bg-[var(--color-accent)] px-3 text-[var(--text-sm)] font-medium text-[var(--color-on-accent)] transition-opacity hover:opacity-90"
                   >
-                    Create
+                    {t('hub.projects.createFolder')}
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setCreatingFolder(false); setNewFolderName(''); }}
-                    className="h-9 px-3 rounded-[var(--radius-md)] text-[var(--color-text-secondary)] text-[var(--text-sm)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                    onClick={() => {
+                      setCreatingFolder(false);
+                      setNewFolderName('');
+                    }}
+                    className="h-9 rounded-[var(--radius-md)] px-3 text-[var(--text-sm)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)]"
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                 </div>
               ) : null}
 
-              {/* Folder sections */}
               {folders.map((folder) => {
-                const folderDesigns = allDesigns.filter((d) => d.folderId === folder.id);
+                const folderDesigns = projectDesigns.filter((design) => design.folderId === folder.id);
                 return (
                   <div key={folder.id} className="group flex flex-col gap-[var(--space-3)]">
                     <FolderSection
                       id={folder.id}
                       name={folder.name}
                       designs={folderDesigns}
+                      templateIds={templateIds}
+                      onSetTemplate={handleSetTemplate}
                     />
                   </div>
                 );
               })}
 
-              {/* Unfoldered designs */}
-              {unfolderedDesigns.length > 0 || folders.length === 0 ? (
+              {unfolderedProjectDesigns.length > 0 || folders.length === 0 ? (
                 <div className="flex flex-col gap-[var(--space-4)]">
                   {folders.length > 0 ? (
-                    <h2 className="text-[var(--text-sm)] font-medium text-[var(--color-text-secondary)] uppercase tracking-[0.06em]">
-                      Uncategorized
+                    <h2 className="text-[var(--text-sm)] font-medium uppercase tracking-[0.06em] text-[var(--color-text-secondary)]">
+                      {t('hub.projects.uncategorized')}
                     </h2>
                   ) : null}
                   <DesignGrid
-                    designs={unfolderedDesigns}
+                    designs={unfolderedProjectDesigns}
                     emptyLabel={t('hub.your.empty')}
                     prefixTile={folders.length === 0 ? newDesignTile : undefined}
+                    templateIds={templateIds}
+                    onSetTemplate={handleSetTemplate}
                   />
                 </div>
               ) : null}
             </div>
           ) : null}
 
-          {/* EXAMPLES */}
-          {section === 'examples' ? (
-            <div className="flex flex-col gap-[var(--space-6)]">
+          {section === 'templates' ? (
+            <div className="flex flex-col gap-[var(--space-8)]">
               <div>
                 <h1
                   className="text-[28px] leading-[1.2] tracking-[-0.02em] text-[var(--color-text-primary)]"
                   style={{ fontFamily: 'var(--font-display)', fontWeight: 500 }}
                 >
-                  {t('examples.title')}
+                  {t('hub.tabs.templates')}
                 </h1>
                 <p className="mt-1 text-[var(--text-sm)] text-[var(--color-text-secondary)]">
-                  {t('examples.subtitle')}
+                  {t('hub.templates.subtitle')}
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-[var(--space-2)]">
-                {EXAMPLE_FILTERS.map((id) => {
-                  const active = id === exampleFilter;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setExampleFilter(id)}
-                      className={`
-                        rounded-full border px-[var(--space-3)] py-[6px]
-                        text-[var(--text-xs)] leading-[var(--leading-ui)] transition-colors duration-[var(--duration-fast)]
-                        ${active
-                          ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-background)]'
-                          : 'border-[var(--color-border)] bg-transparent text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-text-primary)]'
-                        }
-                      `}
-                    >
-                      {t(`examples.categories.${id}`)}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {visibleExamples.length === 0 ? (
-                <p className="text-[var(--text-sm)] text-[var(--color-text-muted)] py-[var(--space-8)] text-center">
-                  {t('examples.empty')}
-                </p>
-              ) : (
-                <div className="grid grid-cols-1 gap-[var(--space-4)] sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {visibleExamples.map((example) => (
-                    <ExampleCard
-                      key={example.id}
-                      example={example}
-                      onUsePrompt={(ex: LocalizedExample) => onUseExamplePrompt?.(ex.prompt)}
-                    />
-                  ))}
+              <section className="flex flex-col gap-[var(--space-4)]">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-[var(--text-sm)] font-medium uppercase tracking-[0.06em] text-[var(--color-text-secondary)]">
+                      {t('hub.templates.savedTitle')}
+                    </h2>
+                    <p className="mt-1 text-[var(--text-xs)] text-[var(--color-text-muted)]">
+                      {t('hub.templates.savedHint')}
+                    </p>
+                  </div>
                 </div>
-              )}
+                <DesignGrid
+                  designs={savedTemplates}
+                  emptyLabel={t('hub.templates.savedEmpty')}
+                  mode="template"
+                  showFolderActions={false}
+                  templateIds={templateIds}
+                  onSetTemplate={handleSetTemplate}
+                />
+              </section>
+
+              <section className="flex flex-col gap-[var(--space-4)]">
+                <div>
+                  <h2 className="text-[var(--text-sm)] font-medium uppercase tracking-[0.06em] text-[var(--color-text-secondary)]">
+                    {t('hub.templates.startersTitle')}
+                  </h2>
+                  <p className="mt-1 text-[var(--text-xs)] text-[var(--color-text-muted)]">
+                    {t('hub.templates.startersHint')}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-[var(--space-2)]">
+                  {EXAMPLE_FILTERS.map((id) => {
+                    const active = id === exampleFilter;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setExampleFilter(id)}
+                        className={`rounded-full border px-[var(--space-3)] py-[6px] text-[var(--text-xs)] leading-[var(--leading-ui)] transition-colors duration-[var(--duration-fast)] ${
+                          active
+                            ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-background)]'
+                            : 'border-[var(--color-border)] bg-transparent text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-text-primary)]'
+                        }`}
+                      >
+                        {t(`examples.categories.${id}`)}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {visibleExamples.length === 0 ? (
+                  <p className="py-[var(--space-8)] text-center text-[var(--text-sm)] text-[var(--color-text-muted)]">
+                    {t('examples.empty')}
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-[var(--space-4)] sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {visibleExamples.map((example) => (
+                      <ExampleCard
+                        key={example.id}
+                        example={example}
+                        onUsePrompt={(ex: LocalizedExample) => onUseExamplePrompt?.(ex.prompt)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
           ) : null}
 
-          {/* DESIGN SYSTEMS */}
           {section === 'designSystems' ? (
             <div className="flex flex-col gap-[var(--space-6)]">
               <div>
@@ -454,7 +545,6 @@ export function HubView({ onUseExamplePrompt }: HubViewProps = {}) {
               <DesignSystemsTab />
             </div>
           ) : null}
-
         </div>
       </main>
     </div>
