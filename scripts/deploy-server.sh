@@ -26,7 +26,7 @@ echo "==> App:    $APP_CONTAINER"
 cd "$REPO_DIR"
 
 echo "==> Pulling latest changes"
-git fetch origin "$BRANCH"
+git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"
 git reset --hard "origin/$BRANCH"
 
 echo "==> Building inside node:22 container"
