@@ -11,6 +11,7 @@ import {
   type GenerateImageAssetRequest,
   type GenerateImageAssetResult,
   applyComment,
+  clarifyPrompt,
   generate,
   generateTitle,
   generateViaAgent,
@@ -1353,6 +1354,96 @@ function registerIpcHandlers(db: Database | null): void {
       }
     });
   });
+
+  ipcMain.handle(
+    'codesign:v1:clarify-prompt',
+    async (
+      _e,
+      raw: unknown,
+    ): Promise<{
+      intro: string;
+      questions: Array<{
+        id: string;
+        label: string;
+        kind: 'text' | 'single_choice' | 'multi_choice';
+        options?: string[];
+        allowCustom?: boolean;
+        placeholder?: string;
+      }>;
+    }> => {
+      const runId = crypto.randomUUID();
+      return withRun(runId, async () => {
+        if (typeof raw !== 'object' || raw === null) {
+          throw new CodesignError('clarify-prompt expects an object payload', 'IPC_BAD_INPUT');
+        }
+        const payload = raw as {
+          prompt?: unknown;
+          attachments?: unknown;
+          referenceUrl?: unknown;
+          designId?: unknown;
+          designSystemId?: unknown;
+        };
+        if (typeof payload.prompt !== 'string' || payload.prompt.trim().length === 0) {
+          throw new CodesignError('clarify-prompt requires a non-empty prompt', 'IPC_BAD_INPUT');
+        }
+        const cfg = getCachedConfig();
+        if (cfg === null) throw new CodesignError('No configuration', 'CONFIG_MISSING');
+        const active = resolveActiveModel(cfg, {
+          provider: cfg.activeProvider,
+          modelId: cfg.activeModel,
+        });
+        const allowKeyless = active.allowKeyless;
+        const apiKey = await resolveApiKeyForActive(active.model.provider, allowKeyless);
+        const baseUrl = active.baseUrl ?? undefined;
+        const designId = typeof payload.designId === 'string' ? payload.designId : null;
+        const resolvedDesignSystem = await resolveDesignSystemForRequest(
+          typeof payload.designSystemId === 'string' ? payload.designSystemId : undefined,
+        );
+        const promptContext = await preparePromptContext({
+          attachments: Array.isArray(payload.attachments)
+            ? (payload.attachments as LocalInputFile[])
+            : [],
+          referenceUrl:
+            typeof payload.referenceUrl === 'string' ? payload.referenceUrl : undefined,
+          designSystem: resolvedDesignSystem,
+          workspacePath: workspacePathForDesign(db, designId),
+        });
+        const clarifyLogger: CoreLogger = {
+          info: (event, data) => logIpc.info(event, data),
+          warn: (event, data) => logIpc.warn(event, data),
+          error: (event, data) => logIpc.error(event, data),
+        };
+        try {
+          return await clarifyPrompt({
+            prompt: payload.prompt,
+            model: active.model,
+            apiKey,
+            ...(baseUrl !== undefined ? { baseUrl } : {}),
+            wire: active.wire,
+            ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
+            capabilities: active.capabilities,
+            explicitCapabilities: active.explicitCapabilities,
+            ...(allowKeyless ? { allowKeyless: true } : {}),
+            designSystem: promptContext.designSystem,
+            workspaceContext: promptContext.workspaceContext,
+            attachments: promptContext.attachments,
+            referenceUrl: promptContext.referenceUrl,
+            logger: clarifyLogger,
+          });
+        } catch (err) {
+          logIpc.error('[clarify] clarify-prompt.fail', {
+            provider: active.model.provider,
+            modelId: active.model.modelId,
+            baseUrl,
+            message: err instanceof Error ? err.message : String(err),
+            code: err instanceof CodesignError ? err.code : undefined,
+          });
+          recordFinalError('clarify', runId, err);
+          throw err;
+        }
+      });
+    },
+  );
 
   ipcMain.handle('codesign:open-log-folder', async () => {
     await shell.openPath(getLogPath());

@@ -109,6 +109,20 @@ export interface GenerateResponse {
   costUsd: number;
 }
 
+export interface ClarifyPromptQuestion {
+  id: string;
+  label: string;
+  kind: 'text' | 'single_choice' | 'multi_choice';
+  options?: string[];
+  allowCustom?: boolean;
+  placeholder?: string;
+}
+
+export interface ClarifyPromptResponse {
+  intro: string;
+  questions: ClarifyPromptQuestion[];
+}
+
 export interface Preferences {
   updateChannel: UpdateChannel;
   generationTimeoutSec: number;
@@ -207,6 +221,14 @@ const api = {
       schemaVersion: 1,
       generationId,
     } satisfies CancelGenerationPayloadV1),
+  clarifyPrompt: (payload: {
+    prompt: string;
+    attachments?: LocalInputFile[];
+    referenceUrl?: string;
+    designId?: string;
+    designSystemId?: string;
+  }) =>
+    ipcRenderer.invoke('codesign:v1:clarify-prompt', payload) as Promise<ClarifyPromptResponse>,
   generateTitle: (prompt: string) =>
     ipcRenderer.invoke('codesign:v1:generate-title', { prompt }) as Promise<string>,
   applyComment: (payload: {

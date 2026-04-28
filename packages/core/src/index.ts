@@ -175,6 +175,22 @@ export interface GenerateOutput {
   warnings?: string[];
 }
 
+export type ClarifyPromptQuestionKind = 'text' | 'single_choice' | 'multi_choice';
+
+export interface ClarifyPromptQuestion {
+  id: string;
+  label: string;
+  kind: ClarifyPromptQuestionKind;
+  options?: string[] | undefined;
+  allowCustom?: boolean | undefined;
+  placeholder?: string | undefined;
+}
+
+export interface ClarifyPromptOutput {
+  intro: string;
+  questions: ClarifyPromptQuestion[];
+}
+
 interface Collected {
   text: string;
   artifacts: Artifact[];
@@ -844,6 +860,24 @@ export interface GenerateTitleInput {
   logger?: CoreLogger | undefined;
 }
 
+export interface ClarifyPromptInput {
+  prompt: string;
+  model: ModelRef;
+  apiKey: string;
+  baseUrl?: string | undefined;
+  wire?: WireApi | undefined;
+  httpHeaders?: Record<string, string> | undefined;
+  capabilities?: ProviderCapabilities | undefined;
+  explicitCapabilities?: ProviderCapabilities | undefined;
+  allowKeyless?: boolean | undefined;
+  designSystem?: StoredDesignSystem | null | undefined;
+  workspaceContext?: WorkspaceContext | null | undefined;
+  attachments?: AttachmentContext[] | undefined;
+  referenceUrl?: ReferenceUrlContext | null | undefined;
+  signal?: AbortSignal | undefined;
+  logger?: CoreLogger | undefined;
+}
+
 const TITLE_SYSTEM_PROMPT = [
   'You write short titles for UI design projects.',
   'Output ONLY the title — 2 to 5 words, no quotes, no trailing punctuation, no emoji.',
@@ -852,6 +886,92 @@ const TITLE_SYSTEM_PROMPT = [
   'Good: "金融科技演讲稿", "Calm Spaces 冥想 App", "移动端引导流程".',
   'Bad: "A presentation for a fintech startup", "Design a slide deck for...".',
 ].join('\n');
+
+const CLARIFY_PROMPT_SYSTEM = [
+  'You decide whether a design brief needs clarifying questions before generation.',
+  'Ask questions ONLY when missing information would materially change the artifact type, audience, platform, visual direction, or key success constraints.',
+  'If the brief is already strong enough for a confident first pass, return zero questions.',
+  'Prefer structured questions over open-ended ones when possible.',
+  'Ask at most 3 questions.',
+  'Use the same language as the user.',
+  'Do not ask about details you can choose confidently yourself.',
+  'Return strict JSON only with this shape:',
+  '{"intro":"short sentence","questions":[{"id":"stable_id","label":"question text","kind":"text|single_choice|multi_choice","options":["option"],"allowCustom":true,"placeholder":"optional"}]}',
+].join('\n');
+
+function extractJsonObject(raw: string): string | null {
+  const fenced = raw.match(/```json\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) return fenced[1].trim();
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  return raw.slice(start, end + 1).trim();
+}
+
+function sanitizeQuestionKind(raw: unknown): ClarifyPromptQuestionKind | null {
+  return raw === 'text' || raw === 'single_choice' || raw === 'multi_choice' ? raw : null;
+}
+
+function sanitizeClarifyPromptOutput(raw: unknown): ClarifyPromptOutput {
+  if (typeof raw !== 'object' || raw === null) return { intro: '', questions: [] };
+  const record = raw as Record<string, unknown>;
+  const intro = typeof record['intro'] === 'string' ? record['intro'].trim().slice(0, 300) : '';
+  const rawQuestions = Array.isArray(record['questions']) ? record['questions'] : [];
+  const questions: ClarifyPromptQuestion[] = [];
+
+  for (const rawQuestion of rawQuestions.slice(0, 3)) {
+    if (typeof rawQuestion !== 'object' || rawQuestion === null) continue;
+    const question = rawQuestion as Record<string, unknown>;
+    const id = typeof question['id'] === 'string' ? question['id'].trim().slice(0, 64) : '';
+    const label =
+      typeof question['label'] === 'string' ? question['label'].trim().slice(0, 200) : '';
+    const kind = sanitizeQuestionKind(question['kind']);
+    if (!id || !label || !kind) continue;
+
+    const options = Array.isArray(question['options'])
+      ? question['options']
+          .filter((option): option is string => typeof option === 'string' && option.trim().length > 0)
+          .map((option) => option.trim().slice(0, 80))
+          .slice(0, 6)
+      : undefined;
+    if (kind !== 'text' && (!options || options.length === 0)) continue;
+
+    questions.push({
+      id,
+      label,
+      kind,
+      ...(options && options.length > 0 ? { options } : {}),
+      ...(typeof question['allowCustom'] === 'boolean'
+        ? { allowCustom: question['allowCustom'] }
+        : {}),
+      ...(typeof question['placeholder'] === 'string'
+        ? { placeholder: question['placeholder'].trim().slice(0, 120) }
+        : {}),
+    });
+  }
+
+  return questions.length > 0 ? { intro, questions } : { intro: '', questions: [] };
+}
+
+function parseClarifyPromptOutput(
+  raw: string,
+  log: CoreLogger,
+): ClarifyPromptOutput {
+  const json = extractJsonObject(raw);
+  if (!json) {
+    log.warn('[clarify] step=parse.fail', { reason: 'missing_json_object' });
+    return { intro: '', questions: [] };
+  }
+
+  try {
+    return sanitizeClarifyPromptOutput(JSON.parse(json));
+  } catch (err) {
+    log.warn('[clarify] step=parse.fail', {
+      reason: err instanceof Error ? err.message : String(err),
+    });
+    return { intro: '', questions: [] };
+  }
+}
 
 function sanitizeTitle(raw: string): string {
   const cleaned = raw
@@ -917,6 +1037,63 @@ export async function generateTitle(input: GenerateTitleInput): Promise<string> 
     return title;
   } catch (err) {
     log.error('[title] step=send_request.fail', {
+      ms: Date.now() - started,
+      errorClass: err instanceof Error ? err.constructor.name : typeof err,
+    });
+    throw remapProviderError(err, input.model.provider, input.wire);
+  }
+}
+
+export async function clarifyPrompt(input: ClarifyPromptInput): Promise<ClarifyPromptOutput> {
+  const log = input.logger ?? NOOP_LOGGER;
+  const trimmed = input.prompt.trim();
+  if (trimmed.length === 0) {
+    throw new CodesignError(
+      'clarifyPrompt requires a non-empty prompt',
+      ERROR_CODES.INPUT_EMPTY_PROMPT,
+    );
+  }
+
+  const userPrompt = buildPrompt(trimmed, buildContextSections(input));
+  const messages: ChatMessage[] = [
+    { role: 'system', content: CLARIFY_PROMPT_SYSTEM },
+    {
+      role: 'user',
+      content: `Decide whether this design request needs clarifying questions before generation.\n\n${userPrompt}`,
+    },
+  ];
+  const started = Date.now();
+  log.info('[clarify] step=send_request', {
+    provider: input.model.provider,
+    modelId: input.model.modelId,
+  });
+  try {
+    const result = await completeWithRetry(
+      input.model,
+      messages,
+      {
+        apiKey: input.apiKey,
+        ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl } : {}),
+        ...(input.wire !== undefined ? { wire: input.wire } : {}),
+        ...(input.httpHeaders !== undefined ? { httpHeaders: input.httpHeaders } : {}),
+        ...(input.capabilities !== undefined ? { capabilities: input.capabilities } : {}),
+        ...(input.explicitCapabilities !== undefined
+          ? { explicitCapabilities: input.explicitCapabilities }
+          : {}),
+        ...(input.allowKeyless === true ? { allowKeyless: true } : {}),
+        ...(input.signal !== undefined ? { signal: input.signal } : {}),
+        maxTokens: 700,
+      },
+      {
+        logger: log,
+        provider: input.model.provider,
+        ...(input.wire !== undefined ? { wire: input.wire } : {}),
+      },
+    );
+    log.info('[clarify] step=send_request.ok', { ms: Date.now() - started });
+    return parseClarifyPromptOutput(result.content, log);
+  } catch (err) {
+    log.error('[clarify] step=send_request.fail', {
       ms: Date.now() - started,
       errorClass: err instanceof Error ? err.constructor.name : typeof err,
     });

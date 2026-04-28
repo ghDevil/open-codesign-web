@@ -129,9 +129,21 @@
   "sidebar": {
     "localContext": "Contexto local",
     "attachLocalFiles": "Anexar arquivos locais",
+    "attachCodebaseFolder": "Anexar pasta do código",
+    "changeCodebaseFolder": "Alterar pasta do código",
     "linkDesignSystemRepo": "Vincular repositório do design system",
     "refreshDesignSystemRepo": "Atualizar repositório do design system",
     "referenceUrl": "URL de referência",
+    "clarify": {
+      "title": "Antes de começar",
+      "defaultIntro": "Alguns detalhes mudariam bastante a primeira versão. Responda abaixo ou pule e eu assumo defaults razoáveis.",
+      "loading": "Revisando o briefing em busca de detalhes que faltam…",
+      "textPlaceholder": "Digite sua resposta",
+      "customPlaceholder": "Outro",
+      "submit": "Gerar com respostas",
+      "skip": "Pular e gerar",
+      "disabledReason": "Responda ou pule a etapa de esclarecimento acima primeiro"
+    },
     "attachedFiles": "Arquivos anexados",
     "removeFile": "Remover {{name}}",
     "activeDesignSystem": "Design system ativo",

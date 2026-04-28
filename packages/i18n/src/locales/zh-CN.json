@@ -129,9 +129,21 @@
   "sidebar": {
     "localContext": "本地上下文",
     "attachLocalFiles": "添加本地文件",
+    "attachCodebaseFolder": "关联代码库文件夹",
+    "changeCodebaseFolder": "更换代码库文件夹",
     "linkDesignSystemRepo": "关联设计系统仓库",
     "refreshDesignSystemRepo": "刷新设计系统仓库",
     "referenceUrl": "参考链接",
+    "clarify": {
+      "title": "开始之前",
+      "defaultIntro": "有几个关键信息会明显影响第一版结果。你可以先补充，或者跳过并让我先做默认判断。",
+      "loading": "正在检查需求里是否缺少关键信息…",
+      "textPlaceholder": "输入你的答案",
+      "customPlaceholder": "其他",
+      "submit": "带着这些答案开始生成",
+      "skip": "跳过并直接生成",
+      "disabledReason": "请先回答上面的澄清问题，或选择跳过"
+    },
     "attachedFiles": "已附加文件",
     "removeFile": "移除 {{name}}",
     "activeDesignSystem": "当前设计系统",

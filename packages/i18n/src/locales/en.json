@@ -129,9 +129,21 @@
   "sidebar": {
     "localContext": "Local context",
     "attachLocalFiles": "Attach local files",
+    "attachCodebaseFolder": "Attach codebase folder",
+    "changeCodebaseFolder": "Change codebase folder",
     "linkDesignSystemRepo": "Link design system repo",
     "refreshDesignSystemRepo": "Refresh design system repo",
     "referenceUrl": "Reference URL",
+    "clarify": {
+      "title": "Before I start",
+      "defaultIntro": "A few details would materially change the first pass. Answer them below, or skip and let me make the defaults.",
+      "loading": "Reviewing the brief for missing details…",
+      "textPlaceholder": "Type your answer",
+      "customPlaceholder": "Other",
+      "submit": "Generate with answers",
+      "skip": "Skip and generate",
+      "disabledReason": "Answer or skip the clarification above first"
+    },
     "attachedFiles": "Attached files",
     "removeFile": "Remove {{name}}",
     "activeDesignSystem": "Active design system",

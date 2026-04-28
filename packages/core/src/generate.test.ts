@@ -37,7 +37,7 @@ vi.mock('./skills/loader.js', async () => {
   };
 });
 
-import { applyComment, generate, generateTitle } from './index';
+import { applyComment, clarifyPrompt, generate, generateTitle } from './index';
 
 const MODEL: ModelRef = { provider: 'anthropic', modelId: 'claude-sonnet-4-6' };
 
@@ -951,6 +951,62 @@ describe('generateTitle()', () => {
     expect(opts.explicitCapabilities).toEqual({
       supportsModelsEndpoint: true,
     });
+  });
+});
+
+describe('clarifyPrompt()', () => {
+  it('returns structured questions from valid JSON output', async () => {
+    completeMock.mockResolvedValueOnce({
+      content: JSON.stringify({
+        intro: 'Before I start, I need two details.',
+        questions: [
+          {
+            id: 'audience',
+            label: 'Who is the main audience?',
+            kind: 'single_choice',
+            options: ['Consumers', 'Investors', 'Internal team'],
+            allowCustom: true,
+          },
+        ],
+      }),
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    });
+
+    const result = await clarifyPrompt({
+      prompt: 'Design a dashboard for our launch.',
+      model: MODEL,
+      apiKey: 'sk-test',
+    });
+
+    expect(result.intro).toBe('Before I start, I need two details.');
+    expect(result.questions).toEqual([
+      {
+        id: 'audience',
+        label: 'Who is the main audience?',
+        kind: 'single_choice',
+        options: ['Consumers', 'Investors', 'Internal team'],
+        allowCustom: true,
+      },
+    ]);
+  });
+
+  it('falls back to no questions on malformed model output', async () => {
+    completeMock.mockResolvedValueOnce({
+      content: 'Ask: who is it for?',
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    });
+
+    await expect(
+      clarifyPrompt({
+        prompt: 'Design a dashboard for our launch.',
+        model: MODEL,
+        apiKey: 'sk-test',
+      }),
+    ).resolves.toEqual({ intro: '', questions: [] });
   });
 });
 

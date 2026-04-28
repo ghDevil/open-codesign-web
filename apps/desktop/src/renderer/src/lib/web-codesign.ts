@@ -4,6 +4,10 @@ import type {
   DesignSystemLibraryItem,
   ImageGenerationSettingsView,
 } from '../../../preload/index';
+import {
+  buildHostedWorkspaceDisplayPath,
+  normalizeHostedWorkspaceUploadPath,
+} from './hosted-workspace-upload';
 
 interface CopilotOAuthStatus {
   loggedIn: boolean;
@@ -28,8 +32,20 @@ type AgentEventListener = (event: Record<string, unknown>) => void;
 
 const agentListeners = new Set<AgentEventListener>();
 
+interface PendingWorkspaceUploadFile {
+  relativePath: string;
+  file: File;
+}
+
+interface PendingWorkspaceSelection {
+  token: string;
+  workspaceLabel: string;
+  files: PendingWorkspaceUploadFile[];
+}
+
 let codexLoginPopup: Window | null = null;
 let codexLoginCancelled = false;
+let pendingWorkspaceSelection: PendingWorkspaceSelection | null = null;
 
 function dispatchAgentEvent(event: Record<string, unknown>): void {
   for (const listener of agentListeners) {
@@ -183,6 +199,72 @@ function downloadText(filename: string, content: string, type: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function nextWorkspaceSelectionToken(): string {
+  return `hosted-upload:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function pickWorkspaceFolderViaInput(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.style.display = 'none';
+    input.setAttribute('webkitdirectory', '');
+    input.setAttribute('directory', '');
+    input.addEventListener(
+      'change',
+      () => {
+        const pickedFiles = input.files;
+        input.remove();
+        if (!pickedFiles || pickedFiles.length === 0) {
+          resolve(null);
+          return;
+        }
+
+        const files = Array.from(pickedFiles)
+          .map((file) => {
+            const relativePath = normalizeHostedWorkspaceUploadPath(
+              file.webkitRelativePath || file.name,
+            );
+            return relativePath ? { relativePath, file } : null;
+          })
+          .filter((entry): entry is PendingWorkspaceUploadFile => entry !== null);
+
+        if (files.length === 0) {
+          resolve(null);
+          return;
+        }
+
+        const token = nextWorkspaceSelectionToken();
+        pendingWorkspaceSelection = {
+          token,
+          workspaceLabel: buildHostedWorkspaceDisplayPath(files.map((entry) => entry.relativePath)),
+          files,
+        };
+        resolve(token);
+      },
+      { once: true },
+    );
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+async function uploadPendingWorkspaceSelection(
+  designId: string,
+  selection: PendingWorkspaceSelection,
+): Promise<Awaited<ReturnType<CodesignApi['snapshots']['getDesign']>>> {
+  const form = new FormData();
+  form.append('workspaceLabel', selection.workspaceLabel);
+  for (const entry of selection.files) {
+    form.append('files', entry.file, entry.relativePath);
+  }
+  return apiJson(`/api/designs/${encodeURIComponent(designId)}/workspace`, {
+    method: 'POST',
+    body: form,
+  });
+}
+
 async function parseSseResponse(
   response: Response,
   onEvent: (event: Record<string, unknown>) => void,
@@ -311,6 +393,11 @@ function installWebCodesign(): void {
     },
     cancelGeneration: (generationId: string) =>
       apiJson('/api/generate/cancel', { method: 'POST', body: { generationId } }).then(() => {}),
+    clarifyPrompt: (payload) =>
+      apiJson('/api/clarify-prompt', {
+        method: 'POST',
+        body: payload,
+      }) as ReturnType<NonNullable<CodesignApi['clarifyPrompt']>>,
     generateTitle: async (prompt: string) => {
       const result = await apiJson<{ title: string }>('/api/generate/title', {
         method: 'POST',
@@ -574,24 +661,42 @@ function installWebCodesign(): void {
         }),
       delete: (id: string) =>
         apiJson(`/api/snapshots/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(() => {}),
-      pickWorkspaceFolder: async () => null,
+      pickWorkspaceFolder: () => pickWorkspaceFolderViaInput(),
       updateWorkspace: async (
         designId: string,
-        _workspacePath: string | null,
+        workspacePath: string | null,
         _migrateFiles: boolean,
       ) => {
-        const design = await apiJson<Awaited<ReturnType<CodesignApi['snapshots']['getDesign']>>>(
-          `/api/designs/${encodeURIComponent(designId)}`,
-        );
-        if (!design) {
-          throw new Error(`Design "${designId}" not found`);
+        if (workspacePath === null) {
+          return apiJson(`/api/designs/${encodeURIComponent(designId)}/workspace`, {
+            method: 'DELETE',
+          });
         }
-        return design;
+
+        if (pendingWorkspaceSelection?.token === workspacePath) {
+          const selection = pendingWorkspaceSelection;
+          pendingWorkspaceSelection = null;
+          try {
+            return await uploadPendingWorkspaceSelection(designId, selection);
+          } catch (err) {
+            pendingWorkspaceSelection = selection;
+            throw err;
+          }
+        }
+
+        throw new Error(
+          'Hosted codebase binding only supports picking a folder in the browser and uploading it to this workspace.',
+        );
       },
       openWorkspaceFolder: async () => {
         throw unsupportedDesktopFeature('Opening workspace folders');
       },
-      checkWorkspaceFolder: async () => ({ exists: false }),
+      checkWorkspaceFolder: async (designId: string) => {
+        const design = await apiJson<Awaited<ReturnType<CodesignApi['snapshots']['getDesign']>>>(
+          `/api/designs/${encodeURIComponent(designId)}`,
+        );
+        return { exists: Boolean(design?.workspacePath) };
+      },
     },
     chat: {
       list: (designId: string) => apiJson(`/api/designs/${encodeURIComponent(designId)}/chat`),

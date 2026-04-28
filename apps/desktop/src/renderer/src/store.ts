@@ -24,7 +24,7 @@ import { computeFingerprint } from '@open-codesign/shared/fingerprint';
 import { create } from 'zustand';
 import type { StoreApi } from 'zustand';
 import { clearDesignIntent, readDesignIntent } from './components/NewDesignDialog';
-import type { CodesignApi, ExportFormat } from '../../preload/index';
+import type { ClarifyPromptQuestion, CodesignApi, ExportFormat } from '../../preload/index';
 import { recordAction, snapshotTimeline } from './lib/action-timeline';
 import {
   clearSelectedDesignSystemId,
@@ -172,6 +172,19 @@ interface PromptRequest {
   referenceUrl?: string | undefined;
 }
 
+interface PendingClarification {
+  designId: string | null;
+  request: PromptRequest;
+  intro: string;
+  questions: ClarifyPromptQuestion[];
+}
+
+export interface ClarificationAnswer {
+  questionId: string;
+  label: string;
+  answer: string;
+}
+
 interface CodesignState {
   previewHtml: string | null;
   /** LRU cache of `previewHtml` per design id, capped to PREVIEW_POOL_LIMIT.
@@ -188,6 +201,7 @@ interface CodesignState {
    *  the design that actually has the run. */
   generatingDesignId: string | null;
   generationStage: GenerationStage;
+  isClarifying: boolean;
   /** Live assistant text buffered during the current agent turn. Rendered as
    *  an ephemeral chat bubble so the UI shows incremental output instead of
    *  waiting for the turn to settle. Cleared on turn_end (the persisted
@@ -224,6 +238,7 @@ interface CodesignState {
   inputFiles: LocalInputFile[];
   referenceUrl: string;
   lastPromptInput: PromptRequest | null;
+  pendingClarification: PendingClarification | null;
   selectedElement: SelectedElement | null;
   previewZoom: number;
   interactionMode: InteractionMode;
@@ -300,12 +315,16 @@ interface CodesignState {
     prompt: string;
     attachments?: LocalInputFile[] | undefined;
     referenceUrl?: string | undefined;
+    displayPrompt?: string | undefined;
+    skipClarification?: boolean | undefined;
     /** Silent prompts skip the user chat bubble and the auto-rename trigger.
      *  Used by the auto-polish flow so the injected "deepen" request isn't
      *  visible as a user message — the agent still receives it and responds
      *  normally, but the chat transcript reads as one continuous run. */
     silent?: boolean | undefined;
   }) => Promise<void>;
+  submitPendingClarification: (answers: ClarificationAnswer[]) => Promise<void>;
+  skipPendingClarification: () => Promise<void>;
   /** Set of designIds for which the automatic polish / deepen follow-up has
    *  already fired. Prevents infinite loops (polish round would otherwise
    *  also end in agent_end and trigger itself). Cleared when a design is
@@ -1499,6 +1518,39 @@ export function buildEnrichedPrompt(
   return `${headers.join('\n\n')}\n\n${lines.join('\n')}`;
 }
 
+function formatClarificationAssistantText(
+  intro: string,
+  questions: ClarifyPromptQuestion[],
+): string {
+  const lines = [intro.trim()].filter((line) => line.length > 0);
+  questions.forEach((question, index) => {
+    lines.push(`${index + 1}. ${question.label}`);
+    if (question.options && question.options.length > 0) {
+      lines.push(`   Options: ${question.options.join(' · ')}`);
+    }
+  });
+  return lines.join('\n');
+}
+
+function buildClarificationAnswerSummary(answers: ClarificationAnswer[]): string {
+  return [
+    'Clarification answers:',
+    ...answers.map((answer) => `- ${answer.label}: ${answer.answer}`),
+  ].join('\n');
+}
+
+function buildClarifiedPrompt(originalPrompt: string, answers: ClarificationAnswer[]): string {
+  return [
+    'Use this original brief and the clarification answers below to create the design now.',
+    '',
+    '## Original brief',
+    originalPrompt,
+    '',
+    '## Clarification answers',
+    ...answers.map((answer) => `- ${answer.label}: ${answer.answer}`),
+  ].join('\n');
+}
+
 export const useCodesignStore = create<CodesignState>((set, get) => ({
   previewHtml: null,
   previewHtmlByDesign: {},
@@ -1507,6 +1559,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
   activeGenerationId: null,
   generatingDesignId: null,
   generationStage: 'idle' as GenerationStage,
+  isClarifying: false,
   streamingAssistantText: null,
   pendingToolCalls: [],
   lastUsage: null,
@@ -1573,6 +1626,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
   inputFiles: [],
   referenceUrl: '',
   lastPromptInput: null,
+  pendingClarification: null,
   selectedElement: null,
   previewZoom: 100,
   interactionMode: 'default' as InteractionMode,
@@ -1721,7 +1775,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         hasAttachments: (input.attachments?.length ?? 0) > 0,
       },
     });
-    if (get().isGenerating) return;
+    if (get().isGenerating || get().isClarifying) return;
     if (!window.codesign) {
       const msg = tr('errors.rendererDisconnected');
       set({ errorMessage: msg, lastError: msg });
@@ -1768,20 +1822,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     if (!request) return;
 
     const pendingEditIds = pendingEdits.map((c) => c.id);
-
-    const generationId = newId();
     const designIdAtStart = get().currentDesignId;
-    set(() => ({
-      isGenerating: true,
-      activeGenerationId: generationId,
-      generatingDesignId: designIdAtStart,
-      generationStage: 'sending',
-      streamingAssistantText: null,
-      errorMessage: null,
-      lastPromptInput: request,
-      selectedElement: null,
-      iframeErrors: [],
-    }));
 
     // Cap cross-generate history to the most recent turns. The agent re-reads
     // the current HTML via text_editor.view() when needed, so older prose in
@@ -1794,6 +1835,78 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     const history =
       fullHistory.length > HISTORY_CAP ? fullHistory.slice(-HISTORY_CAP) : fullHistory;
     const isFirstPrompt = fullHistory.length === 0;
+    const selectedDesignSystemId = designIdAtStart
+      ? readSelectedDesignSystemId(designIdAtStart)
+      : null;
+
+    if (
+      !input.skipClarification &&
+      !input.silent &&
+      pendingEdits.length === 0 &&
+      isFirstPrompt &&
+      window.codesign?.clarifyPrompt
+    ) {
+      set({ isClarifying: true, errorMessage: null, lastPromptInput: request });
+      try {
+        const clarification = await window.codesign.clarifyPrompt({
+          prompt: request.prompt,
+          attachments: request.attachments,
+          ...(request.referenceUrl ? { referenceUrl: request.referenceUrl } : {}),
+          ...(designIdAtStart ? { designId: designIdAtStart } : {}),
+          ...(selectedDesignSystemId ? { designSystemId: selectedDesignSystemId } : {}),
+        });
+        if (clarification.questions.length > 0) {
+          if (designIdAtStart) {
+            await get().appendChatMessage({
+              designId: designIdAtStart,
+              kind: 'user',
+              payload: { text: input.displayPrompt ?? request.prompt },
+            });
+            await get().appendChatMessage({
+              designId: designIdAtStart,
+              kind: 'assistant_text',
+              payload: {
+                text: formatClarificationAssistantText(
+                  clarification.intro,
+                  clarification.questions,
+                ),
+              },
+            });
+          }
+          triggerAutoRenameIfFirst(get, isFirstPrompt, request.prompt);
+          set({
+            pendingClarification: {
+              designId: designIdAtStart,
+              request,
+              intro: clarification.intro,
+              questions: clarification.questions,
+            },
+          });
+          return;
+        }
+      } catch (err) {
+        rendererLogger.warn('clarify.preflight.failed', {
+          designId: designIdAtStart,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        set({ isClarifying: false });
+      }
+    }
+
+    const generationId = newId();
+    set(() => ({
+      isGenerating: true,
+      activeGenerationId: generationId,
+      generatingDesignId: designIdAtStart,
+      generationStage: 'sending',
+      streamingAssistantText: null,
+      errorMessage: null,
+      lastPromptInput: request,
+      pendingClarification: null,
+      selectedElement: null,
+      iframeErrors: [],
+    }));
 
     const designIntent = designIdAtStart ? readDesignIntent(designIdAtStart) : null;
     const extractedDocs = (request.attachments ?? [])
@@ -1837,9 +1950,6 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       designId: designIdAtStart,
       promptLen: enrichedPrompt.length,
     });
-    const selectedDesignSystemId = designIdAtStart
-      ? readSelectedDesignSystemId(designIdAtStart)
-      : null;
 
     try {
       await runGenerate(
@@ -1893,6 +2003,33 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     } catch (err) {
       applyGenerateError(get, set, generationId, err, designIdAtStart);
     }
+  },
+
+  async submitPendingClarification(answers) {
+    const pendingClarification = get().pendingClarification;
+    if (!pendingClarification) return;
+    const compiledPrompt = buildClarifiedPrompt(pendingClarification.request.prompt, answers);
+    const displayPrompt = buildClarificationAnswerSummary(answers);
+    set({ pendingClarification: null });
+    await get().sendPrompt({
+      prompt: compiledPrompt,
+      attachments: pendingClarification.request.attachments,
+      referenceUrl: pendingClarification.request.referenceUrl,
+      displayPrompt,
+      skipClarification: true,
+    });
+  },
+
+  async skipPendingClarification() {
+    const pendingClarification = get().pendingClarification;
+    if (!pendingClarification) return;
+    set({ pendingClarification: null });
+    await get().sendPrompt({
+      prompt: pendingClarification.request.prompt,
+      attachments: pendingClarification.request.attachments,
+      referenceUrl: pendingClarification.request.referenceUrl,
+      skipClarification: true,
+    });
   },
 
   cancelGeneration() {
@@ -2214,6 +2351,8 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         activeCanvasTab: 0,
         inputFiles: [],
         referenceUrl: '',
+        isClarifying: false,
+        pendingClarification: null,
       });
       persistDesignContext(design.id, { inputFiles: [], referenceUrl: '' });
       await get().loadDesigns();
@@ -2299,6 +2438,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         activeCanvasTab: 1,
         inputFiles: designContext.inputFiles,
         referenceUrl: designContext.referenceUrl,
+        isClarifying: false,
       });
       void get().loadChatForCurrentDesign();
       void get().loadCommentsForCurrentDesign();
@@ -2355,6 +2495,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         activeCanvasTab: latest ? 1 : 0,
         inputFiles: designContext.inputFiles,
         referenceUrl: designContext.referenceUrl,
+        isClarifying: false,
       });
       void get().loadChatForCurrentDesign();
       void get().loadCommentsForCurrentDesign();

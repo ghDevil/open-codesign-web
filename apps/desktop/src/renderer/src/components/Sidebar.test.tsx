@@ -7,7 +7,7 @@ function file(path: string, name: string): LocalInputFile {
 }
 
 describe('buildComposerContextItems', () => {
-  it('includes attached files, reference URL, and design system when present', () => {
+  it('includes attached files, reference URL, workspace, and design system when present', () => {
     const config = {
       designSystem: {
         rootPath: 'D:/repo/design-system',
@@ -27,14 +27,22 @@ describe('buildComposerContextItems', () => {
         file('D:/repo/tokens.json', 'tokens.json'),
       ],
       referenceUrl: 'https://example.com/spec',
+      workspacePath: 'D:/repo/app',
       config,
     });
 
-    expect(items.map((item) => item.icon)).toEqual(['file', 'file', 'url', 'designSystem']);
+    expect(items.map((item) => item.icon)).toEqual([
+      'file',
+      'file',
+      'url',
+      'workspace',
+      'designSystem',
+    ]);
     expect(items.map((item) => item.label)).toEqual([
       'brief.md',
       'tokens.json',
       'https://example.com/spec',
+      'D:/repo/app',
       'Tokens + components',
     ]);
   });
@@ -43,6 +51,7 @@ describe('buildComposerContextItems', () => {
     const items = buildComposerContextItems({
       inputFiles: [file('D:/repo/brief.md', 'brief.md')],
       referenceUrl: '   ',
+      workspacePath: null,
       config: null,
     });
 

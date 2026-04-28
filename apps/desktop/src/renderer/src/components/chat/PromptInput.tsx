@@ -39,6 +39,8 @@ export interface PromptInputProps {
   onSubmit: () => void;
   onCancel: () => void;
   isGenerating: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
   /** Optional content rendered above the textarea, inside the composer card. */
   contextSummary?: ReactNode;
   /** Optional element rendered inside the textarea container, bottom-left. */
@@ -59,7 +61,17 @@ export interface PromptInputHandle {
  *   Shift+Enter     — newline
  */
 export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(function PromptInput(
-  { prompt, setPrompt, onSubmit, onCancel, isGenerating, contextSummary, leadingAction },
+  {
+    prompt,
+    setPrompt,
+    onSubmit,
+    onCancel,
+    isGenerating,
+    disabled = false,
+    disabledReason,
+    contextSummary,
+    leadingAction,
+  },
   ref,
 ) {
   const t = useT();
@@ -118,7 +130,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
 
   function handleSubmit(e: FormEvent): void {
     e.preventDefault();
-    if (!prompt.trim() || isGenerating) return;
+    if (!prompt.trim() || isGenerating || disabled) return;
     onSubmit();
   }
 
@@ -132,10 +144,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     }
   }
 
-  const canSend = prompt.trim().length > 0 && !isGenerating;
-  const sendDisabledReason = isGenerating
-    ? t('disabledReason.generatingInProgress')
-    : t('disabledReason.typePromptToSend');
+  const canSend = prompt.trim().length > 0 && !isGenerating && !disabled;
+  const sendDisabledReason =
+    disabledReason ??
+    (isGenerating ? t('disabledReason.generatingInProgress') : t('disabledReason.typePromptToSend'));
 
   return (
     <form onSubmit={handleSubmit}>
@@ -155,6 +167,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
           onKeyDown={handleKeyDown}
           placeholder={t('chat.placeholderRich')}
           rows={1}
+          disabled={disabled}
           className="codesign-prompt-textarea block w-full resize-none appearance-none border-0 bg-transparent px-[14px] pt-[12px] pb-[44px] text-[14px] leading-[1.55] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] shadow-none outline-none focus:outline-none focus:ring-0 min-h-[24px] overflow-y-auto"
           style={{ fontFamily: 'var(--font-sans)' }}
         />

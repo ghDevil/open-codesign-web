@@ -6,7 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -15,6 +15,7 @@ import {
   DESIGN_SKILLS,
   FRAME_TEMPLATES,
   applyComment,
+  clarifyPrompt,
   generate,
   generateTitle,
   generateViaAgent,
@@ -64,9 +65,11 @@ import {
 } from './copilot-token-store.js';
 import {
   appendChatMessage,
+  clearDesignWorkspace,
   createComment,
   createDesign,
   createSnapshot,
+  deleteDesignFilesByPrefix,
   deleteComment,
   deleteSnapshot,
   duplicateDesign,
@@ -85,6 +88,7 @@ import {
   softDeleteDesign,
   updateChatToolCallStatus,
   updateComment,
+  updateDesignWorkspace,
   upsertDesignFile,
 } from './db-queries.js';
 import { scanDesignSystem } from './design-system.js';
@@ -122,8 +126,15 @@ import {
   type McpServerConfig,
   type McpToolCallResult,
 } from './mcp-tools.js';
+import { buildHostedWorkspaceContext } from './project-context.js';
 import { createRuntimeTextEditorFs } from './runtime-fs.js';
 import { initSnapshotsDb } from './snapshots-db.js';
+import {
+  getHostedWorkspaceDiskPath,
+  isTextWorkspaceFile,
+  normalizeHostedWorkspaceLabel,
+  normalizeUploadedWorkspacePath,
+} from './workspace-binding.js';
 
 // Web-safe no-op runtime verifier (no headless browser in Node)
 function makeRuntimeVerifier() {
@@ -1168,6 +1179,7 @@ app.post('/api/generate', async (req: Request, res: Response) => {
 
   const { fs, fsMap } = createRuntimeTextEditorFs({
     db,
+    dataDir: DATA_DIR,
     designId,
     generationId: id,
     previousHtml,
@@ -1178,6 +1190,7 @@ app.post('/api/generate', async (req: Request, res: Response) => {
   const resolvedDesignSystem = await resolveDesignSystemForRequest(
     (payload as { designSystemId?: string }).designSystemId,
   );
+  const workspaceContext = buildHostedWorkspaceContext(db, designId);
 
   const generateInput = {
     prompt: steeredPrompt,
@@ -1195,6 +1208,7 @@ app.post('/api/generate', async (req: Request, res: Response) => {
     attachments: payload.attachments as never,
     referenceUrl: payload.referenceUrl ? { url: payload.referenceUrl } : undefined,
     designSystem: resolvedDesignSystem,
+    workspaceContext,
     ...(baseUrl !== undefined ? { baseUrl } : {}),
     wire: active.wire,
     ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
@@ -1335,6 +1349,49 @@ app.post('/api/generate/title', async (req, res) => {
   }
 });
 
+app.post('/api/clarify-prompt', async (req, res) => {
+  try {
+    const payload = req.body as {
+      prompt: string;
+      attachments?: unknown[];
+      referenceUrl?: string;
+      designId?: string;
+      designSystemId?: string;
+    };
+    const cfg = getCachedConfig();
+    if (!cfg) return sendError(res, 503, 'No config', ERROR_CODES.CONFIG_MISSING);
+    const active = resolveActiveModel(cfg, {
+      provider: cfg.activeProvider,
+      modelId: cfg.activeModel,
+    });
+    const apiKey = await resolveApiKeyWithKeylessFallback(
+      active.model.provider,
+      active.allowKeyless,
+      buildResolveActiveApiKeyDeps(),
+    );
+    const resolvedDesignSystem = await resolveDesignSystemForRequest(payload.designSystemId);
+    const workspaceContext = buildHostedWorkspaceContext(getDb(), payload.designId);
+    const result = await clarifyPrompt({
+      prompt: payload.prompt,
+      model: active.model,
+      apiKey,
+      ...(active.baseUrl ? { baseUrl: active.baseUrl } : {}),
+      wire: active.wire,
+      ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
+      capabilities: active.capabilities,
+      explicitCapabilities: active.explicitCapabilities,
+      ...(active.allowKeyless ? { allowKeyless: true as const } : {}),
+      attachments: payload.attachments as never,
+      referenceUrl: payload.referenceUrl ? { url: payload.referenceUrl } : undefined,
+      designSystem: resolvedDesignSystem,
+      workspaceContext,
+    });
+    res.json(result);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 app.post('/api/apply-comment', async (req, res) => {
   try {
     const payload = req.body as {
@@ -1344,6 +1401,7 @@ app.post('/api/apply-comment', async (req, res) => {
       attachments: unknown[];
       designSystemId?: string;
       referenceUrl?: string;
+      designId?: string;
       model?: { provider: string; modelId: string };
     };
     const cfg = getCachedConfig();
@@ -1356,6 +1414,7 @@ app.post('/api/apply-comment', async (req, res) => {
       buildResolveActiveApiKeyDeps(),
     );
     const resolvedDesignSystem = await resolveDesignSystemForRequest(payload.designSystemId);
+    const workspaceContext = buildHostedWorkspaceContext(getDb(), payload.designId);
     const result = await applyComment({
       html: payload.html,
       comment: payload.comment,
@@ -1365,6 +1424,7 @@ app.post('/api/apply-comment', async (req, res) => {
       attachments: payload.attachments as never,
       referenceUrl: payload.referenceUrl ? { url: payload.referenceUrl } : undefined,
       designSystem: resolvedDesignSystem,
+      workspaceContext,
       ...(active.baseUrl ? { baseUrl: active.baseUrl } : {}),
       wire: active.wire,
       capabilities: active.capabilities,
@@ -1451,6 +1511,73 @@ app.post('/api/designs/:id/duplicate', (req, res) => {
   try {
     const design = duplicateDesign(getDb(), req.params.id);
     res.json(design);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post('/api/designs/:id/workspace', upload.array('files'), async (req, res) => {
+  try {
+    const designId = req.params.id;
+    const design = getDesign(getDb(), designId);
+    if (!design) return sendError(res, 404, 'Design not found', 'not_found');
+
+    const files = (req.files as Express.Multer.File[]) ?? [];
+    if (files.length === 0) {
+      return sendError(res, 400, 'No workspace files uploaded', 'workspace_missing_files');
+    }
+
+    const workspaceRoot = getHostedWorkspaceDiskPath(DATA_DIR, designId);
+    const codebaseRoot = join(workspaceRoot, 'codebase');
+    await rm(codebaseRoot, { recursive: true, force: true });
+    deleteDesignFilesByPrefix(getDb(), designId, 'codebase/');
+
+    let storedCount = 0;
+    for (const file of files) {
+      const normalizedRelativePath = normalizeUploadedWorkspacePath(file.originalname);
+      if (!normalizedRelativePath) continue;
+
+      const storedPath = `codebase/${normalizedRelativePath}`;
+      const destinationPath = join(workspaceRoot, storedPath);
+      await mkdir(dirname(destinationPath), { recursive: true });
+      await writeFile(destinationPath, file.buffer);
+
+      if (isTextWorkspaceFile(storedPath, file.mimetype)) {
+        upsertDesignFile(getDb(), designId, storedPath, file.buffer.toString('utf8'));
+      }
+      storedCount += 1;
+    }
+
+    if (storedCount === 0) {
+      return sendError(res, 400, 'Uploaded workspace contained no valid files', 'workspace_empty');
+    }
+
+    const updated = updateDesignWorkspace(
+      getDb(),
+      designId,
+      normalizeHostedWorkspaceLabel(req.body['workspaceLabel']),
+    );
+    if (!updated) return sendError(res, 404, 'Design not found', 'not_found');
+    res.json(updated);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.delete('/api/designs/:id/workspace', async (req, res) => {
+  try {
+    const designId = req.params.id;
+    const design = getDesign(getDb(), designId);
+    if (!design) return sendError(res, 404, 'Design not found', 'not_found');
+
+    await rm(join(getHostedWorkspaceDiskPath(DATA_DIR, designId), 'codebase'), {
+      recursive: true,
+      force: true,
+    });
+    deleteDesignFilesByPrefix(getDb(), designId, 'codebase/');
+    const updated = clearDesignWorkspace(getDb(), designId);
+    if (!updated) return sendError(res, 404, 'Design not found', 'not_found');
+    res.json(updated);
   } catch (err) {
     handleError(res, err);
   }

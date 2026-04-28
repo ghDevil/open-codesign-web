@@ -1,6 +1,6 @@
 import { useT } from '@open-codesign/i18n';
 import { IconButton, Tooltip } from '@open-codesign/ui';
-import { FolderOpen, Link2, Paperclip, Plus } from 'lucide-react';
+import { FileCode2, FolderOpen, Link2, Paperclip, Plus } from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
@@ -11,9 +11,11 @@ import {
 
 export interface AddMenuProps {
   onAttachFiles: () => void;
+  onBindWorkspace: () => void;
   onLinkDesignSystem: () => void;
   referenceUrl: string;
   onReferenceUrlChange: (value: string) => void;
+  hasWorkspace: boolean;
   hasDesignSystem: boolean;
   disabled?: boolean;
 }
@@ -27,9 +29,11 @@ export interface AddMenuProps {
  */
 export function AddMenu({
   onAttachFiles,
+  onBindWorkspace,
   onLinkDesignSystem,
   referenceUrl,
   onReferenceUrlChange,
+  hasWorkspace,
   hasDesignSystem,
   disabled,
 }: AddMenuProps) {
@@ -103,6 +107,22 @@ export function AddMenu({
               aria-hidden
             />
             <span className="truncate">{t('sidebar.attachLocalFiles')}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={handleItem(onBindWorkspace)}
+            className="flex w-full items-center gap-[var(--space-2)] rounded-[var(--radius-sm)] px-[var(--space-2_5)] py-[var(--space-2)] text-left text-[var(--text-sm)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+          >
+            <FileCode2
+              className="w-[var(--size-icon-sm)] h-[var(--size-icon-sm)] text-[var(--color-text-secondary)]"
+              aria-hidden
+            />
+            <span className="truncate">
+              {hasWorkspace
+                ? t('sidebar.changeCodebaseFolder')
+                : t('sidebar.attachCodebaseFolder')}
+            </span>
           </button>
           <button
             type="button"

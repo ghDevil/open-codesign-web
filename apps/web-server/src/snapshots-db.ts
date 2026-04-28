@@ -329,6 +329,26 @@ export function softDeleteDesign(db: BetterSqlite3.Database, id: string): void {
   );
 }
 
+export function updateDesignWorkspace(
+  db: BetterSqlite3.Database,
+  id: string,
+  workspacePath: string,
+): Design | null {
+  const result = db
+    .prepare('UPDATE designs SET workspace_path = ?, updated_at = ? WHERE id = ?')
+    .run(workspacePath, now(), id);
+  if (result.changes === 0) return null;
+  return getDesign(db, id);
+}
+
+export function clearDesignWorkspace(db: BetterSqlite3.Database, id: string): Design | null {
+  const result = db
+    .prepare('UPDATE designs SET workspace_path = NULL, updated_at = ? WHERE id = ?')
+    .run(now(), id);
+  if (result.changes === 0) return null;
+  return getDesign(db, id);
+}
+
 export function duplicateDesign(db: BetterSqlite3.Database, id: string): Design | null {
   const original = db.prepare('SELECT * FROM designs WHERE id = ?').get(id) as
     | DesignRowDb
@@ -409,6 +429,19 @@ export function upsertDesignFile(
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(design_id, path) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at
   `).run(id, designId, filePath, content, ts, ts);
+}
+
+export function deleteDesignFilesByPrefix(
+  db: BetterSqlite3.Database,
+  designId: string,
+  prefix: string,
+): void {
+  const normalizedPrefix = normalizeDesignFilePath(prefix).replace(/\/+$/, '');
+  if (normalizedPrefix.length === 0) return;
+  db.prepare('DELETE FROM design_files WHERE design_id = ? AND path LIKE ?').run(
+    designId,
+    `${normalizedPrefix}/%`,
+  );
 }
 
 export function listChatMessages(db: BetterSqlite3.Database, designId: string): ChatMessageRow[] {

@@ -1,12 +1,14 @@
 import { useT } from '@open-codesign/i18n';
 import type { LocalInputFile, OnboardingState } from '@open-codesign/shared';
-import { FolderOpen, Link2, Paperclip, X } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { FileCode2, FolderOpen, Link2, Paperclip, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useAgentStream } from '../hooks/useAgentStream';
+import { workspacePathComparisonKey } from '../lib/workspace-path';
 import { useCodesignStore } from '../store';
 import { ModelSwitcher } from './ModelSwitcher';
 import { AddMenu } from './chat/AddMenu';
 import { ChatMessageList } from './chat/ChatMessageList';
+import { ClarificationCard } from './chat/ClarificationCard';
 import { CommentChipBar } from './chat/CommentChipBar';
 import { EmptyState } from './chat/EmptyState';
 import { PromptInput, type PromptInputHandle } from './chat/PromptInput';
@@ -20,13 +22,14 @@ export interface SidebarProps {
 interface ComposerContextItem {
   key: string;
   label: string;
-  icon: 'file' | 'url' | 'designSystem';
+  icon: 'file' | 'url' | 'workspace' | 'designSystem';
   actionLabel?: string;
 }
 
 export function buildComposerContextItems(input: {
   inputFiles: LocalInputFile[];
   referenceUrl: string;
+  workspacePath?: string | null;
   config: OnboardingState | null;
 }): ComposerContextItem[] {
   const items: ComposerContextItem[] = input.inputFiles.map((file) => ({
@@ -46,6 +49,16 @@ export function buildComposerContextItems(input: {
     });
   }
 
+  const workspacePath = input.workspacePath?.trim() ?? '';
+  if (workspacePath.length > 0) {
+    items.push({
+      key: 'workspace-path',
+      label: workspacePath,
+      icon: 'workspace',
+      actionLabel: workspacePath,
+    });
+  }
+
   const designSystem = input.config?.designSystem ?? null;
   if (designSystem) {
     items.push({
@@ -62,6 +75,7 @@ export function buildComposerContextItems(input: {
 function ContextIcon({ icon }: { icon: ComposerContextItem['icon'] }) {
   if (icon === 'file') return <Paperclip className="w-3.5 h-3.5" aria-hidden />;
   if (icon === 'url') return <Link2 className="w-3.5 h-3.5" aria-hidden />;
+  if (icon === 'workspace') return <FileCode2 className="w-3.5 h-3.5" aria-hidden />;
   return <FolderOpen className="w-3.5 h-3.5" aria-hidden />;
 }
 
@@ -92,13 +106,19 @@ export function Sidebar({ prompt, setPrompt, onSubmit }: SidebarProps) {
 
   const chatMessages = useCodesignStore((s) => s.chatMessages);
   const chatLoaded = useCodesignStore((s) => s.chatLoaded);
+  const isClarifying = useCodesignStore((s) => s.isClarifying);
+  const pendingClarification = useCodesignStore((s) => s.pendingClarification);
   const streamingAssistantText = useCodesignStore((s) => s.streamingAssistantText);
   const pendingToolCalls = useCodesignStore((s) => s.pendingToolCalls);
   const loadChatForCurrentDesign = useCodesignStore((s) => s.loadChatForCurrentDesign);
   const currentDesignId = useCodesignStore((s) => s.currentDesignId);
   const designs = useCodesignStore((s) => s.designs);
+  const requestWorkspaceRebind = useCodesignStore((s) => s.requestWorkspaceRebind);
+  const submitPendingClarification = useCodesignStore((s) => s.submitPendingClarification);
+  const skipPendingClarification = useCodesignStore((s) => s.skipPendingClarification);
   const sidebarCollapsed = useCodesignStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useCodesignStore((s) => s.setSidebarCollapsed);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
 
   // Mount useAgentStream here so streaming events route into the chat
   // as soon as the Sidebar is in the tree — matches the lifecycle of
@@ -113,7 +133,17 @@ export function Sidebar({ prompt, setPrompt, onSubmit }: SidebarProps) {
 
   const designSystem = config?.designSystem ?? null;
   const currentDesign = designs.find((d) => d.id === currentDesignId) ?? null;
-  const contextItems = buildComposerContextItems({ inputFiles, referenceUrl, config });
+  const workspacePath = currentDesign?.workspacePath ?? null;
+  const activeClarification =
+    pendingClarification && pendingClarification.designId === currentDesignId
+      ? pendingClarification
+      : null;
+  const contextItems = buildComposerContextItems({
+    inputFiles,
+    referenceUrl,
+    workspacePath,
+    config,
+  });
 
   useEffect(() => {
     if (currentDesignId && !chatLoaded) {
@@ -124,6 +154,45 @@ export function Sidebar({ prompt, setPrompt, onSubmit }: SidebarProps) {
   const activeModelLine =
     config?.hasKey && config.modelPrimary ? config.modelPrimary : t('sidebar.chat.noModel');
   const lastTokens = lastUsage ? lastUsage.inputTokens + lastUsage.outputTokens : null;
+
+  async function handleBindWorkspace(): Promise<void> {
+    if (!window.codesign?.snapshots.pickWorkspaceFolder || !currentDesign || !currentDesignId) return;
+    if (isGenerating) {
+      useCodesignStore.getState().pushToast({
+        variant: 'info',
+        title: t('canvas.workspace.busyGenerating'),
+      });
+      return;
+    }
+
+    try {
+      setWorkspaceLoading(true);
+      const path = await window.codesign.snapshots.pickWorkspaceFolder();
+      if (!path) return;
+
+      if (
+        currentDesign.workspacePath &&
+        workspacePathComparisonKey(currentDesign.workspacePath) !== workspacePathComparisonKey(path)
+      ) {
+        requestWorkspaceRebind(currentDesign, path);
+        return;
+      }
+
+      if (currentDesign.workspacePath === null) {
+        await window.codesign.snapshots.updateWorkspace(currentDesignId, path, false);
+        const updated = await window.codesign.snapshots.listDesigns();
+        useCodesignStore.setState({ designs: updated });
+      }
+    } catch (err) {
+      useCodesignStore.getState().pushToast({
+        variant: 'error',
+        title: t('canvas.workspace.updateFailed'),
+        description: err instanceof Error ? err.message : t('errors.unknown'),
+      });
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  }
 
   return (
     <aside
@@ -154,6 +223,23 @@ export function Sidebar({ prompt, setPrompt, onSubmit }: SidebarProps) {
         {/* Skill chips + prompt input + model/tokens line */}
         <div className="border-t border-[var(--color-border-subtle)] px-[var(--space-4)] pt-[var(--space-3)] pb-[var(--space-3)] space-y-[10px] bg-[var(--color-background-secondary)]">
           <CommentChipBar />
+          {isClarifying && !activeClarification ? (
+            <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-[var(--space-3)] py-[var(--space-2)] text-[12px] text-[var(--color-text-secondary)]">
+              {t('sidebar.clarify.loading')}
+            </div>
+          ) : null}
+          {activeClarification ? (
+            <ClarificationCard
+              intro={activeClarification.intro}
+              questions={activeClarification.questions}
+              onSubmit={(answers) => {
+                void submitPendingClarification(answers);
+              }}
+              onSkip={() => {
+                void skipPendingClarification();
+              }}
+            />
+          ) : null}
           <PromptInput
             ref={promptInputRef}
             prompt={prompt}
@@ -161,6 +247,14 @@ export function Sidebar({ prompt, setPrompt, onSubmit }: SidebarProps) {
             onSubmit={onSubmit}
             onCancel={cancelGeneration}
             isGenerating={isGenerating}
+            disabled={isClarifying || activeClarification !== null}
+            disabledReason={
+              activeClarification !== null
+                ? t('sidebar.clarify.disabledReason')
+                : isClarifying
+                  ? t('sidebar.clarify.loading')
+                  : undefined
+            }
             contextSummary={
               contextItems.length > 0 ? (
                 <div className="flex flex-wrap gap-[8px]">
@@ -218,13 +312,17 @@ export function Sidebar({ prompt, setPrompt, onSubmit }: SidebarProps) {
                 onAttachFiles={() => {
                   void pickInputFiles();
                 }}
+                  onBindWorkspace={() => {
+                    void handleBindWorkspace();
+                  }}
                 onLinkDesignSystem={() => {
                   void pickDesignSystemDirectory();
                 }}
                 referenceUrl={referenceUrl}
                 onReferenceUrlChange={setReferenceUrl}
+                  hasWorkspace={Boolean(workspacePath)}
                 hasDesignSystem={Boolean(designSystem)}
-                disabled={isGenerating}
+                  disabled={isGenerating || workspaceLoading}
               />
             }
           />

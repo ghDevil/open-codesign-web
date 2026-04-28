@@ -3,9 +3,11 @@ import { dirname, join } from 'node:path';
 import { type CoreLogger, DESIGN_SKILLS, FRAME_TEMPLATES } from '@open-codesign/core';
 import type BetterSqlite3 from 'better-sqlite3';
 import { getDesign, normalizeDesignFilePath, upsertDesignFile } from './snapshots-db.js';
+import { getHostedWorkspaceDiskPath } from './workspace-binding.js';
 
 interface Options {
   db: BetterSqlite3.Database | null;
+  dataDir: string;
   generationId: string;
   designId: string | null;
   previousHtml: string | null;
@@ -15,6 +17,7 @@ interface Options {
 
 export function createRuntimeTextEditorFs({
   db,
+  dataDir,
   generationId,
   designId,
   previousHtml,
@@ -64,9 +67,9 @@ export function createRuntimeTextEditorFs({
   async function persistMutation(filePath: string, content: string): Promise<void> {
     if (designId === null || db === null) return;
     const normalizedPath = normalizeDesignFilePath(filePath);
-    const design = getDesign(db, designId) as { workspace_path?: string | null } | null;
-    if (design?.workspace_path) {
-      const destinationPath = join(design.workspace_path, normalizedPath);
+    const design = getDesign(db, designId);
+    if (design?.workspacePath) {
+      const destinationPath = join(getHostedWorkspaceDiskPath(dataDir, designId), normalizedPath);
       try {
         await mkdir(dirname(destinationPath), { recursive: true });
         await writeFile(destinationPath, content, 'utf8');
@@ -75,7 +78,7 @@ export function createRuntimeTextEditorFs({
         logger.error('runtime.fs.writeThrough.fail', {
           designId,
           filePath,
-          workspacePath: design.workspace_path,
+          workspacePath: design.workspacePath,
           message,
         });
         throw new Error(`Workspace write-through failed for ${filePath}: ${message}`);
