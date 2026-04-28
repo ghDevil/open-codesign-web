@@ -42,6 +42,23 @@ import { registerCommentsIpc, registerCommentsUnavailableIpc } from './comments-
 import { configDir } from './config';
 import { registerConnectionIpc } from './connection-ipc';
 import { scanDesignSystem } from './design-system';
+import {
+  importDesignSystemFromFigma,
+  importDesignSystemFromGithub,
+  importDesignSystemFromManual,
+} from './design-system-import';
+import {
+  activateDesignSystem,
+  addDesignSystem,
+  createDesignSystemRecord,
+  ensureSeededLibrary,
+  findDesignSystemById,
+  getActiveDesignSystem,
+  readDesignSystemsLibrary,
+  removeDesignSystem,
+  writeDesignSystemsLibrary,
+  type DesignSystemsLibrary,
+} from './design-systems-store';
 import { registerDiagnosticsIpc } from './diagnostics-ipc';
 import { makeRuntimeVerifier } from './done-verify';
 import { BrowserWindow, app, clipboard, dialog, ipcMain, shell } from './electron-runtime';
@@ -108,6 +125,7 @@ if (storageLocations.dataDir !== undefined) {
   mkdirSync(storageLocations.dataDir, { recursive: true });
   app.setPath('userData', storageLocations.dataDir);
 }
+const DESIGN_SYSTEMS_PATH = join(app.getPath('userData'), 'design-systems.json');
 
 /**
  * Workstream B Phase 1 feature flag. When truthy, `codesign:*:generate` routes
@@ -277,6 +295,43 @@ function allocateAssetPath(
     path = `assets/${stem}-${i}.${ext}`;
   }
   return path;
+}
+
+async function readDesignSystemsState(): Promise<DesignSystemsLibrary> {
+  const library = await readDesignSystemsLibrary(DESIGN_SYSTEMS_PATH);
+  const cfg = getCachedConfig();
+  const seeded = ensureSeededLibrary(library, cfg?.designSystem ?? null);
+  if (seeded.items.length !== library.items.length || seeded.activeId !== library.activeId) {
+    await writeDesignSystemsLibrary(DESIGN_SYSTEMS_PATH, seeded);
+    return seeded;
+  }
+  return library;
+}
+
+async function writeDesignSystemsState(library: DesignSystemsLibrary): Promise<void> {
+  await writeDesignSystemsLibrary(DESIGN_SYSTEMS_PATH, library);
+  await setDesignSystem(getActiveDesignSystem(library));
+}
+
+async function resolveDesignSystemForRequest(
+  requestedId: string | null | undefined,
+): Promise<import('@open-codesign/shared').StoredDesignSystem | null> {
+  const library = await readDesignSystemsState();
+  return findDesignSystemById(library, requestedId) ?? getActiveDesignSystem(library);
+}
+
+function serializeDesignSystemsState(library: DesignSystemsLibrary): {
+  activeId: string | null;
+  items: Array<{ id: string; name: string } & import('@open-codesign/shared').StoredDesignSystem>;
+} {
+  return {
+    activeId: library.activeId,
+    items: library.items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      ...item.snapshot,
+    })),
+  };
 }
 
 interface CreateRuntimeTextEditorFsOptions {
@@ -755,20 +810,101 @@ function registerIpcHandlers(db: Database | null): void {
     if (!rootPath) return getOnboardingState();
     logIpc.info('designSystem.scan.start', { rootPath });
     const snapshot = await scanDesignSystem(rootPath);
-    const nextState = await setDesignSystem(snapshot);
+    const nextLibrary = addDesignSystem(
+      await readDesignSystemsState(),
+      createDesignSystemRecord({ snapshot }),
+      true,
+    );
+    await writeDesignSystemsState(nextLibrary);
     logIpc.info('designSystem.scan.ok', {
       rootPath,
       sourceFiles: snapshot.sourceFiles.length,
       colors: snapshot.colors.length,
       fonts: snapshot.fonts.length,
     });
-    return nextState;
+    return getOnboardingState();
   });
 
   ipcMain.handle('codesign:clear-design-system', async () => {
-    const nextState = await setDesignSystem(null);
+    const library = await readDesignSystemsState();
+    const nextLibrary = library.activeId ? removeDesignSystem(library, library.activeId) : library;
+    await writeDesignSystemsState(nextLibrary);
     logIpc.info('designSystem.clear');
-    return nextState;
+    return getOnboardingState();
+  });
+
+  async function persistDesignSystem(
+    snapshot: import('@open-codesign/shared').StoredDesignSystem,
+    name?: string,
+  ): Promise<DesignSystemsLibrary> {
+    const nextLibrary = addDesignSystem(
+      await readDesignSystemsState(),
+      createDesignSystemRecord({ snapshot, ...(name ? { name } : {}) }),
+      true,
+    );
+    await writeDesignSystemsState(nextLibrary);
+    return nextLibrary;
+  }
+
+  ipcMain.handle('design-systems:v1:list', async () =>
+    serializeDesignSystemsState(await readDesignSystemsState()),
+  );
+
+  ipcMain.handle('design-systems:v1:scan-github', async (_e, raw: unknown) => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new CodesignError('scan-github expects an object payload', 'IPC_BAD_INPUT');
+    }
+    const { repoUrl, name } = raw as { repoUrl?: unknown; name?: unknown };
+    if (typeof repoUrl !== 'string' || repoUrl.trim().length === 0) {
+      throw new CodesignError('repoUrl is required', 'IPC_BAD_INPUT');
+    }
+    const snapshot = await importDesignSystemFromGithub(repoUrl.trim());
+    return serializeDesignSystemsState(
+      await persistDesignSystem(snapshot, typeof name === 'string' ? name : undefined),
+    );
+  });
+
+  ipcMain.handle('design-systems:v1:scan-figma', async (_e, raw: unknown) => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new CodesignError('scan-figma expects an object payload', 'IPC_BAD_INPUT');
+    }
+    const { figmaUrl, name } = raw as { figmaUrl?: unknown; name?: unknown };
+    if (typeof figmaUrl !== 'string' || figmaUrl.trim().length === 0) {
+      throw new CodesignError('figmaUrl is required', 'IPC_BAD_INPUT');
+    }
+    const snapshot = await importDesignSystemFromFigma(figmaUrl.trim());
+    return serializeDesignSystemsState(
+      await persistDesignSystem(snapshot, typeof name === 'string' ? name : undefined),
+    );
+  });
+
+  ipcMain.handle('design-systems:v1:manual', async (_e, raw: unknown) => {
+    const input =
+      typeof raw === 'object' && raw !== null
+        ? (raw as Parameters<typeof importDesignSystemFromManual>[0])
+        : {};
+    const snapshot = importDesignSystemFromManual(input);
+    return serializeDesignSystemsState(await persistDesignSystem(snapshot, input.name));
+  });
+
+  ipcMain.handle('design-systems:v1:activate', async (_e, raw: unknown) => {
+    const id = (raw as { id?: unknown } | null)?.id;
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      throw new CodesignError('id is required', 'IPC_BAD_INPUT');
+    }
+    const nextLibrary = activateDesignSystem(await readDesignSystemsState(), id.trim());
+    await writeDesignSystemsState(nextLibrary);
+    return serializeDesignSystemsState(nextLibrary);
+  });
+
+  ipcMain.handle('design-systems:v1:remove', async (_e, raw: unknown) => {
+    const id = (raw as { id?: unknown } | null)?.id;
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      throw new CodesignError('id is required', 'IPC_BAD_INPUT');
+    }
+    const nextLibrary = removeDesignSystem(await readDesignSystemsState(), id.trim());
+    await writeDesignSystemsState(nextLibrary);
+    return serializeDesignSystemsState(nextLibrary);
   });
 
   ipcMain.handle('codesign:v1:generate', async (_e, raw: unknown) => {
@@ -817,6 +953,7 @@ function registerIpcHandlers(db: Database | null): void {
       if (active.overridden) {
         payload.baseUrl = baseUrl;
       }
+      const resolvedDesignSystem = await resolveDesignSystemForRequest(payload.designSystemId);
       coreLogger.info('[generate] step=load_config.ok', {
         ms: Date.now() - loadStart,
         hasApiKey: apiKey.length > 0,
@@ -854,7 +991,7 @@ function registerIpcHandlers(db: Database | null): void {
       const promptContext = await preparePromptContext({
         attachments: payload.attachments,
         referenceUrl: payload.referenceUrl,
-        designSystem: cfg.designSystem ?? null,
+        designSystem: resolvedDesignSystem,
         workspacePath: workspacePathForDesign(db, payload.designId),
       });
 
@@ -994,10 +1131,11 @@ function registerIpcHandlers(db: Database | null): void {
       if (active.overridden) {
         payload.baseUrl = baseUrl;
       }
+      const resolvedDesignSystem = await resolveDesignSystemForRequest(payload.designSystemId);
       const promptContext = await preparePromptContext({
         attachments: payload.attachments,
         referenceUrl: payload.referenceUrl,
-        designSystem: cfg.designSystem ?? null,
+        designSystem: resolvedDesignSystem,
         workspacePath: null,
       });
 
@@ -1103,10 +1241,11 @@ function registerIpcHandlers(db: Database | null): void {
       const allowKeyless = active.allowKeyless;
       const apiKey = await resolveApiKeyForActive(active.model.provider, allowKeyless);
       const baseUrl = active.baseUrl ?? undefined;
+      const resolvedDesignSystem = await resolveDesignSystemForRequest(payload.designSystemId);
       const promptContext = await preparePromptContext({
         attachments: payload.attachments,
         referenceUrl: payload.referenceUrl,
-        designSystem: cfg.designSystem ?? null,
+        designSystem: resolvedDesignSystem,
         workspacePath: workspacePathForDesign(db, payload.designId),
       });
 

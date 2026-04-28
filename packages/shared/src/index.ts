@@ -152,6 +152,8 @@ export const GeneratePayloadV1 = z.object({
    *  Present in the renderer path so agent stream events can route to
    *  the right design's chat bubble. */
   designId: z.string().min(1).optional(),
+  /** Optional active design-system selection for this design/workflow. */
+  designSystemId: z.string().min(1).optional(),
   /** Current HTML for this design (if any). Seeded into the agent's
    *  virtual FS as `index.html` so the text_editor tool can view/edit
    *  incrementally instead of always rewriting from scratch. */
@@ -165,6 +167,7 @@ export const ApplyCommentPayload = z.object({
   selection: SelectedElement,
   model: ModelRef.optional(),
   designId: z.string().min(1).optional(),
+  designSystemId: z.string().min(1).optional(),
   referenceUrl: z.string().url().optional(),
   attachments: z.array(LocalInputFile).max(12).default([]),
 });

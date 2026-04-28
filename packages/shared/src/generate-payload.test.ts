@@ -7,6 +7,7 @@ const BASE_VALID = {
   history: [],
   model: { provider: 'anthropic' as const, modelId: 'claude-sonnet-4-6' },
   generationId: 'gen-abc123',
+  designSystemId: 'brand-a',
 };
 
 describe('GeneratePayloadV1', () => {
@@ -14,6 +15,7 @@ describe('GeneratePayloadV1', () => {
     const result = GeneratePayloadV1.parse(BASE_VALID);
     expect(result.schemaVersion).toBe(1);
     expect(result.generationId).toBe('gen-abc123');
+    expect(result.designSystemId).toBe('brand-a');
     expect(result.attachments).toEqual([]);
   });
 
@@ -84,8 +86,10 @@ describe('ApplyCommentPayload', () => {
         rect: { top: 0, left: 0, width: 100, height: 40 },
       },
       designId: 'design-123',
+      designSystemId: 'brand-a',
     });
     expect(parsed.designId).toBe('design-123');
+    expect(parsed.designSystemId).toBe('brand-a');
     expect(parsed.attachments).toEqual([]);
   });
 });

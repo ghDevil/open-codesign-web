@@ -1,6 +1,7 @@
 import type {
   CodesignApi,
   CodexOAuthStatus,
+  DesignSystemLibraryItem,
   ImageGenerationSettingsView,
 } from '../../../preload/index';
 
@@ -330,6 +331,37 @@ function installWebCodesign(): void {
       apiJson('/api/design-system', { method: 'DELETE' }) as ReturnType<
         NonNullable<CodesignApi['clearDesignSystem']>
       >,
+    designSystems: {
+      list: () =>
+        apiJson('/api/design-systems') as Promise<{
+          activeId: string | null;
+          items: DesignSystemLibraryItem[];
+        }>,
+      importGithub: (input) =>
+        apiJson('/api/design-system/scan-github', {
+          method: 'POST',
+          body: input,
+        }) as Promise<{ activeId: string | null; items: DesignSystemLibraryItem[] }>,
+      importFigma: (input) =>
+        apiJson('/api/design-system/scan-figma', {
+          method: 'POST',
+          body: input,
+        }) as Promise<{ activeId: string | null; items: DesignSystemLibraryItem[] }>,
+      importManual: (input) =>
+        apiJson('/api/design-system/manual', {
+          method: 'POST',
+          body: input,
+        }) as Promise<{ activeId: string | null; items: DesignSystemLibraryItem[] }>,
+      activate: (id) =>
+        apiJson('/api/design-systems/activate', {
+          method: 'POST',
+          body: { id },
+        }) as Promise<{ activeId: string | null; items: DesignSystemLibraryItem[] }>,
+      remove: (id) =>
+        apiJson(`/api/design-systems/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+        }) as Promise<{ activeId: string | null; items: DesignSystemLibraryItem[] }>,
+    },
     export: async ({ format, htmlContent, defaultFilename }) => {
       const filename = defaultFilename ?? `open-codesign.${format === 'markdown' ? 'md' : format}`;
       if (format === 'html') {

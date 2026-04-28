@@ -117,6 +117,21 @@ export interface Preferences {
   diagnosticsLastReadTs: number;
 }
 
+export interface DesignSystemLibraryItem {
+  id: string;
+  name: string;
+  rootPath: string;
+  sourceFiles: string[];
+  summary: string;
+  extractedAt: string;
+  colors: string[];
+  fonts: string[];
+  spacing: string[];
+  radius: string[];
+  shadows: string[];
+  components: string[];
+}
+
 /**
  * Streaming events emitted by the (future) Agent runtime. Phase 1 emits
  * turn_start / text_delta / turn_end. Phase 2 adds tool_call_*. Kept
@@ -180,6 +195,7 @@ const api = {
     attachments: LocalInputFile[];
     generationId: string;
     designId?: string;
+    designSystemId?: string;
     previousHtml?: string;
   }) =>
     ipcRenderer.invoke('codesign:v1:generate', {
@@ -199,6 +215,7 @@ const api = {
     selection: SelectedElement;
     model?: ModelRef;
     designId?: string;
+    designSystemId?: string;
     referenceUrl?: string;
     attachments?: LocalInputFile[];
   }) => ipcRenderer.invoke('codesign:apply-comment', payload) as Promise<GenerateResponse>,
@@ -208,6 +225,47 @@ const api = {
     ipcRenderer.invoke('codesign:pick-design-system-directory') as Promise<OnboardingState>,
   clearDesignSystem: () =>
     ipcRenderer.invoke('codesign:clear-design-system') as Promise<OnboardingState>,
+  designSystems: {
+    list: () =>
+      ipcRenderer.invoke('design-systems:v1:list') as Promise<{
+        activeId: string | null;
+        items: DesignSystemLibraryItem[];
+      }>,
+    importGithub: (input: { repoUrl: string; name?: string }) =>
+      ipcRenderer.invoke('design-systems:v1:scan-github', input) as Promise<{
+        activeId: string | null;
+        items: DesignSystemLibraryItem[];
+      }>,
+    importFigma: (input: { figmaUrl: string; name?: string }) =>
+      ipcRenderer.invoke('design-systems:v1:scan-figma', input) as Promise<{
+        activeId: string | null;
+        items: DesignSystemLibraryItem[];
+      }>,
+    importManual: (input: {
+      name?: string;
+      summary?: string;
+      colors?: string[];
+      fonts?: string[];
+      spacing?: string[];
+      radius?: string[];
+      shadows?: string[];
+      components?: string[];
+    }) =>
+      ipcRenderer.invoke('design-systems:v1:manual', input) as Promise<{
+        activeId: string | null;
+        items: DesignSystemLibraryItem[];
+      }>,
+    activate: (id: string) =>
+      ipcRenderer.invoke('design-systems:v1:activate', { id }) as Promise<{
+        activeId: string | null;
+        items: DesignSystemLibraryItem[];
+      }>,
+    remove: (id: string) =>
+      ipcRenderer.invoke('design-systems:v1:remove', { id }) as Promise<{
+        activeId: string | null;
+        items: DesignSystemLibraryItem[];
+      }>,
+  },
   export: (payload: { format: ExportFormat; htmlContent: string; defaultFilename?: string }) =>
     ipcRenderer.invoke('codesign:export', payload) as Promise<ExportInvokeResponse>,
   locale: {

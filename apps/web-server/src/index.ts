@@ -93,6 +93,18 @@ import {
   importDesignSystemFromGithub,
   importDesignSystemFromManual,
 } from './design-system-import.js';
+import {
+  activateDesignSystem,
+  addDesignSystem,
+  createDesignSystemRecord,
+  ensureSeededLibrary,
+  findDesignSystemById,
+  getActiveDesignSystem,
+  readDesignSystemsLibrary,
+  removeDesignSystem,
+  writeDesignSystemsLibrary,
+  type DesignSystemsLibrary,
+} from './design-systems-store.js';
 import { parseOfficeDocument } from './document-parsers.js';
 import {
   armGenerationTimeout,
@@ -181,6 +193,7 @@ const BCGPT_SERVER: McpServerConfig | null = (() => {
 
 const CONFIG_PATH = join(DATA_DIR, 'config.toml');
 const DB_PATH = join(DATA_DIR, 'designs.db');
+const DESIGN_SYSTEMS_PATH = join(DATA_DIR, 'design-systems.json');
 const PREFS_PATH = join(DATA_DIR, 'preferences.json');
 
 let cachedConfig: Config | null = null;
@@ -262,6 +275,60 @@ function toState(cfg: Config | null): OnboardingState {
     modelPrimary: cfg.activeModel,
     baseUrl: entry?.baseUrl ?? null,
     designSystem: cfg.designSystem ?? null,
+  };
+}
+
+async function syncActiveDesignSystemToConfig(
+  activeSnapshot: import('@open-codesign/shared').StoredDesignSystem | null,
+): Promise<void> {
+  const cfg = getCachedConfig();
+  if (!cfg) return;
+  const next = hydrateConfig({
+    version: 3,
+    activeProvider: cfg.activeProvider,
+    activeModel: cfg.activeModel,
+    secrets: cfg.secrets,
+    providers: cfg.providers,
+    ...(activeSnapshot ? { designSystem: activeSnapshot } : {}),
+  });
+  await saveConfig(next);
+  setCachedConfig(next);
+}
+
+async function readDesignSystemsState(): Promise<DesignSystemsLibrary> {
+  const library = await readDesignSystemsLibrary(DESIGN_SYSTEMS_PATH);
+  const cfg = getCachedConfig();
+  const seeded = ensureSeededLibrary(library, cfg?.designSystem ?? null);
+  if (seeded.items.length !== library.items.length || seeded.activeId !== library.activeId) {
+    await writeDesignSystemsLibrary(DESIGN_SYSTEMS_PATH, seeded);
+    return seeded;
+  }
+  return library;
+}
+
+async function writeDesignSystemsState(library: DesignSystemsLibrary): Promise<void> {
+  await writeDesignSystemsLibrary(DESIGN_SYSTEMS_PATH, library);
+  await syncActiveDesignSystemToConfig(getActiveDesignSystem(library));
+}
+
+async function resolveDesignSystemForRequest(
+  requestedId: string | null | undefined,
+): Promise<import('@open-codesign/shared').StoredDesignSystem | null> {
+  const library = await readDesignSystemsState();
+  return findDesignSystemById(library, requestedId) ?? getActiveDesignSystem(library);
+}
+
+function serializeDesignSystemsState(library: DesignSystemsLibrary): {
+  activeId: string | null;
+  items: Array<{ id: string; name: string } & import('@open-codesign/shared').StoredDesignSystem>;
+} {
+  return {
+    activeId: library.activeId,
+    items: library.items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      ...item.snapshot,
+    })),
   };
 }
 
@@ -1108,6 +1175,10 @@ app.post('/api/generate', async (req: Request, res: Response) => {
     logger: coreLogger,
   });
 
+  const resolvedDesignSystem = await resolveDesignSystemForRequest(
+    (payload as { designSystemId?: string }).designSystemId,
+  );
+
   const generateInput = {
     prompt: steeredPrompt,
     history: payload.history as never,
@@ -1123,7 +1194,7 @@ app.post('/api/generate', async (req: Request, res: Response) => {
       : {}),
     attachments: payload.attachments as never,
     referenceUrl: payload.referenceUrl ? { url: payload.referenceUrl } : undefined,
-    designSystem: cfg.designSystem ?? null,
+    designSystem: resolvedDesignSystem,
     ...(baseUrl !== undefined ? { baseUrl } : {}),
     wire: active.wire,
     ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
@@ -1271,6 +1342,7 @@ app.post('/api/apply-comment', async (req, res) => {
       comment: string;
       selection: unknown;
       attachments: unknown[];
+      designSystemId?: string;
       referenceUrl?: string;
       model?: { provider: string; modelId: string };
     };
@@ -1283,6 +1355,7 @@ app.post('/api/apply-comment', async (req, res) => {
       active.allowKeyless,
       buildResolveActiveApiKeyDeps(),
     );
+    const resolvedDesignSystem = await resolveDesignSystemForRequest(payload.designSystemId);
     const result = await applyComment({
       html: payload.html,
       comment: payload.comment,
@@ -1291,7 +1364,7 @@ app.post('/api/apply-comment', async (req, res) => {
       apiKey,
       attachments: payload.attachments as never,
       referenceUrl: payload.referenceUrl ? { url: payload.referenceUrl } : undefined,
-      designSystem: cfg.designSystem ?? null,
+      designSystem: resolvedDesignSystem,
       ...(active.baseUrl ? { baseUrl: active.baseUrl } : {}),
       wire: active.wire,
       capabilities: active.capabilities,
@@ -1790,19 +1863,14 @@ app.post('/api/design-system/scan', async (req, res) => {
   try {
     const { rootPath } = req.body as { rootPath: string };
     const snapshot = await scanDesignSystem(rootPath);
-    const cfg = getCachedConfig();
-    if (!cfg) return sendError(res, 503, 'No config', ERROR_CODES.CONFIG_MISSING);
-    const next = hydrateConfig({
-      version: 3,
-      activeProvider: cfg.activeProvider,
-      activeModel: cfg.activeModel,
-      secrets: cfg.secrets,
-      providers: cfg.providers,
-      designSystem: snapshot,
-    });
-    await saveConfig(next);
-    setCachedConfig(next);
-    res.json(toState(cachedConfig));
+    const library = await readDesignSystemsState();
+    const nextLibrary = addDesignSystem(
+      library,
+      createDesignSystemRecord({ snapshot }),
+      true,
+    );
+    await writeDesignSystemsState(nextLibrary);
+    res.json(serializeDesignSystemsState(nextLibrary));
   } catch (err) {
     handleError(res, err);
   }
@@ -1810,47 +1878,37 @@ app.post('/api/design-system/scan', async (req, res) => {
 
 app.delete('/api/design-system', async (_req, res) => {
   try {
-    const cfg = getCachedConfig();
-    if (!cfg) return sendError(res, 503, 'No config', ERROR_CODES.CONFIG_MISSING);
-    const next = hydrateConfig({
-      version: 3,
-      activeProvider: cfg.activeProvider,
-      activeModel: cfg.activeModel,
-      secrets: cfg.secrets,
-      providers: cfg.providers,
-    });
-    await saveConfig(next);
-    setCachedConfig(next);
+    const library = await readDesignSystemsState();
+    const nextLibrary = library.activeId ? removeDesignSystem(library, library.activeId) : library;
+    await writeDesignSystemsState(nextLibrary);
     res.json(toState(cachedConfig));
   } catch (err) {
     handleError(res, err);
   }
 });
 
-async function persistDesignSystem(snapshot: import('@open-codesign/shared').StoredDesignSystem) {
-  const cfg = getCachedConfig();
-  if (!cfg) throw new CodesignError('No config', ERROR_CODES.CONFIG_MISSING);
-  const next = hydrateConfig({
-    version: 3,
-    activeProvider: cfg.activeProvider,
-    activeModel: cfg.activeModel,
-    secrets: cfg.secrets,
-    providers: cfg.providers,
-    designSystem: snapshot,
-  });
-  await saveConfig(next);
-  setCachedConfig(next);
+async function persistDesignSystem(
+  snapshot: import('@open-codesign/shared').StoredDesignSystem,
+  name?: string,
+) {
+  const library = await readDesignSystemsState();
+  const nextLibrary = addDesignSystem(
+    library,
+    createDesignSystemRecord({ snapshot, ...(name ? { name } : {}) }),
+    true,
+  );
+  await writeDesignSystemsState(nextLibrary);
+  return nextLibrary;
 }
 
 app.post('/api/design-system/scan-github', async (req, res) => {
   try {
-    const { repoUrl } = req.body as { repoUrl?: string };
+    const { repoUrl, name } = req.body as { repoUrl?: string; name?: string };
     if (typeof repoUrl !== 'string' || repoUrl.trim().length === 0) {
       return sendError(res, 400, 'repoUrl is required', ERROR_CODES.IPC_BAD_INPUT);
     }
     const snapshot = await importDesignSystemFromGithub(repoUrl);
-    await persistDesignSystem(snapshot);
-    res.json(toState(getCachedConfig()));
+    res.json(serializeDesignSystemsState(await persistDesignSystem(snapshot, name)));
   } catch (err) {
     handleError(res, err);
   }
@@ -1858,13 +1916,12 @@ app.post('/api/design-system/scan-github', async (req, res) => {
 
 app.post('/api/design-system/scan-figma', async (req, res) => {
   try {
-    const { figmaUrl } = req.body as { figmaUrl?: string };
+    const { figmaUrl, name } = req.body as { figmaUrl?: string; name?: string };
     if (typeof figmaUrl !== 'string' || figmaUrl.trim().length === 0) {
       return sendError(res, 400, 'figmaUrl is required', ERROR_CODES.IPC_BAD_INPUT);
     }
     const snapshot = await importDesignSystemFromFigma(figmaUrl);
-    await persistDesignSystem(snapshot);
-    res.json(toState(getCachedConfig()));
+    res.json(serializeDesignSystemsState(await persistDesignSystem(snapshot, name)));
   } catch (err) {
     handleError(res, err);
   }
@@ -1874,17 +1931,54 @@ app.post('/api/design-system/manual', async (req, res) => {
   try {
     const body = req.body as Parameters<typeof importDesignSystemFromManual>[0];
     const snapshot = importDesignSystemFromManual(body ?? {});
-    await persistDesignSystem(snapshot);
-    res.json(toState(getCachedConfig()));
+    res.json(serializeDesignSystemsState(await persistDesignSystem(snapshot, body?.name)));
   } catch (err) {
     handleError(res, err);
   }
 });
 
-app.get('/api/design-system', (_req, res) => {
+app.get('/api/design-system', async (_req, res) => {
   try {
-    const cfg = getCachedConfig();
-    res.json({ designSystem: cfg?.designSystem ?? null });
+    const library = await readDesignSystemsState();
+    res.json({ designSystem: getActiveDesignSystem(library) });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get('/api/design-systems', async (_req, res) => {
+  try {
+    res.json(serializeDesignSystemsState(await readDesignSystemsState()));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post('/api/design-systems/activate', async (req, res) => {
+  try {
+    const { id } = req.body as { id?: string };
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      return sendError(res, 400, 'id is required', ERROR_CODES.IPC_BAD_INPUT);
+    }
+    const library = await readDesignSystemsState();
+    const nextLibrary = activateDesignSystem(library, id.trim());
+    await writeDesignSystemsState(nextLibrary);
+    res.json(serializeDesignSystemsState(nextLibrary));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.delete('/api/design-systems/:id', async (req, res) => {
+  try {
+    const id = req.params['id'];
+    if (typeof id !== 'string' || id.trim().length === 0) {
+      return sendError(res, 400, 'id is required', ERROR_CODES.IPC_BAD_INPUT);
+    }
+    const library = await readDesignSystemsState();
+    const nextLibrary = removeDesignSystem(library, id.trim());
+    await writeDesignSystemsState(nextLibrary);
+    res.json(serializeDesignSystemsState(nextLibrary));
   } catch (err) {
     handleError(res, err);
   }
@@ -2075,7 +2169,7 @@ function figmaColorToRgba(c: FigmaColor): string {
 interface FigmaContext {
   text: string;
   /** Base64-encoded screenshot of the target node/frame, if available */
-  screenshot?: { data: string; mimeType: string };
+  screenshot?: { data: string; mimeType: 'image/png' | 'image/jpeg' };
 }
 
 /** Fetch structured design context from the Figma REST API using MCP_FIGMA_API_KEY */
@@ -2273,7 +2367,7 @@ async function fetchFigmaFileContext(
 
     // Step 5: fetch a rendered screenshot of the target node so the LLM can SEE the design.
     // Use scale=0.15 + jpeg to keep the image under ~150KB (acceptable for vision context).
-    let screenshot: { data: string; mimeType: 'image/png' } | undefined;
+    let screenshot: { data: string; mimeType: 'image/png' | 'image/jpeg' } | undefined;
     const screenshotNodeId = nodeId ?? (rootDoc?.id ?? null);
     if (screenshotNodeId) {
       try {

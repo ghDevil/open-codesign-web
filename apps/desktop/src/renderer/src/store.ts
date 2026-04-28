@@ -26,6 +26,11 @@ import type { StoreApi } from 'zustand';
 import { clearDesignIntent, readDesignIntent } from './components/NewDesignDialog';
 import type { CodesignApi, ExportFormat } from '../../preload/index';
 import { recordAction, snapshotTimeline } from './lib/action-timeline';
+import {
+  clearSelectedDesignSystemId,
+  copySelectedDesignSystemId,
+  readSelectedDesignSystemId,
+} from './lib/design-system-selection';
 import { rendererLogger } from './lib/renderer-logger';
 
 declare global {
@@ -1832,6 +1837,9 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       designId: designIdAtStart,
       promptLen: enrichedPrompt.length,
     });
+    const selectedDesignSystemId = designIdAtStart
+      ? readSelectedDesignSystemId(designIdAtStart)
+      : null;
 
     try {
       await runGenerate(
@@ -1846,6 +1854,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
           attachments: request.attachments,
           generationId,
           ...(designIdAtStart ? { designId: designIdAtStart } : {}),
+          ...(selectedDesignSystemId ? { designSystemId: selectedDesignSystemId } : {}),
           ...(get().previewHtml ? { previousHtml: get().previewHtml as string } : {}),
         },
         designIdAtStart,
@@ -1956,6 +1965,9 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     const referenceUrl = normalizeReferenceUrl(get().referenceUrl);
     const attachments = uniqueFiles(get().inputFiles);
     const designIdAtStart = get().currentDesignId;
+    const selectedDesignSystemId = designIdAtStart
+      ? readSelectedDesignSystemId(designIdAtStart)
+      : null;
 
     set(() => ({
       isGenerating: true,
@@ -1978,6 +1990,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         comment: trimmed,
         selection,
         ...(designIdAtStart ? { designId: designIdAtStart } : {}),
+        ...(selectedDesignSystemId ? { designSystemId: selectedDesignSystemId } : {}),
         ...(referenceUrl ? { referenceUrl } : {}),
         attachments,
       });
@@ -2387,6 +2400,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     try {
       const cloned = await window.codesign.snapshots.duplicateDesign(id, name);
       copyDesignContext(id, cloned.id);
+      copySelectedDesignSystemId(id, cloned.id);
       await get().loadDesigns();
       get().pushToast({
         variant: 'success',
@@ -2416,6 +2430,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     try {
       await window.codesign.snapshots.softDeleteDesign(id);
       clearDesignContext(id);
+      clearSelectedDesignSystemId(id);
       if (get().autoPolishFired.has(id)) {
         const nextFired = new Set(get().autoPolishFired);
         nextFired.delete(id);
