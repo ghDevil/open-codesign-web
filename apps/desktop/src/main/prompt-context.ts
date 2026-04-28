@@ -1,6 +1,11 @@
-import { open } from 'node:fs/promises';
-import { extname } from 'node:path';
-import type { AttachmentContext, ReferenceUrlContext } from '@open-codesign/core';
+import { open, readdir, stat } from 'node:fs/promises';
+import { extname, join } from 'node:path';
+import type {
+  AttachmentContext,
+  ReferenceUrlContext,
+  WorkspaceContext,
+  WorkspaceContextFile,
+} from '@open-codesign/core';
 import {
   CodesignError,
   ERROR_CODES,
@@ -44,6 +49,64 @@ const MAX_BINARY_ATTACHMENT_BYTES = 10_000_000; // 10MB - images get full read f
 const MAX_URL_EXCERPT_CHARS = 1_200;
 const MAX_URL_RESPONSE_BYTES = 256_000;
 const REFERENCE_CONTENT_TYPES = ['text/html', 'application/xhtml+xml'];
+const MAX_WORKSPACE_SCAN_ENTRIES = 800;
+const MAX_WORKSPACE_FILES = 12;
+const MAX_WORKSPACE_FILE_BYTES = 128_000;
+const MAX_WORKSPACE_FILE_CHARS = 1_800;
+const MAX_WORKSPACE_TOTAL_CHARS = 12_000;
+
+const WORKSPACE_TEXT_EXTS = new Set([
+  '.css',
+  '.html',
+  '.js',
+  '.json',
+  '.jsx',
+  '.less',
+  '.md',
+  '.mdx',
+  '.mjs',
+  '.scss',
+  '.svg',
+  '.ts',
+  '.tsx',
+  '.txt',
+  '.xml',
+  '.yaml',
+  '.yml',
+]);
+
+const WORKSPACE_SKIP_DIRS = new Set([
+  '.cache',
+  '.git',
+  '.idea',
+  '.next',
+  '.nuxt',
+  '.output',
+  '.pnpm-store',
+  '.storybook',
+  '.turbo',
+  '.vercel',
+  '.vscode',
+  '__mocks__',
+  '__snapshots__',
+  '__tests__',
+  'build',
+  'coverage',
+  'dist',
+  'fixtures',
+  'node_modules',
+  'out',
+  'storybook-static',
+  'temp',
+  'tmp',
+]);
+
+interface WorkspaceCandidate {
+  absolutePath: string;
+  relativePath: string;
+  size: number;
+  score: number;
+}
 
 function cleanText(raw: string, maxChars: number): string {
   return raw
@@ -66,6 +129,195 @@ function isProbablyText(buffer: Buffer, extension: string): boolean {
   if (TEXT_EXTS.has(extension)) return true;
   const probe = buffer.subarray(0, 512);
   return !probe.includes(0);
+}
+
+function normalizeWorkspaceRelativePath(path: string): string {
+  return path.replaceAll('\\', '/');
+}
+
+function shouldSkipWorkspaceDir(name: string): boolean {
+  return WORKSPACE_SKIP_DIRS.has(name.toLowerCase());
+}
+
+function shouldIncludeWorkspaceFile(relativePath: string): boolean {
+  const normalized = normalizeWorkspaceRelativePath(relativePath);
+  const lower = normalized.toLowerCase();
+  const extension = extname(lower);
+  if (!WORKSPACE_TEXT_EXTS.has(extension)) return false;
+  if (/(^|\/)(?:__tests__|__mocks__|fixtures)\//.test(lower)) return false;
+  if (/\.(?:test|spec|stories)\.[^/.]+$/.test(lower)) return false;
+  if (/(?:^|\/)[^.][^/]*\.min\.[^/.]+$/.test(lower)) return false;
+  if (lower.endsWith('.map')) return false;
+  return true;
+}
+
+function scoreWorkspaceFile(relativePath: string): number {
+  const normalized = normalizeWorkspaceRelativePath(relativePath);
+  const lower = normalized.toLowerCase();
+  const segments = normalized.split('/');
+  let score = 0;
+
+  if (lower === 'package.json') score += 120;
+  if (lower.endsWith('/package.json')) score += 90;
+  if (/(^|\/)readme(?:\.[a-z0-9]+)?$/.test(lower)) score += 110;
+  if (/(tailwind|theme|token|design-system|brand|palette|typography|spacing|radius|shadow)/.test(lower)) {
+    score += 95;
+  }
+  if (/(^|\/)(?:src\/)?(?:app|pages|components|styles|tokens)\//.test(lower)) score += 75;
+  if (/(^|\/)(?:app|layout|index|main|home)\.(?:tsx?|jsx?|html|mdx?)$/.test(lower)) score += 80;
+  if (/\.(?:tsx?|jsx|css|scss|html|md|mdx)$/.test(lower)) score += 45;
+  if (/\.(?:json|ya?ml|txt|svg)$/.test(lower)) score += 20;
+  if (/lock|pnpm-lock|package-lock|yarn\.lock/.test(lower)) score -= 80;
+  if (/(^|\/)assets\//.test(lower)) score -= 20;
+  score -= segments.length * 3;
+
+  return score;
+}
+
+async function collectWorkspaceCandidates(rootPath: string): Promise<{
+  candidates: WorkspaceCandidate[];
+  candidateCount: number;
+  truncated: boolean;
+}> {
+  const candidates: WorkspaceCandidate[] = [];
+  let visited = 0;
+  let truncated = false;
+
+  async function walk(absoluteDir: string, relativeDir: string): Promise<void> {
+    if (visited >= MAX_WORKSPACE_SCAN_ENTRIES) {
+      truncated = true;
+      return;
+    }
+
+    try {
+      const entries = await readdir(absoluteDir, { encoding: 'utf8', withFileTypes: true });
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+      for (const entry of entries) {
+        if (visited >= MAX_WORKSPACE_SCAN_ENTRIES) {
+          truncated = true;
+          return;
+        }
+        visited += 1;
+
+        const absolutePath = join(absoluteDir, entry.name);
+        const relativePath = relativeDir.length > 0 ? `${relativeDir}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+          if (shouldSkipWorkspaceDir(entry.name)) continue;
+          await walk(absolutePath, relativePath);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        if (!shouldIncludeWorkspaceFile(relativePath)) continue;
+
+        let size = 0;
+        try {
+          size = (await stat(absolutePath)).size;
+        } catch {
+          continue;
+        }
+
+        candidates.push({
+          absolutePath,
+          relativePath: normalizeWorkspaceRelativePath(relativePath),
+          size,
+          score: scoreWorkspaceFile(relativePath),
+        });
+      }
+    } catch {
+      return;
+    }
+  }
+
+  await walk(rootPath, '');
+  return {
+    candidates,
+    candidateCount: candidates.length,
+    truncated,
+  };
+}
+
+async function readWorkspaceFileExcerpt(
+  candidate: WorkspaceCandidate,
+  maxChars: number,
+): Promise<WorkspaceContextFile | null> {
+  const extension = extname(candidate.relativePath).toLowerCase();
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    handle = await open(candidate.absolutePath, 'r');
+    const probeBuffer = Buffer.alloc(512);
+    const { bytesRead: probeRead } = await handle.read(probeBuffer, 0, 512, 0);
+    const probe = probeBuffer.subarray(0, probeRead);
+    if (!isProbablyText(probe, extension)) return null;
+
+    const bytesToRead = Math.max(1, Math.min(candidate.size || MAX_WORKSPACE_FILE_BYTES, MAX_WORKSPACE_FILE_BYTES));
+    const fullBuffer = Buffer.alloc(bytesToRead);
+    const { bytesRead } = await handle.read(fullBuffer, 0, fullBuffer.length, 0);
+    const excerpt = cleanText(fullBuffer.subarray(0, bytesRead).toString('utf8'), maxChars);
+    if (excerpt.length === 0) return null;
+
+    const noteParts: string[] = [];
+    if (candidate.size > bytesToRead) noteParts.push('Large file; excerpt sampled from the start.');
+    if (excerpt.length >= maxChars) noteParts.push('Excerpt trimmed for prompt budget.');
+
+    return {
+      path: candidate.relativePath,
+      excerpt,
+      ...(noteParts.length > 0 ? { note: noteParts.join(' ') } : {}),
+    };
+  } catch {
+    return null;
+  } finally {
+    await handle?.close();
+  }
+}
+
+function summarizeWorkspaceContext(input: {
+  files: WorkspaceContextFile[];
+  candidateCount: number;
+  truncated: boolean;
+}): string {
+  const topDirs = new Set(
+    input.files
+      .map((file) => file.path.split('/').slice(0, -1).join('/'))
+      .filter((dir) => dir.length > 0)
+      .slice(0, 4),
+  );
+  const dirSummary = topDirs.size > 0 ? ` Focused on ${[...topDirs].join(', ')}.` : '';
+  const scanNote = input.truncated ? ' Directory scan hit a safety cap.' : '';
+  return `Sampled ${input.files.length} workspace files from ${input.candidateCount} relevant text files.${dirSummary}${scanNote}`.trim();
+}
+
+async function readWorkspaceContext(
+  workspacePath: string | null | undefined,
+): Promise<WorkspaceContext | null> {
+  if (typeof workspacePath !== 'string' || workspacePath.trim().length === 0) return null;
+
+  const rootPath = workspacePath.trim();
+  const { candidates, candidateCount, truncated } = await collectWorkspaceCandidates(rootPath);
+  if (candidateCount === 0) return null;
+
+  const ranked = [...candidates].sort(
+    (a, b) => b.score - a.score || a.relativePath.localeCompare(b.relativePath),
+  );
+
+  const files: WorkspaceContextFile[] = [];
+  let remainingChars = MAX_WORKSPACE_TOTAL_CHARS;
+  for (const candidate of ranked) {
+    if (files.length >= MAX_WORKSPACE_FILES || remainingChars < 300) break;
+    const excerptChars = Math.min(MAX_WORKSPACE_FILE_CHARS, remainingChars);
+    const file = await readWorkspaceFileExcerpt(candidate, excerptChars);
+    if (!file) continue;
+    files.push(file);
+    remainingChars -= file.excerpt.length;
+  }
+
+  if (files.length === 0) return null;
+
+  return {
+    rootPath,
+    summary: summarizeWorkspaceContext({ files, candidateCount, truncated }),
+    files,
+  };
 }
 
 async function readAttachment(file: LocalInputFile): Promise<AttachmentContext> {
@@ -277,6 +529,7 @@ async function inspectReferenceUrl(url: string): Promise<ReferenceUrlContext> {
 
 export interface PreparedPromptContext {
   designSystem: StoredDesignSystem | null;
+  workspaceContext: WorkspaceContext | null;
   attachments: AttachmentContext[];
   referenceUrl: ReferenceUrlContext | null;
 }
@@ -285,6 +538,7 @@ export async function preparePromptContext(input: {
   attachments?: LocalInputFile[] | undefined;
   referenceUrl?: string | undefined;
   designSystem?: StoredDesignSystem | null | undefined;
+  workspacePath?: string | null | undefined;
 }): Promise<PreparedPromptContext> {
   const attachments = await Promise.all(
     (input.attachments ?? []).map((file) => readAttachment(file)),
@@ -293,9 +547,11 @@ export async function preparePromptContext(input: {
     typeof input.referenceUrl === 'string' && input.referenceUrl.trim().length > 0
       ? await inspectReferenceUrl(input.referenceUrl.trim())
       : null;
+  const workspaceContext = await readWorkspaceContext(input.workspacePath);
 
   return {
     designSystem: input.designSystem ?? null,
+    workspaceContext,
     attachments,
     referenceUrl,
   };

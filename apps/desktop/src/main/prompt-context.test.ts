@@ -103,4 +103,56 @@ describe('preparePromptContext', () => {
       code: 'REFERENCE_URL_TOO_LARGE',
     });
   });
+
+  it('samples relevant workspace files and skips tests and node_modules', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'codesign-workspace-context-'));
+    await fs.mkdir(path.join(dir, 'src', 'components'), { recursive: true });
+    await fs.mkdir(path.join(dir, '__tests__'), { recursive: true });
+    await fs.mkdir(path.join(dir, 'node_modules', 'leftpad'), { recursive: true });
+
+    await fs.writeFile(
+      path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'claude-design-clone', dependencies: { react: '^19.0.0' } }, null, 2),
+    );
+    await fs.writeFile(
+      path.join(dir, 'src', 'App.tsx'),
+      [
+        "export function App() {",
+        "  return <main className='app-shell'>Revenue dashboard</main>;",
+        '}',
+      ].join('\n'),
+    );
+    await fs.writeFile(
+      path.join(dir, 'src', 'components', 'Hero.test.tsx'),
+      "it('should not be scanned', () => {});",
+    );
+    await fs.writeFile(
+      path.join(dir, 'node_modules', 'leftpad', 'index.js'),
+      'module.exports = () => 0;',
+    );
+
+    const result = await preparePromptContext({
+      workspacePath: dir,
+    });
+
+    expect(result.workspaceContext).not.toBeNull();
+    expect(result.workspaceContext?.rootPath).toBe(dir);
+    const files = result.workspaceContext?.files.map((file) => file.path) ?? [];
+    expect(files).toContain('package.json');
+    expect(files).toContain('src/App.tsx');
+    expect(files.some((file) => file.includes('__tests__'))).toBe(false);
+    expect(files.some((file) => file.includes('node_modules'))).toBe(false);
+    expect(result.workspaceContext?.summary).toContain('workspace files');
+  });
+
+  it('returns null workspaceContext when the workspace has no relevant text files', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'codesign-empty-workspace-'));
+    await fs.writeFile(path.join(dir, 'logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+    const result = await preparePromptContext({
+      workspacePath: dir,
+    });
+
+    expect(result.workspaceContext).toBeNull();
+  });
 });

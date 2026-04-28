@@ -601,6 +601,16 @@ describe('generate()', () => {
       model: MODEL,
       apiKey: 'sk-test',
       designSystem: DESIGN_SYSTEM,
+      workspaceContext: {
+        rootPath: '/workspace/app',
+        summary: 'Sampled 2 workspace files from the bound app.',
+        files: [
+          {
+            path: 'src/App.tsx',
+            excerpt: 'export function App() { return <main>Revenue dashboard</main>; }',
+          },
+        ],
+      },
       attachments: [
         {
           name: 'brief.md',
@@ -620,6 +630,9 @@ describe('generate()', () => {
     if (!user) throw new Error('expected user message');
     expect(user.content).toContain('design a warm landing page');
     expect(user.content).toContain('Design system to follow');
+    expect(user.content).toContain('Project workspace context');
+    expect(user.content).toContain('/workspace/app');
+    expect(user.content).toContain('src/App.tsx');
     expect(user.content).toContain('Muted neutrals with warm copper accents.');
     expect(user.content).toContain('brief.md');
     expect(user.content).toContain('https://example.com');
@@ -1208,6 +1221,16 @@ describe('applyComment()', () => {
       model: MODEL,
       apiKey: 'sk-test',
       designSystem: DESIGN_SYSTEM,
+      workspaceContext: {
+        rootPath: '/workspace/app',
+        summary: 'Sampled 1 workspace file from the bound app.',
+        files: [
+          {
+            path: 'src/Hero.tsx',
+            excerpt: 'export function Hero() { return <section id="hero">Quarterly growth</section>; }',
+          },
+        ],
+      },
     });
 
     const messages = completeMock.mock.calls[0]?.[1] as ChatMessage[];
@@ -1219,6 +1242,8 @@ describe('applyComment()', () => {
     expect(user.content).toContain('#hero');
     expect(user.content).toContain(SAMPLE_HTML);
     expect(user.content).toContain('Muted neutrals with warm copper accents.');
+    expect(user.content).toContain('Project workspace context');
+    expect(user.content).toContain('src/Hero.tsx');
     expect(user.content).toContain('Prioritize the selected element first');
     expect(user.content).toContain('Do not use Markdown code fences');
   });

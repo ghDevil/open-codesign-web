@@ -164,6 +164,7 @@ export const ApplyCommentPayload = z.object({
   comment: z.string().min(1).max(4_000),
   selection: SelectedElement,
   model: ModelRef.optional(),
+  designId: z.string().min(1).optional(),
   referenceUrl: z.string().url().optional(),
   attachments: z.array(LocalInputFile).max(12).default([]),
 });

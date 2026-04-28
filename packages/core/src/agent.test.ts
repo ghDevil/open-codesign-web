@@ -291,6 +291,35 @@ describe('generateViaAgent() — Phase 1 pass-through', () => {
     expect(seed?.role).toBe('user');
   });
 
+  it('includes workspace context in the first user turn when provided', async () => {
+    scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT };
+    await generateViaAgent(
+      {
+        prompt: 'design a landing page',
+        history: [],
+        model: MODEL,
+        apiKey: 'sk-test',
+        workspaceContext: {
+          rootPath: '/workspace/app',
+          summary: 'Sampled 1 workspace file from the bound app.',
+          files: [
+            {
+              path: 'src/App.tsx',
+              excerpt: 'export function App() { return <main>Revenue dashboard</main>; }',
+            },
+          ],
+        },
+      },
+      { tools: [] },
+    );
+
+    const prompt = agentCalls[0]?.prompts[0]?.message;
+    expect(typeof prompt).toBe('string');
+    expect(prompt).toContain('Project workspace context');
+    expect(prompt).toContain('/workspace/app');
+    expect(prompt).toContain('src/App.tsx');
+  });
+
   it('forwards apiKey through getApiKey callback', async () => {
     scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT };
     await generateViaAgent({

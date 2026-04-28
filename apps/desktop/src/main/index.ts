@@ -228,6 +228,14 @@ function resolveApiKeyForActive(providerId: string, allowKeyless: boolean): Prom
   });
 }
 
+function workspacePathForDesign(
+  db: Database | null,
+  designId: string | null | undefined,
+): string | null {
+  if (db === null || typeof designId !== 'string' || designId.trim().length === 0) return null;
+  return getDesign(db, designId)?.workspacePath ?? null;
+}
+
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -847,6 +855,7 @@ function registerIpcHandlers(db: Database | null): void {
         attachments: payload.attachments,
         referenceUrl: payload.referenceUrl,
         designSystem: cfg.designSystem ?? null,
+        workspacePath: workspacePathForDesign(db, payload.designId),
       });
 
       logIpc.info('generate', {
@@ -861,6 +870,7 @@ function registerIpcHandlers(db: Database | null): void {
         attachmentCount: payload.attachments.length,
         hasReferenceUrl: payload.referenceUrl !== undefined,
         hasDesignSystem: promptContext.designSystem !== null,
+        hasWorkspaceContext: promptContext.workspaceContext !== null,
         baseUrl: baseUrl ?? '<default>',
       });
 
@@ -881,6 +891,7 @@ function registerIpcHandlers(db: Database | null): void {
             attachments: promptContext.attachments,
             referenceUrl: promptContext.referenceUrl,
             designSystem: promptContext.designSystem ?? null,
+            workspaceContext: promptContext.workspaceContext,
             ...(baseUrl !== undefined ? { baseUrl } : {}),
             wire: active.wire,
             ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
@@ -987,6 +998,7 @@ function registerIpcHandlers(db: Database | null): void {
         attachments: payload.attachments,
         referenceUrl: payload.referenceUrl,
         designSystem: cfg.designSystem ?? null,
+        workspacePath: null,
       });
 
       logIpc.info('generate', {
@@ -1001,6 +1013,7 @@ function registerIpcHandlers(db: Database | null): void {
         attachmentCount: payload.attachments.length,
         hasReferenceUrl: payload.referenceUrl !== undefined,
         hasDesignSystem: promptContext.designSystem !== null,
+        hasWorkspaceContext: promptContext.workspaceContext !== null,
         baseUrl: baseUrl ?? '<default>',
       });
 
@@ -1021,6 +1034,7 @@ function registerIpcHandlers(db: Database | null): void {
             attachments: promptContext.attachments,
             referenceUrl: promptContext.referenceUrl,
             designSystem: promptContext.designSystem ?? null,
+            workspaceContext: promptContext.workspaceContext,
             ...(baseUrl !== undefined ? { baseUrl } : {}),
             wire: active.wire,
             ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
@@ -1093,6 +1107,7 @@ function registerIpcHandlers(db: Database | null): void {
         attachments: payload.attachments,
         referenceUrl: payload.referenceUrl,
         designSystem: cfg.designSystem ?? null,
+        workspacePath: workspacePathForDesign(db, payload.designId),
       });
 
       logIpc.info('applyComment', {
@@ -1105,6 +1120,7 @@ function registerIpcHandlers(db: Database | null): void {
         attachmentCount: payload.attachments.length,
         hasReferenceUrl: payload.referenceUrl !== undefined,
         hasDesignSystem: promptContext.designSystem !== null,
+        hasWorkspaceContext: promptContext.workspaceContext !== null,
         baseUrl: baseUrl ?? '<default>',
       });
 
@@ -1119,6 +1135,7 @@ function registerIpcHandlers(db: Database | null): void {
           attachments: promptContext.attachments,
           referenceUrl: promptContext.referenceUrl,
           designSystem: promptContext.designSystem ?? null,
+          workspaceContext: promptContext.workspaceContext,
           ...(baseUrl !== undefined ? { baseUrl } : {}),
           wire: active.wire,
           ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),

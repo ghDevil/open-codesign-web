@@ -198,6 +198,7 @@ const api = {
     comment: string;
     selection: SelectedElement;
     model?: ModelRef;
+    designId?: string;
     referenceUrl?: string;
     attachments?: LocalInputFile[];
   }) => ipcRenderer.invoke('codesign:apply-comment', payload) as Promise<GenerateResponse>,

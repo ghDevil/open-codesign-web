@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GeneratePayload, GeneratePayloadV1 } from './index';
+import { ApplyCommentPayload, GeneratePayload, GeneratePayloadV1 } from './index';
 
 const BASE_VALID = {
   schemaVersion: 1 as const,
@@ -69,5 +69,23 @@ describe('GeneratePayload (legacy — no schemaVersion)', () => {
     const v1 = GeneratePayloadV1.parse({ schemaVersion: 1, ...legacy, generationId: id });
     expect(v1.schemaVersion).toBe(1);
     expect(v1.generationId).toMatch(/^gen-/);
+  });
+});
+
+describe('ApplyCommentPayload', () => {
+  it('accepts an optional designId so revisions can reuse project context', () => {
+    const parsed = ApplyCommentPayload.parse({
+      html: '<main>Hello</main>',
+      comment: 'Tighten this section',
+      selection: {
+        selector: 'main',
+        tag: 'main',
+        outerHTML: '<main>Hello</main>',
+        rect: { top: 0, left: 0, width: 100, height: 40 },
+      },
+      designId: 'design-123',
+    });
+    expect(parsed.designId).toBe('design-123');
+    expect(parsed.attachments).toEqual([]);
   });
 });

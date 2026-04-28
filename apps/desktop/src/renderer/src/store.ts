@@ -1977,6 +1977,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         html,
         comment: trimmed,
         selection,
+        ...(designIdAtStart ? { designId: designIdAtStart } : {}),
         ...(referenceUrl ? { referenceUrl } : {}),
         attachments,
       });
