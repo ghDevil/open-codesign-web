@@ -123,7 +123,14 @@ async function uploadPickedFiles(files: FileList): Promise<Array<Record<string, 
     form.append('files', file, file.name);
   }
   const uploaded = await apiJson<
-    Array<{ name: string; size: number; mimeType: string; dataUrl: string }>
+    Array<{
+      name: string;
+      size: number;
+      mimeType: string;
+      dataUrl: string;
+      extractedText?: string;
+      documentKind?: string;
+    }>
   >('/api/upload-files', {
     method: 'POST',
     body: form,
@@ -134,6 +141,8 @@ async function uploadPickedFiles(files: FileList): Promise<Array<Record<string, 
     size: file.size,
     mimeType: file.mimeType,
     dataUrl: file.dataUrl,
+    ...(file.extractedText ? { extractedText: file.extractedText } : {}),
+    ...(file.documentKind ? { documentKind: file.documentKind } : {}),
   }));
 }
 

@@ -21,6 +21,7 @@
     "better-sqlite3": "^12.9.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "jszip": "^3.10.1",
     "multer": "^1.4.5-lts.1",
     "smol-toml": "^1.6.1"
   },

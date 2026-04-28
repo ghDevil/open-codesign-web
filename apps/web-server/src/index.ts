@@ -89,6 +89,12 @@ import {
 } from './db-queries.js';
 import { scanDesignSystem } from './design-system.js';
 import {
+  importDesignSystemFromFigma,
+  importDesignSystemFromGithub,
+  importDesignSystemFromManual,
+} from './design-system-import.js';
+import { parseOfficeDocument } from './document-parsers.js';
+import {
   armGenerationTimeout,
   cancelGenerationRequest,
   extractGenerationTimeoutError,
@@ -1533,15 +1539,23 @@ app.post('/api/comments/mark-applied', (req, res) => {
 
 // ── File upload (replaces file dialogs) ───────────────────────────────────────
 
-app.post('/api/upload-files', upload.array('files'), (req, res) => {
+app.post('/api/upload-files', upload.array('files'), async (req, res) => {
   try {
     const files = (req.files as Express.Multer.File[]) ?? [];
-    const result = files.map((f) => ({
-      name: f.originalname,
-      size: f.size,
-      mimeType: f.mimetype,
-      dataUrl: `data:${f.mimetype};base64,${f.buffer.toString('base64')}`,
-    }));
+    const result = await Promise.all(
+      files.map(async (f) => {
+        const parsed = await parseOfficeDocument(f.originalname, f.mimetype, f.buffer);
+        return {
+          name: f.originalname,
+          size: f.size,
+          mimeType: f.mimetype,
+          dataUrl: `data:${f.mimetype};base64,${f.buffer.toString('base64')}`,
+          ...(parsed.parsed
+            ? { extractedText: parsed.text, documentKind: parsed.kind }
+            : {}),
+        };
+      }),
+    );
     res.json(result);
   } catch (err) {
     handleError(res, err);
@@ -1808,6 +1822,69 @@ app.delete('/api/design-system', async (_req, res) => {
     await saveConfig(next);
     setCachedConfig(next);
     res.json(toState(cachedConfig));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+async function persistDesignSystem(snapshot: import('@open-codesign/shared').StoredDesignSystem) {
+  const cfg = getCachedConfig();
+  if (!cfg) throw new CodesignError('No config', ERROR_CODES.CONFIG_MISSING);
+  const next = hydrateConfig({
+    version: 3,
+    activeProvider: cfg.activeProvider,
+    activeModel: cfg.activeModel,
+    secrets: cfg.secrets,
+    providers: cfg.providers,
+    designSystem: snapshot,
+  });
+  await saveConfig(next);
+  setCachedConfig(next);
+}
+
+app.post('/api/design-system/scan-github', async (req, res) => {
+  try {
+    const { repoUrl } = req.body as { repoUrl?: string };
+    if (typeof repoUrl !== 'string' || repoUrl.trim().length === 0) {
+      return sendError(res, 400, 'repoUrl is required', ERROR_CODES.IPC_BAD_INPUT);
+    }
+    const snapshot = await importDesignSystemFromGithub(repoUrl);
+    await persistDesignSystem(snapshot);
+    res.json(toState(getCachedConfig()));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post('/api/design-system/scan-figma', async (req, res) => {
+  try {
+    const { figmaUrl } = req.body as { figmaUrl?: string };
+    if (typeof figmaUrl !== 'string' || figmaUrl.trim().length === 0) {
+      return sendError(res, 400, 'figmaUrl is required', ERROR_CODES.IPC_BAD_INPUT);
+    }
+    const snapshot = await importDesignSystemFromFigma(figmaUrl);
+    await persistDesignSystem(snapshot);
+    res.json(toState(getCachedConfig()));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post('/api/design-system/manual', async (req, res) => {
+  try {
+    const body = req.body as Parameters<typeof importDesignSystemFromManual>[0];
+    const snapshot = importDesignSystemFromManual(body ?? {});
+    await persistDesignSystem(snapshot);
+    res.json(toState(getCachedConfig()));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.get('/api/design-system', (_req, res) => {
+  try {
+    const cfg = getCachedConfig();
+    res.json({ designSystem: cfg?.designSystem ?? null });
   } catch (err) {
     handleError(res, err);
   }

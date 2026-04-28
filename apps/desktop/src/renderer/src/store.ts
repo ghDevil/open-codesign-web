@@ -23,6 +23,7 @@ import { diagnoseGenerateFailure } from '@open-codesign/shared';
 import { computeFingerprint } from '@open-codesign/shared/fingerprint';
 import { create } from 'zustand';
 import type { StoreApi } from 'zustand';
+import { clearDesignIntent, readDesignIntent } from './components/NewDesignDialog';
 import type { CodesignApi, ExportFormat } from '../../preload/index';
 import { recordAction, snapshotTimeline } from './lib/action-timeline';
 import { rendererLogger } from './lib/renderer-logger';
@@ -1270,11 +1271,76 @@ const HUMAN_TWEAK_AUTHORITY_LINES = [
   'When an edit is scoped to one element, keep the change local and avoid unrelated design drift.',
 ].join(' ');
 
+export interface PromptContextExtras {
+  /** Project intent captured at design creation: prototype kind + fidelity. */
+  intent?: { kind: string; fidelity?: string; speakerNotes?: boolean } | null;
+  /** Plain-text content extracted from any DOCX/PPTX/XLSX uploads. */
+  extractedDocs?: Array<{ name: string; kind: string; text: string }>;
+}
+
+const FIDELITY_GUIDANCE: Record<string, string> = {
+  wireframe:
+    'WIREFRAME mode: produce a low-fidelity exploration. Use neutral grey blocks, dashed borders, system-ui sans-serif, placeholder text like "Lorem ipsum…", and no images or photographs (use captioned grey rectangles instead). Prioritize structure and information hierarchy over visual polish.',
+  high:
+    'HIGH-FIDELITY mode: produce a polished, magazine-quality result. Use real-feeling content (proper headlines, concrete copy), brand-grade typography, layered backgrounds, real images via cdn.midjourney-mirror.com or unsplash.com, and proper spacing/shadow tokens. Match a real launched product, not a wireframe.',
+};
+
+const KIND_GUIDANCE: Record<string, string> = {
+  prototype:
+    'Output a clickable prototype: phone or browser-frame app screen with realistic interactions.',
+  slideDeck:
+    'Output a multi-slide deck (each slide is a section with id="slide-1", "slide-2", …). Use scroll-snap for navigation. Cover, agenda, content slides, then closing.',
+  template:
+    'Honor the chosen template starter — extend rather than override its structure unless asked.',
+  other:
+    'Treat the request flexibly — landing page, one-pager, infographic, or whatever the prompt suggests.',
+};
+
+function intentToPromptHeader(intent: PromptContextExtras['intent']): string | null {
+  if (!intent || !intent.kind) return null;
+  const lines = ['## DESIGN INTENT'];
+  const kindLine = KIND_GUIDANCE[intent.kind];
+  if (kindLine) lines.push(`- Kind: **${intent.kind}** — ${kindLine}`);
+  if (intent.fidelity && FIDELITY_GUIDANCE[intent.fidelity]) {
+    lines.push(`- Fidelity: ${FIDELITY_GUIDANCE[intent.fidelity]}`);
+  }
+  if (intent.speakerNotes && intent.kind === 'slideDeck') {
+    lines.push(
+      '- Speaker notes: include a `<aside class="speaker-notes">…</aside>` block under each slide with delivery cues; hide it from default view but show with a "Notes" toggle.',
+    );
+  }
+  return lines.join('\n');
+}
+
+function extractedDocsToPromptHeader(
+  docs: PromptContextExtras['extractedDocs'],
+): string | null {
+  if (!docs || docs.length === 0) return null;
+  const lines = ['## ATTACHED DOCUMENTS', ''];
+  for (const doc of docs) {
+    const cap = doc.text.length > 8000 ? `${doc.text.slice(0, 8000)}\n…[truncated]` : doc.text;
+    lines.push(`### ${doc.name} (${doc.kind})`);
+    lines.push(cap);
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
 export function buildEnrichedPrompt(
   userPrompt: string,
   pendingEdits: PendingEditEnrichment[],
+  extras?: PromptContextExtras,
 ): string {
-  if (pendingEdits.length === 0) return userPrompt;
+  const intentHeader = intentToPromptHeader(extras?.intent ?? null);
+  const docsHeader = extractedDocsToPromptHeader(extras?.extractedDocs);
+  const headers: string[] = [];
+  if (intentHeader) headers.push(intentHeader);
+  if (docsHeader) headers.push(docsHeader);
+
+  if (pendingEdits.length === 0) {
+    if (headers.length === 0) return userPrompt;
+    return `${headers.join('\n\n')}\n\n---\n\n${userPrompt}`;
+  }
 
   const MAX_HTML = 600;
   const truncate = (s: string) => (s.length > MAX_HTML ? `${s.slice(0, MAX_HTML)}…` : s);
@@ -1310,7 +1376,8 @@ export function buildEnrichedPrompt(
     lines.push('---', '', userPrompt);
   }
 
-  return lines.join('\n');
+  if (headers.length === 0) return lines.join('\n');
+  return `${headers.join('\n\n')}\n\n${lines.join('\n')}`;
 }
 
 export const useCodesignStore = create<CodesignState>((set, get) => ({
@@ -1555,7 +1622,6 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     );
     if (!request) return;
 
-    const enrichedPrompt = buildEnrichedPrompt(request.prompt, pendingEdits);
     const pendingEditIds = pendingEdits.map((c) => c.id);
 
     const generationId = newId();
@@ -1583,6 +1649,25 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     const history =
       fullHistory.length > HISTORY_CAP ? fullHistory.slice(-HISTORY_CAP) : fullHistory;
     const isFirstPrompt = fullHistory.length === 0;
+
+    const designIntent = designIdAtStart ? readDesignIntent(designIdAtStart) : null;
+    const extractedDocs = (request.attachments ?? [])
+      .filter((f) => typeof f.extractedText === 'string' && f.extractedText.length > 0)
+      .map((f) => ({
+        name: f.name,
+        kind: f.documentKind ?? 'document',
+        text: f.extractedText as string,
+      }));
+    const enrichedPrompt = buildEnrichedPrompt(request.prompt, pendingEdits, {
+      // Only inject the intent header on the first prompt; afterwards the
+      // model has the artifact in scope and the framing is already established.
+      intent: isFirstPrompt ? designIntent : null,
+      extractedDocs,
+    });
+    if (isFirstPrompt && designIdAtStart) {
+      // Consume so subsequent turns don't re-prepend the intent.
+      clearDesignIntent(designIdAtStart);
+    }
 
     // Append to the new chat_messages table so Sidebar v2 reflects activity
     // even before Workstream B starts emitting streaming tool events. Silent

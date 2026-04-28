@@ -88,6 +88,14 @@ export const LocalInputFile = z.object({
   path: z.string().min(1),
   name: z.string().min(1),
   size: z.number().int().nonnegative(),
+  /** Plain-text content extracted from DOCX/PPTX/XLSX uploads, when available. */
+  extractedText: z.string().optional(),
+  /** Inline base64 dataUrl preview (web port surfaces this from /api/upload-files). */
+  dataUrl: z.string().optional(),
+  /** Mime type recovered from upload — useful for branching on image vs document. */
+  mimeType: z.string().optional(),
+  /** Identifier of the document parser ("docx" / "pptx" / "xlsx" / "unsupported"). */
+  documentKind: z.string().optional(),
 });
 export type LocalInputFile = z.infer<typeof LocalInputFile>;
 

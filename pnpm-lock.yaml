@@ -186,6 +186,9 @@ importers:
       express:
         specifier: ^4.21.2
         version: 4.22.1
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.1
       multer:
         specifier: ^1.4.5-lts.1
         version: 1.4.5-lts.2
