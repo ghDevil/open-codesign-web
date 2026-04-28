@@ -169,7 +169,7 @@
     },
     "comments": {
       "title": "Comment mode",
-      "body": "Inline comments on the canvas arrive in v0.2.1. You'll be able to click any element in the preview to leave a note or an edit instruction."
+      "body": "Inline comments are live. Click any element in the preview to leave a note or an edit instruction. If a comment doesn't stick, paste it into chat."
     }
   },
   "settings": {

@@ -5,6 +5,7 @@ import {
   coerceUsageSnapshot,
   extractCodesignErrorCode,
   extractUpstreamContext,
+  resetPersistedDesignContextsForTesting,
   useCodesignStore,
 } from './store';
 
@@ -45,10 +46,12 @@ function resetStore() {
 }
 
 beforeEach(() => {
+  resetPersistedDesignContextsForTesting();
   resetStore();
 });
 
 afterEach(() => {
+  resetPersistedDesignContextsForTesting();
   vi.unstubAllGlobals();
 });
 
@@ -445,6 +448,7 @@ describe('useCodesignStore design management', () => {
         updatedAt: '2024-01-01T00:00:00.000Z',
         thumbnailText: null,
         deletedAt: null,
+        workspacePath: null,
       },
       {
         schemaVersion: 1 as const,
@@ -454,6 +458,7 @@ describe('useCodesignStore design management', () => {
         updatedAt: '2024-01-02T00:00:00.000Z',
         thumbnailText: null,
         deletedAt: null,
+        workspacePath: null,
       },
     ];
 
@@ -474,6 +479,72 @@ describe('useCodesignStore design management', () => {
 
     await useCodesignStore.getState().switchDesign('design-a');
     expect(useCodesignStore.getState().currentDesignId).toBe('design-a');
+  });
+
+  it('keeps attached files and reference URLs scoped to each design', async () => {
+    const designs = [
+      {
+        schemaVersion: 1 as const,
+        id: 'design-a',
+        name: 'A',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        thumbnailText: null,
+        deletedAt: null,
+        workspacePath: null,
+      },
+      {
+        schemaVersion: 1 as const,
+        id: 'design-b',
+        name: 'B',
+        createdAt: '2024-01-02T00:00:00.000Z',
+        updatedAt: '2024-01-02T00:00:00.000Z',
+        thumbnailText: null,
+        deletedAt: null,
+        workspacePath: null,
+      },
+    ];
+
+    vi.stubGlobal('window', {
+      codesign: {
+        snapshots: {
+          list: vi.fn(() => Promise.resolve([])),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      designs,
+      currentDesignId: 'design-a',
+      inputFiles: [{ path: '/tmp/brief-a.md', name: 'brief-a.md', size: 12 }],
+      referenceUrl: 'https://example.com/a',
+    });
+    useCodesignStore.getState().setReferenceUrl('https://example.com/a');
+
+    await useCodesignStore.getState().switchDesign('design-b');
+
+    expect(useCodesignStore.getState().inputFiles).toEqual([]);
+    expect(useCodesignStore.getState().referenceUrl).toBe('');
+
+    useCodesignStore.setState({
+      inputFiles: [{ path: '/tmp/brief-b.md', name: 'brief-b.md', size: 34 }],
+    });
+    useCodesignStore.getState().setReferenceUrl('https://example.com/b');
+
+    await useCodesignStore.getState().switchDesign('design-a');
+
+    expect(useCodesignStore.getState().inputFiles).toEqual([
+      { path: '/tmp/brief-a.md', name: 'brief-a.md', size: 12 },
+    ]);
+    expect(useCodesignStore.getState().referenceUrl).toBe('https://example.com/a');
+
+    await useCodesignStore.getState().switchDesign('design-b');
+
+    expect(useCodesignStore.getState().inputFiles).toEqual([
+      { path: '/tmp/brief-b.md', name: 'brief-b.md', size: 34 },
+    ]);
+    expect(useCodesignStore.getState().referenceUrl).toBe('https://example.com/b');
   });
 
   it('createNewDesign resets messages + preview and stores the new id as current', async () => {
@@ -507,6 +578,8 @@ describe('useCodesignStore design management', () => {
     const state = useCodesignStore.getState();
     expect(state.currentDesignId).toBe('fresh');
     expect(state.previewHtml).toBeNull();
+    expect(state.inputFiles).toEqual([]);
+    expect(state.referenceUrl).toBe('');
   });
 
   it('allows switchDesign while another design is generating (generation stays bound to its origin)', async () => {
@@ -556,6 +629,54 @@ describe('useCodesignStore design management', () => {
     expect(softDeleteDesign).not.toHaveBeenCalled();
     expect(useCodesignStore.getState().currentDesignId).toBe('design-a');
     expect(useCodesignStore.getState().toasts.at(-1)?.variant).toBe('info');
+  });
+
+  it('copies project context when duplicating a design', async () => {
+    const source = {
+      schemaVersion: 1 as const,
+      id: 'design-a',
+      name: 'A',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      thumbnailText: null,
+      deletedAt: null,
+      workspacePath: null,
+    };
+    const clone = {
+      ...source,
+      id: 'design-b',
+      name: 'A Copy',
+    };
+
+    const duplicateDesign = vi.fn().mockResolvedValue(clone);
+    const listDesigns = vi.fn().mockResolvedValue([source, clone]);
+
+    vi.stubGlobal('window', {
+      codesign: {
+        snapshots: {
+          duplicateDesign,
+          listDesigns,
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      designs: [source],
+      currentDesignId: source.id,
+      inputFiles: [{ path: '/tmp/brief-a.md', name: 'brief-a.md', size: 12 }],
+      referenceUrl: 'https://example.com/a',
+    });
+    useCodesignStore.getState().setReferenceUrl('https://example.com/a');
+
+    const result = await useCodesignStore.getState().duplicateDesign(source.id);
+
+    expect(result?.id).toBe(clone.id);
+    await useCodesignStore.getState().switchDesign(clone.id);
+    expect(useCodesignStore.getState().inputFiles).toEqual([
+      { path: '/tmp/brief-a.md', name: 'brief-a.md', size: 12 },
+    ]);
+    expect(useCodesignStore.getState().referenceUrl).toBe('https://example.com/a');
   });
 });
 

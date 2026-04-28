@@ -555,6 +555,120 @@ function persistTheme(theme: Theme): void {
   }
 }
 
+const DESIGN_CONTEXT_STORAGE_KEY = 'open-codesign.design-context.v1';
+
+interface PersistedDesignContext {
+  inputFiles: LocalInputFile[];
+  referenceUrl: string;
+}
+
+let volatileDesignContexts: Record<string, PersistedDesignContext> = {};
+
+function getStorage(): Storage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function isStoredLocalInputFile(value: unknown): value is LocalInputFile {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate['path'] !== 'string' || candidate['path'].trim().length === 0) return false;
+  if (typeof candidate['name'] !== 'string' || candidate['name'].trim().length === 0) return false;
+  if (
+    typeof candidate['size'] !== 'number' ||
+    !Number.isFinite(candidate['size']) ||
+    candidate['size'] < 0
+  ) {
+    return false;
+  }
+  const optionalStringKeys = ['extractedText', 'dataUrl', 'mimeType', 'documentKind'] as const;
+  return optionalStringKeys.every((key) => candidate[key] === undefined || typeof candidate[key] === 'string');
+}
+
+function readAllDesignContexts(): Record<string, PersistedDesignContext> {
+  const storage = getStorage();
+  if (!storage) return { ...volatileDesignContexts };
+  try {
+    const raw = storage.getItem(DESIGN_CONTEXT_STORAGE_KEY);
+    if (!raw) return { ...volatileDesignContexts };
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== 'object' || parsed === null) return { ...volatileDesignContexts };
+    const entries = parsed as Record<string, unknown>;
+    const next: Record<string, PersistedDesignContext> = {};
+    for (const [designId, value] of Object.entries(entries)) {
+      if (typeof designId !== 'string' || designId.trim().length === 0) continue;
+      if (typeof value !== 'object' || value === null) continue;
+      const context = value as Record<string, unknown>;
+      const inputFiles = Array.isArray(context['inputFiles'])
+        ? uniqueFiles(context['inputFiles'].filter(isStoredLocalInputFile))
+        : [];
+      const referenceUrl =
+        typeof context['referenceUrl'] === 'string' ? context['referenceUrl'] : '';
+      next[designId] = { inputFiles, referenceUrl };
+    }
+    volatileDesignContexts = next;
+    return next;
+  } catch {
+    return { ...volatileDesignContexts };
+  }
+}
+
+function writeAllDesignContexts(contexts: Record<string, PersistedDesignContext>): void {
+  volatileDesignContexts = { ...contexts };
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    storage.setItem(DESIGN_CONTEXT_STORAGE_KEY, JSON.stringify(contexts));
+  } catch {
+    // Ignore storage quota / private mode failures. Context still lives in-memory.
+  }
+}
+
+function readDesignContext(designId: string | null): PersistedDesignContext {
+  if (!designId) return { inputFiles: [], referenceUrl: '' };
+  const stored = readAllDesignContexts()[designId];
+  return stored ?? { inputFiles: [], referenceUrl: '' };
+}
+
+function persistDesignContext(designId: string | null, context: PersistedDesignContext): void {
+  if (!designId) return;
+  const next = readAllDesignContexts();
+  if (context.inputFiles.length === 0 && context.referenceUrl.trim().length === 0) {
+    delete next[designId];
+  } else {
+    next[designId] = {
+      inputFiles: uniqueFiles(context.inputFiles),
+      referenceUrl: context.referenceUrl,
+    };
+  }
+  writeAllDesignContexts(next);
+}
+
+function copyDesignContext(sourceDesignId: string, targetDesignId: string): void {
+  const context = readDesignContext(sourceDesignId);
+  persistDesignContext(targetDesignId, context);
+}
+
+function clearDesignContext(designId: string): void {
+  const next = readAllDesignContexts();
+  delete next[designId];
+  writeAllDesignContexts(next);
+}
+
+export function resetPersistedDesignContextsForTesting(): void {
+  volatileDesignContexts = {};
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    storage.removeItem(DESIGN_CONTEXT_STORAGE_KEY);
+  } catch {
+    // Ignore storage cleanup failures in test or private-mode environments.
+  }
+}
+
 function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -1515,19 +1629,45 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     if (!window.codesign) return;
     const files = await window.codesign.pickInputFiles();
     if (files.length === 0) return;
-    set((s) => ({ inputFiles: uniqueFiles([...s.inputFiles, ...files]) }));
+    set((s) => {
+      const inputFiles = uniqueFiles([...s.inputFiles, ...files]);
+      persistDesignContext(s.currentDesignId, {
+        inputFiles,
+        referenceUrl: s.referenceUrl,
+      });
+      return { inputFiles };
+    });
   },
 
   removeInputFile(path) {
-    set((s) => ({ inputFiles: s.inputFiles.filter((file) => file.path !== path) }));
+    set((s) => {
+      const inputFiles = s.inputFiles.filter((file) => file.path !== path);
+      persistDesignContext(s.currentDesignId, {
+        inputFiles,
+        referenceUrl: s.referenceUrl,
+      });
+      return { inputFiles };
+    });
   },
 
   clearInputFiles() {
-    set({ inputFiles: [] });
+    set((s) => {
+      persistDesignContext(s.currentDesignId, {
+        inputFiles: [],
+        referenceUrl: s.referenceUrl,
+      });
+      return { inputFiles: [] };
+    });
   },
 
   setReferenceUrl(value) {
-    set({ referenceUrl: value });
+    set((s) => {
+      persistDesignContext(s.currentDesignId, {
+        inputFiles: s.inputFiles,
+        referenceUrl: value,
+      });
+      return { referenceUrl: value };
+    });
   },
 
   async pickDesignSystemDirectory() {
@@ -2058,7 +2198,10 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         currentSnapshotId: null,
         canvasTabs: [FILES_TAB],
         activeCanvasTab: 0,
+        inputFiles: [],
+        referenceUrl: '',
       });
+      persistDesignContext(design.id, { inputFiles: [], referenceUrl: '' });
       await get().loadDesigns();
       void get().loadChatForCurrentDesign();
       void get().loadCommentsForCurrentDesign();
@@ -2111,6 +2254,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     // Cache hit on the incoming design — render instantly, refresh in the
     // background so any external edits eventually land.
     const cachedHtml = outgoingPool.cache[id];
+    const designContext = readDesignContext(id);
     if (cachedHtml !== undefined) {
       const incomingPool = recordPreviewInPool(
         outgoingPool.cache,
@@ -2139,6 +2283,8 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         currentSnapshotId: null,
         canvasTabs: [FILES_TAB, { kind: 'file', path: 'index.html' }],
         activeCanvasTab: 1,
+        inputFiles: designContext.inputFiles,
+        referenceUrl: designContext.referenceUrl,
       });
       void get().loadChatForCurrentDesign();
       void get().loadCommentsForCurrentDesign();
@@ -2193,6 +2339,8 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         currentSnapshotId: null,
         canvasTabs: latest ? [FILES_TAB, { kind: 'file', path: 'index.html' }] : [FILES_TAB],
         activeCanvasTab: latest ? 1 : 0,
+        inputFiles: designContext.inputFiles,
+        referenceUrl: designContext.referenceUrl,
       });
       void get().loadChatForCurrentDesign();
       void get().loadCommentsForCurrentDesign();
@@ -2237,6 +2385,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     const name = tr('projects.duplicateNameTemplate', { name: source.name });
     try {
       const cloned = await window.codesign.snapshots.duplicateDesign(id, name);
+      copyDesignContext(id, cloned.id);
       await get().loadDesigns();
       get().pushToast({
         variant: 'success',
@@ -2265,6 +2414,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     }
     try {
       await window.codesign.snapshots.softDeleteDesign(id);
+      clearDesignContext(id);
       if (get().autoPolishFired.has(id)) {
         const nextFired = new Set(get().autoPolishFired);
         nextFired.delete(id);
