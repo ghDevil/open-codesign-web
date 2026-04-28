@@ -94,6 +94,11 @@ import {
   updateDesignWorkspace,
   upsertDesignFile,
   viewDesignFile,
+  createFolder,
+  deleteFolder,
+  listFolders,
+  moveDesignToFolder,
+  renameFolder,
 } from './db-queries.js';
 import { scanDesignSystem } from './design-system.js';
 import {
@@ -2259,6 +2264,66 @@ app.delete('/api/design-systems/:id', async (req, res) => {
     const nextLibrary = removeDesignSystem(library, id.trim());
     await writeDesignSystemsState(nextLibrary);
     res.json(serializeDesignSystemsState(nextLibrary));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ── Folder management ─────────────────────────────────────────────────────────
+
+app.get('/api/folders', (req, res) => {
+  try {
+    const folders = listFolders(getDb());
+    res.json({ folders });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post('/api/folders', (req, res) => {
+  try {
+    const { name } = req.body as { name?: string };
+    if (typeof name !== 'string' || name.trim().length === 0) {
+      return sendError(res, 400, 'name is required', ERROR_CODES.IPC_BAD_INPUT);
+    }
+    const folder = createFolder(getDb(), name.trim());
+    res.json({ folder });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.patch('/api/folders/:id', (req, res) => {
+  try {
+    const id = req.params['id'];
+    const { name } = req.body as { name?: string };
+    if (typeof name !== 'string' || name.trim().length === 0) {
+      return sendError(res, 400, 'name is required', ERROR_CODES.IPC_BAD_INPUT);
+    }
+    const ok = renameFolder(getDb(), id, name.trim());
+    if (!ok) return sendError(res, 404, 'Folder not found', ERROR_CODES.IPC_BAD_INPUT);
+    res.json({ ok: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.delete('/api/folders/:id', (req, res) => {
+  try {
+    const id = req.params['id'];
+    deleteFolder(getDb(), id);
+    res.json({ ok: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.patch('/api/designs/:id/folder', (req, res) => {
+  try {
+    const designId = req.params['id'];
+    const { folderId } = req.body as { folderId?: string | null };
+    moveDesignToFolder(getDb(), designId, folderId ?? null);
+    res.json({ ok: true });
   } catch (err) {
     handleError(res, err);
   }

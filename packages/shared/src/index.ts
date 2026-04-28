@@ -336,6 +336,7 @@ export {
   DesignMessageV1,
   DesignSnapshotV1,
   DesignV1,
+  FolderV1,
 } from './snapshot';
 export type {
   ChatAppendInput,
@@ -353,6 +354,7 @@ export type {
   DesignFile,
   DesignMessage,
   DesignSnapshot,
+  Folder,
   SnapshotCreateInput,
 } from './snapshot';
 

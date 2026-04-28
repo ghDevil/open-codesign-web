@@ -11,6 +11,7 @@ import type {
   Design,
   DiagnosticEventRow,
   DiagnosticHypothesis,
+  Folder,
   LocalInputFile,
   ModelRef,
   OnboardingState,
@@ -215,6 +216,7 @@ interface CodesignState {
   toastMessage: string | null;
 
   designs: Design[];
+  folders: Folder[];
   currentDesignId: string | null;
   designsLoaded: boolean;
   designsViewOpen: boolean;
@@ -374,6 +376,11 @@ interface CodesignState {
   setPreviewViewport: (viewport: PreviewViewport) => void;
 
   loadDesigns: () => Promise<void>;
+  loadFolders: () => Promise<void>;
+  createFolder: (name: string) => Promise<Folder | null>;
+  renameFolder: (id: string, name: string) => Promise<void>;
+  deleteFolder: (id: string) => Promise<void>;
+  moveDesignToFolder: (designId: string, folderId: string | null) => Promise<void>;
   ensureCurrentDesign: () => Promise<void>;
   openNewDesignDialog: () => void;
   closeNewDesignDialog: () => void;
@@ -1615,6 +1622,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
   iframeErrors: [],
 
   designs: [],
+  folders: [],
   currentDesignId: null,
   designsLoaded: false,
   designsViewOpen: false,
@@ -2295,6 +2303,51 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       set({ designsLoaded: true });
       throw err instanceof Error ? err : new Error(msg);
     }
+  },
+
+  async loadFolders() {
+    if (!window.codesign) return;
+    try {
+      const result = await window.codesign.folders.list();
+      set({ folders: result?.folders ?? [] });
+    } catch {
+      /* folders are optional — don't fail the app */
+    }
+  },
+
+  async createFolder(name: string) {
+    if (!window.codesign) return null;
+    try {
+      const result = await window.codesign.folders.create(name);
+      const folder = result?.folder ?? null;
+      if (folder) set((s) => ({ folders: [...s.folders, folder] }));
+      return folder;
+    } catch {
+      return null;
+    }
+  },
+
+  async renameFolder(id: string, name: string) {
+    if (!window.codesign) return;
+    await window.codesign.folders.rename(id, name);
+    set((s) => ({ folders: s.folders.map((f) => (f.id === id ? { ...f, name } : f)) }));
+  },
+
+  async deleteFolder(id: string) {
+    if (!window.codesign) return;
+    await window.codesign.folders.delete(id);
+    set((s) => ({
+      folders: s.folders.filter((f) => f.id !== id),
+      designs: s.designs.map((d) => (d.folderId === id ? { ...d, folderId: null } : d)),
+    }));
+  },
+
+  async moveDesignToFolder(designId: string, folderId: string | null) {
+    if (!window.codesign) return;
+    await window.codesign.folders.moveDesign(designId, folderId);
+    set((s) => ({
+      designs: s.designs.map((d) => (d.id === designId ? { ...d, folderId } : d)),
+    }));
   },
 
   async ensureCurrentDesign() {

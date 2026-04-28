@@ -29,4 +29,9 @@ export {
   deleteComment,
   markCommentsApplied,
   normalizeDesignFilePath,
+  listFolders,
+  createFolder,
+  renameFolder,
+  deleteFolder,
+  moveDesignToFolder,
 } from './snapshots-db.js';

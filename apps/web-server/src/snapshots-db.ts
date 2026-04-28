@@ -17,6 +17,7 @@ import type {
   Design,
   DesignFile,
   DesignSnapshot,
+  Folder,
 } from '@open-codesign/shared';
 import type BetterSqlite3 from 'better-sqlite3';
 
@@ -140,6 +141,20 @@ function applyAdditiveMigrations(db: BetterSqlite3.Database): void {
   if (!designCols.includes('project_instructions')) {
     db.exec('ALTER TABLE designs ADD COLUMN project_instructions TEXT');
   }
+  if (!designCols.includes('folder_id')) {
+    db.exec('ALTER TABLE designs ADD COLUMN folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL');
+  }
+
+  // Folders table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS folders (
+      id         TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_folders_name ON folders(name);
+  `);
 }
 
 export function initSnapshotsDb(dbPath: string): BetterSqlite3.Database {
@@ -168,6 +183,14 @@ interface DesignRowDb {
   deleted_at: string | null;
   workspace_path: string | null;
   project_instructions: string | null;
+  folder_id: string | null;
+}
+
+interface FolderRowDb {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
 }
 
 interface SnapshotRowDb {
@@ -231,6 +254,16 @@ function rowToDesign(row: DesignRowDb): Design {
     deletedAt: row.deleted_at,
     workspacePath: row.workspace_path,
     projectInstructions: row.project_instructions,
+    folderId: row.folder_id ?? null,
+  };
+}
+
+function rowToFolder(row: FolderRowDb): Folder {
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -726,4 +759,33 @@ export function markCommentsApplied(
     .prepare(`SELECT * FROM comments WHERE id IN (${placeholders})`)
     .all(...ids) as CommentRowDb[];
   return rows.map(rowToComment);
+}
+
+// ── Folder queries ────────────────────────────────────────────────────────────
+
+export function listFolders(db: BetterSqlite3.Database): Folder[] {
+  const rows = db.prepare('SELECT * FROM folders ORDER BY name COLLATE NOCASE ASC').all() as FolderRowDb[];
+  return rows.map(rowToFolder);
+}
+
+export function createFolder(db: BetterSqlite3.Database, name: string): Folder {
+  const id = uuid();
+  const ts = now();
+  db.prepare('INSERT INTO folders (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').run(id, name, ts, ts);
+  return { id, name, createdAt: ts, updatedAt: ts };
+}
+
+export function renameFolder(db: BetterSqlite3.Database, id: string, name: string): boolean {
+  const result = db.prepare('UPDATE folders SET name = ?, updated_at = ? WHERE id = ?').run(name, now(), id);
+  return result.changes > 0;
+}
+
+export function deleteFolder(db: BetterSqlite3.Database, id: string): void {
+  // Unassign designs from this folder before deleting
+  db.prepare('UPDATE designs SET folder_id = NULL WHERE folder_id = ?').run(id);
+  db.prepare('DELETE FROM folders WHERE id = ?').run(id);
+}
+
+export function moveDesignToFolder(db: BetterSqlite3.Database, designId: string, folderId: string | null): void {
+  db.prepare('UPDATE designs SET folder_id = ? WHERE id = ?').run(folderId, designId);
 }

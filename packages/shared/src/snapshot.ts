@@ -24,8 +24,17 @@ export const DesignV1 = z.object({
   deletedAt: z.string().nullable().default(null),
   workspacePath: z.string().nullable().default(null),
   projectInstructions: z.string().nullable().default(null),
+  folderId: z.string().nullable().default(null),
 });
 export type Design = z.infer<typeof DesignV1>;
+
+export const FolderV1 = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Folder = z.infer<typeof FolderV1>;
 
 export const DesignMessageV1 = z.object({
   schemaVersion: z.literal(1).default(1),

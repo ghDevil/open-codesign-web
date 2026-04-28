@@ -26,6 +26,7 @@ export function App() {
   const configLoaded = useCodesignStore((s) => s.configLoaded);
   const loadConfig = useCodesignStore((s) => s.loadConfig);
   const loadDesigns = useCodesignStore((s) => s.loadDesigns);
+  const loadFolders = useCodesignStore((s) => s.loadFolders);
   const switchDesign = useCodesignStore((s) => s.switchDesign);
   const sendPrompt = useCodesignStore((s) => s.sendPrompt);
   const isGenerating = useCodesignStore(
@@ -110,7 +111,7 @@ export function App() {
 
   useEffect(() => {
     async function bootstrap(): Promise<void> {
-      await Promise.all([loadConfig(), loadDesigns()]);
+      await Promise.all([loadConfig(), loadDesigns(), loadFolders()]);
       const state = useCodesignStore.getState();
       if (state.currentDesignId === null && state.designs.length > 0) {
         const first = state.designs[0];
@@ -118,7 +119,7 @@ export function App() {
       }
     }
     void bootstrap();
-  }, [loadConfig, loadDesigns, switchDesign]);
+  }, [loadConfig, loadDesigns, loadFolders, switchDesign]);
 
   function submit(): void {
     const trimmed = prompt.trim();

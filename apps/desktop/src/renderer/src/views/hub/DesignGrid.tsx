@@ -1,6 +1,6 @@
 import { useT } from '@open-codesign/i18n';
 import type { Design } from '@open-codesign/shared';
-import { FileText, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { FileText, FolderInput, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
 import { type MouseEvent, useEffect, useState } from 'react';
 import { useCodesignStore } from '../../store';
 import { DesignCardPreview } from './DesignCardPreview';
@@ -32,6 +32,7 @@ interface MenuPos {
   x: number;
   y: number;
   design: Design;
+  showFolderPicker?: boolean;
 }
 
 function useMenu() {
@@ -62,6 +63,8 @@ export function DesignGrid({ designs, emptyLabel, prefixTile }: DesignGridProps)
   const setView = useCodesignStore((s) => s.setView);
   const requestRenameDesign = useCodesignStore((s) => s.requestRenameDesign);
   const requestDeleteDesign = useCodesignStore((s) => s.requestDeleteDesign);
+  const folders = useCodesignStore((s) => s.folders);
+  const moveDesignToFolder = useCodesignStore((s) => s.moveDesignToFolder);
   const { pos, open, close } = useMenu();
 
   if (designs.length === 0 && !prefixTile) {
@@ -151,36 +154,104 @@ export function DesignGrid({ designs, emptyLabel, prefixTile }: DesignGridProps)
         <div
           id="design-card-menu"
           role="menu"
-          className="fixed z-50 min-w-[160px] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-elevated)] py-[var(--space-1)]"
+          className="fixed z-50 min-w-[180px] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-elevated)] py-[var(--space-1)] overflow-hidden"
           style={{
-            left: Math.min(pos.x, window.innerWidth - 180),
-            top: Math.min(pos.y, window.innerHeight - 100),
+            left: Math.min(pos.x, window.innerWidth - 200),
+            top: Math.min(pos.y, window.innerHeight - 200),
           }}
         >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              requestRenameDesign(pos.design);
-              close();
-            }}
-            className="w-full flex items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)] text-left text-[var(--text-xs)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors"
-          >
-            <Pencil className="w-3.5 h-3.5 text-[var(--color-text-secondary)]" aria-hidden />
-            {t('hub.card.rename')}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              requestDeleteDesign(pos.design);
-              close();
-            }}
-            className="w-full flex items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)] text-left text-[var(--text-xs)] text-[var(--color-error)] hover:bg-[var(--color-surface-hover)] transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" aria-hidden />
-            {t('hub.card.delete')}
-          </button>
+          {pos.showFolderPicker ? (
+            <>
+              <div className="flex items-center gap-2 px-[var(--space-3)] py-[var(--space-2)] border-b border-[var(--color-border-subtle)]">
+                <button
+                  type="button"
+                  onClick={() => open({ ...pos, showFolderPicker: false })}
+                  className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" aria-hidden />
+                </button>
+                <span className="text-[var(--text-xs)] font-medium text-[var(--color-text-secondary)]">
+                  Move to folder
+                </span>
+              </div>
+              {pos.design.folderId ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    void moveDesignToFolder(pos.design.id, null);
+                    close();
+                  }}
+                  className="w-full flex items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)] text-left text-[var(--text-xs)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                >
+                  No folder
+                </button>
+              ) : null}
+              {folders.map((folder) => (
+                <button
+                  key={folder.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    void moveDesignToFolder(pos.design.id, folder.id);
+                    close();
+                  }}
+                  className={`w-full flex items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)] text-left text-[var(--text-xs)] hover:bg-[var(--color-surface-hover)] transition-colors ${
+                    pos.design.folderId === folder.id
+                      ? 'text-[var(--color-accent)] font-medium'
+                      : 'text-[var(--color-text-primary)]'
+                  }`}
+                >
+                  {folder.name}
+                  {pos.design.folderId === folder.id ? (
+                    <span className="ml-auto text-[var(--color-accent)]">✓</span>
+                  ) : null}
+                </button>
+              ))}
+              {folders.length === 0 ? (
+                <p className="px-[var(--space-3)] py-[var(--space-2)] text-[var(--text-xs)] text-[var(--color-text-muted)]">
+                  No folders yet
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  requestRenameDesign(pos.design);
+                  close();
+                }}
+                className="w-full flex items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)] text-left text-[var(--text-xs)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+              >
+                <Pencil className="w-3.5 h-3.5 text-[var(--color-text-secondary)]" aria-hidden />
+                {t('hub.card.rename')}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => open({ ...pos, showFolderPicker: true })}
+                className="w-full flex items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)] text-left text-[var(--text-xs)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+              >
+                <FolderInput className="w-3.5 h-3.5 text-[var(--color-text-secondary)]" aria-hidden />
+                Move to folder
+              </button>
+              <div className="my-[var(--space-1)] border-t border-[var(--color-border-subtle)]" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  requestDeleteDesign(pos.design);
+                  close();
+                }}
+                className="w-full flex items-center gap-[var(--space-2)] px-[var(--space-3)] py-[var(--space-2)] text-left text-[var(--text-xs)] text-[var(--color-error)] hover:bg-[var(--color-surface-hover)] transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" aria-hidden />
+                {t('hub.card.delete')}
+              </button>
+            </>
+          )}
         </div>
       ) : null}
     </>

@@ -1,32 +1,28 @@
 import { useT } from '@open-codesign/i18n';
-import { Layout, Presentation, Sparkles, Wand2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Layout, Monitor, Presentation, Smartphone, Sparkles, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useCodesignStore } from '../store';
 
-type ProjectKind = 'prototype' | 'slideDeck' | 'template' | 'other';
+type ProjectKind = 'prototype' | 'slideDeck' | 'mobile' | 'other';
 type Fidelity = 'wireframe' | 'high';
 
-const KIND_ORDER: ProjectKind[] = ['prototype', 'slideDeck', 'template', 'other'];
-const KIND_ICON: Record<ProjectKind, typeof Layout> = {
-  prototype: Layout,
-  slideDeck: Presentation,
-  template: Wand2,
-  other: Sparkles,
+const KIND_ORDER: ProjectKind[] = ['prototype', 'mobile', 'slideDeck', 'other'];
+
+const KIND_META: Record<ProjectKind, { icon: typeof Layout; color: string }> = {
+  prototype: { icon: Monitor, color: 'var(--color-accent)' },
+  mobile: { icon: Smartphone, color: '#10b981' },
+  slideDeck: { icon: Presentation, color: '#f59e0b' },
+  other: { icon: Sparkles, color: '#8b5cf6' },
 };
 
 interface ProjectIntent {
   kind: ProjectKind;
   fidelity?: Fidelity;
   speakerNotes?: boolean;
-  template?: string | null;
 }
 
 const INTENT_STORAGE_KEY = 'open-codesign:new-design-intent';
 
-/**
- * Persist the just-created design's intent so the first generation prompt
- * can pick it up. Keyed by design id; cleared on read.
- */
 export function readDesignIntent(designId: string): ProjectIntent | null {
   try {
     const raw = window.localStorage.getItem(`${INTENT_STORAGE_KEY}:${designId}`);
@@ -65,6 +61,7 @@ export function NewDesignDialog() {
   const [fidelity, setFidelity] = useState<Fidelity>('high');
   const [speakerNotes, setSpeakerNotes] = useState(false);
   const [creating, setCreating] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) {
@@ -72,6 +69,9 @@ export function NewDesignDialog() {
       setKind('prototype');
       setFidelity('high');
       setSpeakerNotes(false);
+    } else {
+      // Focus name field after mount
+      setTimeout(() => nameRef.current?.focus(), 60);
     }
   }, [open]);
 
@@ -100,9 +100,6 @@ export function NewDesignDialog() {
     }
   }
 
-  const kindLabel = (k: ProjectKind) => t(`create.types.${k}`);
-  const kindDescription = (k: ProjectKind) => t(`create.typeDescriptions.${k}`);
-
   return (
     <div
       role="dialog"
@@ -114,144 +111,127 @@ export function NewDesignDialog() {
       }}
       onKeyDown={(e) => {
         if (e.key === 'Escape' && !creating) close();
+        if (e.key === 'Enter' && !creating) void handleCreate();
       }}
     >
       <div
         role="document"
-        className="w-full max-w-md rounded-[var(--radius-2xl)] bg-[var(--color-background)] border border-[var(--color-border)] shadow-[var(--shadow-elevated)] p-5 space-y-4 animate-[panel-in_160ms_ease-out]"
+        className="w-full max-w-[420px] rounded-[var(--radius-2xl)] bg-[var(--color-background)] border border-[var(--color-border)] shadow-[var(--shadow-elevated)] animate-[panel-in_160ms_ease-out] overflow-hidden"
       >
-        <div className="space-y-1">
-          <h3 className="display text-[var(--text-md)] font-medium text-[var(--color-text-primary)]">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-4">
+          <h3
+            className="text-[var(--text-md)] font-medium text-[var(--color-text-primary)]"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
             {t('create.title')}
           </h3>
-          <p className="text-[var(--text-sm)] text-[var(--color-text-secondary)] leading-[var(--leading-body)]">
-            {t('create.subtitle')}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          {KIND_ORDER.map((k) => {
-            const Icon = KIND_ICON[k];
-            const active = k === kind;
-            return (
-              <button
-                type="button"
-                key={k}
-                onClick={() => setKind(k)}
-                className={`flex flex-col items-start gap-1 rounded-[var(--radius-md)] border px-3 py-2.5 text-left transition-colors ${
-                  active
-                    ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-text-primary)]'
-                    : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
-                }`}
-              >
-                <span className="flex items-center gap-1.5 text-[var(--text-sm)] font-medium">
-                  <Icon className="size-3.5" />
-                  {kindLabel(k)}
-                </span>
-                <span className="text-[var(--text-xs)] text-[var(--color-text-secondary)] leading-snug">
-                  {kindDescription(k)}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="space-y-1">
-          <label
-            htmlFor="new-design-name"
-            className="text-[var(--text-xs)] uppercase tracking-[0.04em] text-[var(--color-text-muted)]"
+          <button
+            type="button"
+            onClick={() => close()}
+            aria-label={t('create.close')}
+            className="inline-flex items-center justify-center w-7 h-7 rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors"
           >
-            {t('create.fields.name')}
-          </label>
+            <X className="w-4 h-4" aria-hidden />
+          </button>
+        </div>
+
+        <div className="px-5 pb-5 space-y-4">
+          {/* Name input — first, most important */}
           <input
-            id="new-design-name"
+            ref={nameRef}
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t('create.fields.namePlaceholder')}
             disabled={creating}
-            autoFocus
-            className="w-full h-9 px-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--text-sm)] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none transition-colors"
+            className="w-full h-10 px-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--text-sm)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none transition-colors"
           />
-        </div>
 
-        {kind === 'prototype' ? (
-          <div className="space-y-1">
-            <span className="text-[var(--text-xs)] uppercase tracking-[0.04em] text-[var(--color-text-muted)]">
-              {t('create.fields.fidelity')}
-            </span>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setFidelity('wireframe')}
-                className={`flex flex-col items-start gap-0.5 rounded-[var(--radius-md)] border px-3 py-2 text-left transition-colors ${
-                  fidelity === 'wireframe'
-                    ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
-                    : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
-                }`}
-              >
-                <span className="text-[var(--text-sm)] font-medium text-[var(--color-text-primary)]">
-                  {t('create.fields.fidelityWireframe')}
-                </span>
-                <span className="text-[var(--text-xs)] text-[var(--color-text-secondary)] leading-snug">
-                  {t('create.fields.fidelityWireframeHint')}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setFidelity('high')}
-                className={`flex flex-col items-start gap-0.5 rounded-[var(--radius-md)] border px-3 py-2 text-left transition-colors ${
-                  fidelity === 'high'
-                    ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
-                    : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
-                }`}
-              >
-                <span className="text-[var(--text-sm)] font-medium text-[var(--color-text-primary)]">
-                  {t('create.fields.fidelityHigh')}
-                </span>
-                <span className="text-[var(--text-xs)] text-[var(--color-text-secondary)] leading-snug">
-                  {t('create.fields.fidelityHighHint')}
-                </span>
-              </button>
-            </div>
+          {/* Type selector */}
+          <div className="grid grid-cols-4 gap-2">
+            {KIND_ORDER.map((k) => {
+              const { icon: Icon, color } = KIND_META[k];
+              const active = k === kind;
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setKind(k)}
+                  className={`
+                    flex flex-col items-center gap-1.5 rounded-[var(--radius-md)] border py-3 px-2 text-center transition-colors
+                    ${active
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+                      : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
+                    }
+                  `}
+                >
+                  <Icon
+                    className="w-4 h-4 shrink-0"
+                    style={{ color: active ? color : 'var(--color-text-muted)' }}
+                    aria-hidden
+                  />
+                  <span
+                    className="text-[11px] leading-tight font-medium"
+                    style={{ color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}
+                  >
+                    {t(`create.types.${k}`)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-        ) : null}
 
-        {kind === 'slideDeck' ? (
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={speakerNotes}
-              onChange={(e) => setSpeakerNotes(e.target.checked)}
-              className="mt-0.5"
-            />
-            <span className="space-y-0.5">
-              <span className="block text-[var(--text-sm)] font-medium text-[var(--color-text-primary)]">
+          {/* Fidelity (prototype only) */}
+          {kind === 'prototype' ? (
+            <div className="grid grid-cols-2 gap-2">
+              {(['wireframe', 'high'] as Fidelity[]).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setFidelity(f)}
+                  className={`
+                    flex flex-col gap-0.5 rounded-[var(--radius-md)] border px-3 py-2.5 text-left transition-colors
+                    ${fidelity === f
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+                      : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
+                    }
+                  `}
+                >
+                  <span className="text-[var(--text-xs)] font-medium text-[var(--color-text-primary)]">
+                    {t(`create.fields.fidelity${f === 'wireframe' ? 'Wireframe' : 'High'}`)}
+                  </span>
+                  <span className="text-[11px] text-[var(--color-text-muted)] leading-snug">
+                    {t(`create.fields.fidelity${f === 'wireframe' ? 'Wireframe' : 'High'}Hint`)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {/* Speaker notes (slide deck only) */}
+          {kind === 'slideDeck' ? (
+            <label className="flex items-center gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={speakerNotes}
+                onChange={(e) => setSpeakerNotes(e.target.checked)}
+                className="w-4 h-4 rounded accent-[var(--color-accent)]"
+              />
+              <span className="text-[var(--text-sm)] text-[var(--color-text-primary)]">
                 {t('create.fields.speakerNotes')}
               </span>
-              <span className="block text-[var(--text-xs)] text-[var(--color-text-secondary)] leading-snug">
-                {t('create.fields.speakerNotesHint')}
-              </span>
-            </span>
-          </label>
-        ) : null}
+            </label>
+          ) : null}
 
-        <div className="flex items-center justify-end gap-2 pt-2">
-          <button
-            type="button"
-            onClick={() => close()}
-            disabled={creating}
-            className="h-9 px-3 rounded-[var(--radius-md)] text-[var(--text-sm)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] disabled:opacity-50 transition-colors"
-          >
-            {t('create.close')}
-          </button>
+          {/* CTA */}
           <button
             type="button"
             onClick={() => void handleCreate()}
             disabled={creating}
-            className="h-9 px-4 rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[var(--text-sm)] font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+            className="w-full h-10 rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[var(--text-sm)] font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
           >
-            {t('create.cta')}
+            {creating ? t('create.creating') : t('create.cta')}
           </button>
         </div>
       </div>

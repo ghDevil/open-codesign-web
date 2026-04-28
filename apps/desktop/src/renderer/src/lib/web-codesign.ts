@@ -728,6 +728,19 @@ function installWebCodesign(): void {
         return { exists: Boolean(design?.workspacePath) };
       },
     },
+    folders: {
+      list: () => apiJson<{ folders: import('@open-codesign/shared').Folder[] }>('/api/folders'),
+      create: (name: string) => apiJson('/api/folders', { method: 'POST', body: { name } }),
+      rename: (id: string, name: string) =>
+        apiJson(`/api/folders/${encodeURIComponent(id)}`, { method: 'PATCH', body: { name } }),
+      delete: (id: string) =>
+        apiJson(`/api/folders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+      moveDesign: (designId: string, folderId: string | null) =>
+        apiJson(`/api/designs/${encodeURIComponent(designId)}/folder`, {
+          method: 'PATCH',
+          body: { folderId },
+        }),
+    },
     files: {
       list: (designId: string) =>
         apiJson<DesignFile[]>(`/api/designs/${encodeURIComponent(designId)}/files`),

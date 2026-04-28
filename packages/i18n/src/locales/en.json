@@ -1055,6 +1055,19 @@
     "newDesignCardTitle": "Start a new design",
     "newDesignCardSub": "Blank canvas · AI generated",
     "backToHub": "All designs",
+    "home": {
+      "greeting": "What will you build today?",
+      "subtitle": "Describe anything — a landing page, dashboard, mobile app, deck — and watch it come to life.",
+      "recentLabel": "Recent",
+      "seeAll": "See all",
+      "startFromLabel": "Start from an example",
+      "browseAll": "Browse all"
+    },
+    "nav": {
+      "home": "Home",
+      "examples": "Examples",
+      "designSystems": "Design systems"
+    },
     "tabs": {
       "recent": "Recent",
       "your": "Your designs",
@@ -1076,6 +1089,7 @@
     },
     "designSystems": {
       "title": "Design systems",
+      "subtitle": "Connect your design tokens so every generation uses your brand colors, fonts, and spacing.",
       "comingSoon": "Reusable brand systems and templates are on the way."
     },
     "card": {
@@ -1096,8 +1110,9 @@
     "subtitle": "Pick a type so we can tailor the first prompt.",
     "close": "Close",
     "types": {
-      "prototype": "Prototype",
-      "slideDeck": "Slide deck",
+      "prototype": "Web",
+      "mobile": "Mobile",
+      "slideDeck": "Deck",
       "template": "From template",
       "other": "Other"
     },
@@ -1122,6 +1137,7 @@
       "templateHint": "Choose a starter — the first prompt will be pre-filled."
     },
     "cta": "Create",
+    "creating": "Creating…",
     "disabledHint": "Add a project name to continue.",
     "help": {
       "share": "Designs stay on this device. Sharing happens through bundle export — no cloud account needed.",

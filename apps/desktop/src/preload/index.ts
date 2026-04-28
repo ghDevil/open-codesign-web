@@ -550,6 +550,13 @@ const api = {
         designId,
       }) as Promise<{ exists: boolean }>,
   },
+  folders: {
+    list: () => Promise.resolve({ folders: [] as import('@open-codesign/shared').Folder[] }),
+    create: (_name: string) => Promise.resolve({ folder: null }),
+    rename: (_id: string, _name: string) => Promise.resolve({ ok: true }),
+    delete: (_id: string) => Promise.resolve({ ok: true }),
+    moveDesign: (_designId: string, _folderId: string | null) => Promise.resolve({ ok: true }),
+  },
   files: {
     list: (designId: string) =>
       ipcRenderer.invoke('files:v1:list', {
