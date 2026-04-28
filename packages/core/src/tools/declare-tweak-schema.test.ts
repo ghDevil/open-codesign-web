@@ -39,7 +39,12 @@ describe('declare_tweak_schema tool', () => {
     const tool = makeDeclareTweakSchemaTool(fs);
     const res = await tool.execute('id1', {
       schema: {
-        accent: { kind: 'color' },
+        accent: {
+          kind: 'color',
+          label: 'Accent color',
+          description: 'Primary call-to-action color',
+          group: 'Color',
+        },
         radius: { kind: 'number', min: 0, max: 32, step: 2, unit: 'px' },
       },
     });
@@ -48,7 +53,12 @@ describe('declare_tweak_schema tool', () => {
     const after = fs.view('index.html');
     if (!after) throw new Error('expected index.html to exist');
     expect(parseTweakSchema(after.content)).toEqual({
-      accent: { kind: 'color' },
+      accent: {
+        kind: 'color',
+        label: 'Accent color',
+        description: 'Primary call-to-action color',
+        group: 'Color',
+      },
       radius: { kind: 'number', min: 0, max: 32, step: 2, unit: 'px' },
     });
   });

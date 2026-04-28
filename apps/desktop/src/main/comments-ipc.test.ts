@@ -176,6 +176,30 @@ describe('comments-ipc validation', () => {
     expect(applied[0]?.status).toBe('applied');
   });
 
+  it('update accepts scope changes for saved comments', () => {
+    const { db, designId, snapshotId } = baseFixture();
+    registerCommentsIpc(db);
+    const row = invoke('comments:v1:add', {
+      schemaVersion: 1,
+      designId,
+      snapshotId,
+      kind: 'edit',
+      selector: 'button',
+      tag: 'button',
+      outerHTML: '<button/>',
+      rect: { top: 0, left: 0, width: 0, height: 0 },
+      text: 'make it stronger',
+    }) as { id: string; scope: string };
+
+    const updated = invoke('comments:v1:update', {
+      schemaVersion: 1,
+      id: row.id,
+      scope: 'global',
+    }) as { scope: string };
+
+    expect(updated.scope).toBe('global');
+  });
+
   it('remove returns {removed:true} when hit', () => {
     const { db, designId, snapshotId } = baseFixture();
     registerCommentsIpc(db);

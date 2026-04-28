@@ -22,8 +22,22 @@ function isColorString(value: unknown): value is string {
   return typeof value === 'string' && CSS_COLOR_RE.test(value.trim());
 }
 
-function isNativeColorInputValue(value: string): boolean {
-  return HEX_RE.test(value.trim());
+/** Convert any CSS color string to #rrggbb for use with <input type="color">.
+ *  Uses a canvas element — works for oklch, hsl, rgb, named colors, everything the browser supports. */
+function cssColorToHex(cssColor: string): string {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '#000000';
+    ctx.fillStyle = cssColor;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+    return `#${(r ?? 0).toString(16).padStart(2, '0')}${(g ?? 0).toString(16).padStart(2, '0')}${(b ?? 0).toString(16).padStart(2, '0')}`;
+  } catch {
+    return '#000000';
+  }
 }
 
 function humanize(key: string): string {
@@ -32,6 +46,49 @@ function humanize(key: string): string {
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function labelForToken(tokenKey: string, schemaEntry?: TokenSchemaEntry): string {
+  return schemaEntry?.label?.trim() || humanize(tokenKey);
+}
+
+function descriptionForToken(schemaEntry?: TokenSchemaEntry): string | null {
+  const description = schemaEntry?.description?.trim();
+  return description && description.length > 0 ? description : null;
+}
+
+function inferGroupName(
+  tokenKey: string,
+  value: TokenValue,
+  schemaEntry?: TokenSchemaEntry,
+): string {
+  const explicit = schemaEntry?.group?.trim();
+  if (explicit && explicit.length > 0) return explicit;
+
+  const normalized = tokenKey.toLowerCase();
+  if (
+    isColorString(value) ||
+    /(accent|color|bg|background|surface|border|stroke|shadow|tone|fill)/.test(normalized)
+  ) {
+    return 'Color';
+  }
+  if (/(font|type|headline|heading|title|body|label|text)/.test(normalized)) {
+    return 'Typography';
+  }
+  if (/(space|gap|padding|margin|radius|width|height|size|layout|grid|column)/.test(normalized)) {
+    return 'Layout';
+  }
+  if (/(show|hide|enable|disable|variant|mode|density|toggle|state|tab|panel)/.test(normalized)) {
+    return 'Behavior';
+  }
+  if (/(hero|card|nav|footer|cta|image|media|copy|caption|content)/.test(normalized)) {
+    return 'Content';
+  }
+  return 'Misc';
+}
+
+function valuesEqual(left: TokenValue, right: TokenValue): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function ColorSwatch({
@@ -43,31 +100,24 @@ function ColorSwatch({
   onChange: (next: string) => void;
   pickColorLabel: string;
 }) {
-  const canPickNatively = isNativeColorInputValue(value);
-  const swatchClassName = `relative inline-flex h-[28px] w-[28px] shrink-0 overflow-hidden rounded-[var(--radius-sm)] shadow-[var(--shadow-inset-soft)] transition-transform duration-[var(--duration-faster)] ${
-    canPickNatively
-      ? 'cursor-pointer hover:scale-[1.04] active:scale-[var(--scale-press-down)]'
-      : 'cursor-default'
-  }`;
-  const swatchFill = (
-    <span className="block h-full w-full" style={{ backgroundColor: value }} aria-hidden="true" />
-  );
+  // Always convert to hex for the native picker — works for oklch, hsl, rgb, named colors
+  const hexValue = HEX_RE.test(value.trim()) ? value.trim() : cssColorToHex(value);
+
+  const swatchClassName =
+    'relative inline-flex h-[28px] w-[28px] shrink-0 overflow-hidden rounded-[var(--radius-sm)] shadow-[var(--shadow-inset-soft)] transition-transform duration-[var(--duration-faster)] cursor-pointer hover:scale-[1.04] active:scale-[var(--scale-press-down)]';
+
   return (
     <div className="flex items-center gap-[var(--space-2)]">
-      {canPickNatively ? (
-        <label className={swatchClassName}>
-          {swatchFill}
-          <input
-            type="color"
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            className="absolute inset-0 cursor-pointer opacity-0"
-            aria-label={pickColorLabel}
-          />
-        </label>
-      ) : (
-        <div className={swatchClassName}>{swatchFill}</div>
-      )}
+      <label className={swatchClassName}>
+        <span className="block h-full w-full" style={{ backgroundColor: value }} aria-hidden="true" />
+        <input
+          type="color"
+          value={hexValue}
+          onChange={(e) => onChange(e.target.value)}
+          className="absolute inset-0 cursor-pointer opacity-0"
+          aria-label={pickColorLabel}
+        />
+      </label>
       <input
         type="text"
         value={value}
@@ -112,9 +162,11 @@ function Switch({
 function NumberInput({
   value,
   onChange,
+  className,
 }: {
   value: number;
   onChange: (next: number) => void;
+  className?: string | undefined;
 }) {
   const [text, setText] = useState(String(value));
   useEffect(() => {
@@ -130,7 +182,7 @@ function NumberInput({
         const n = Number(e.target.value);
         if (!Number.isNaN(n) && e.target.value.trim() !== '') onChange(n);
       }}
-      className="w-full rounded-[var(--radius-sm)] border border-transparent bg-[var(--color-surface-hover)] px-[var(--space-2)] py-[6px] text-right text-[12px] text-[var(--color-text-primary)] transition-colors duration-[var(--duration-faster)] hover:bg-[var(--color-surface-active)] focus:border-[var(--color-accent)] focus:bg-[var(--color-surface)] focus:outline-none"
+      className={`w-full rounded-[var(--radius-sm)] border border-transparent bg-[var(--color-surface-hover)] px-[var(--space-2)] py-[6px] text-right text-[12px] text-[var(--color-text-primary)] transition-colors duration-[var(--duration-faster)] hover:bg-[var(--color-surface-active)] focus:border-[var(--color-accent)] focus:bg-[var(--color-surface)] focus:outline-none ${className ?? ''}`}
       style={{ fontFamily: 'var(--font-mono)', fontFeatureSettings: "'tnum'" }}
     />
   );
@@ -142,6 +194,7 @@ function RangeSlider({
   max,
   step,
   unit,
+  showReadout = true,
   onChange,
 }: {
   value: number;
@@ -149,6 +202,7 @@ function RangeSlider({
   max: number;
   step: number;
   unit?: string | undefined;
+  showReadout?: boolean | undefined;
   onChange: (next: number) => void;
 }) {
   return (
@@ -162,13 +216,15 @@ function RangeSlider({
         onChange={(e) => onChange(Number(e.target.value))}
         className="h-[4px] min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-[var(--color-surface-active)] accent-[var(--color-accent)]"
       />
-      <span
-        className="min-w-[44px] text-right text-[11px] text-[var(--color-text-secondary)]"
-        style={{ fontFamily: 'var(--font-mono)', fontFeatureSettings: "'tnum'" }}
-      >
-        {value}
-        {unit ?? ''}
-      </span>
+      {showReadout ? (
+        <span
+          className="min-w-[44px] text-right text-[11px] text-[var(--color-text-secondary)]"
+          style={{ fontFamily: 'var(--font-mono)', fontFeatureSettings: "'tnum'" }}
+        >
+          {value}
+          {unit ?? ''}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -230,6 +286,27 @@ function TextInput({
   );
 }
 
+function TextAreaInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string | undefined;
+}) {
+  return (
+    <textarea
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      spellCheck={false}
+      rows={3}
+      placeholder={placeholder}
+      className="min-h-[76px] w-full resize-y rounded-[var(--radius-sm)] border border-transparent bg-[var(--color-surface-hover)] px-[var(--space-2)] py-[8px] text-[12px] leading-[1.45] text-[var(--color-text-primary)] transition-colors duration-[var(--duration-faster)] hover:bg-[var(--color-surface-active)] focus:border-[var(--color-accent)] focus:bg-[var(--color-surface)] focus:outline-none"
+    />
+  );
+}
+
 function JsonInput({
   value,
   onChange,
@@ -271,37 +348,89 @@ function JsonInput({
 function TokenRow({
   tokenKey,
   value,
+  initialValue,
   onChange,
+  onReset,
   pickColorLabel,
   schemaEntry,
 }: {
   tokenKey: string;
   value: TokenValue;
+  initialValue: TokenValue;
   onChange: (next: TokenValue) => void;
+  onReset: () => void;
   pickColorLabel: string;
   schemaEntry?: TokenSchemaEntry | undefined;
 }) {
-  const labelText = humanize(tokenKey);
+  const labelText = labelForToken(tokenKey, schemaEntry);
+  const description = descriptionForToken(schemaEntry);
+  const isDirty = !valuesEqual(value, initialValue);
+
+  const header = (
+    <div className="flex items-start justify-between gap-[var(--space-2)]">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[12px] text-[var(--color-text-primary)]">{labelText}</div>
+        {description ? (
+          <div className="mt-[2px] text-[11px] leading-[1.45] text-[var(--color-text-muted)]">
+            {description}
+          </div>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        onClick={onReset}
+        title={`Reset ${labelText}`}
+        aria-label={`Reset ${labelText}`}
+        disabled={!isDirty}
+        className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-secondary)] transition-colors duration-[var(--duration-faster)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] disabled:pointer-events-none disabled:opacity-25"
+      >
+        <RotateCcw className="h-[11px] w-[11px]" aria-hidden="true" />
+      </button>
+    </div>
+  );
 
   // Schema-driven render — agent declared the control kind explicitly.
   if (schemaEntry) {
     if (schemaEntry.kind === 'boolean') {
       const v = typeof value === 'boolean' ? value : Boolean(value);
       return (
-        <div className="flex items-center justify-between gap-[var(--space-3)] py-[var(--space-1_5)]">
-          <span className="truncate text-[12px] text-[var(--color-text-primary)]">{labelText}</span>
-          <Switch checked={v} onChange={(next) => onChange(next)} label={labelText} />
+        <div
+          className={`flex items-center justify-between gap-[var(--space-3)] rounded-[var(--radius-md)] px-[var(--space-2)] py-[var(--space-2)] ${
+            isDirty ? 'bg-[var(--color-surface-hover)]' : ''
+          }`}
+        >
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[12px] text-[var(--color-text-primary)]">{labelText}</div>
+            {description ? (
+              <div className="mt-[2px] text-[11px] leading-[1.45] text-[var(--color-text-muted)]">
+                {description}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-[var(--space-1_5)]">
+            <button
+              type="button"
+              onClick={onReset}
+              title={`Reset ${labelText}`}
+              aria-label={`Reset ${labelText}`}
+              disabled={!isDirty}
+              className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-secondary)] transition-colors duration-[var(--duration-faster)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)] disabled:pointer-events-none disabled:opacity-25"
+            >
+              <RotateCcw className="h-[11px] w-[11px]" aria-hidden="true" />
+            </button>
+            <Switch checked={v} onChange={(next) => onChange(next)} label={labelText} />
+          </div>
         </div>
       );
     }
+
     return (
-      <div className="flex flex-col gap-[var(--space-1_5)] py-[var(--space-1)]">
-        <span
-          className="text-[10px] uppercase text-[var(--color-text-muted)]"
-          style={{ letterSpacing: 'var(--tracking-label)' }}
-        >
-          {labelText}
-        </span>
+      <div
+        className={`flex flex-col gap-[var(--space-2)] rounded-[var(--radius-md)] px-[var(--space-2)] py-[var(--space-2)] ${
+          isDirty ? 'bg-[var(--color-surface-hover)]' : ''
+        }`}
+      >
+        {header}
         {schemaEntry.kind === 'color' ? (
           <ColorSwatch
             value={typeof value === 'string' ? value : '#000000'}
@@ -309,19 +438,33 @@ function TokenRow({
             pickColorLabel={pickColorLabel}
           />
         ) : schemaEntry.kind === 'number' ? (
-          <RangeSlider
-            value={typeof value === 'number' ? value : 0}
-            min={schemaEntry.min ?? 0}
-            max={schemaEntry.max ?? 100}
-            step={schemaEntry.step ?? 1}
-            unit={schemaEntry.unit}
-            onChange={(v) => onChange(v)}
-          />
+          <div className="flex items-center gap-[var(--space-2)]">
+            <div className="min-w-0 flex-1">
+              <RangeSlider
+                value={typeof value === 'number' ? value : 0}
+                min={schemaEntry.min ?? 0}
+                max={schemaEntry.max ?? 100}
+                step={schemaEntry.step ?? 1}
+                unit={schemaEntry.unit}
+                showReadout={false}
+                onChange={(v) => onChange(v)}
+              />
+            </div>
+            <div className="w-[76px] shrink-0">
+              <NumberInput value={typeof value === 'number' ? value : 0} onChange={(v) => onChange(v)} />
+            </div>
+          </div>
         ) : schemaEntry.kind === 'enum' ? (
           <SegmentedPicker
             value={typeof value === 'string' ? value : (schemaEntry.options[0] ?? '')}
             options={schemaEntry.options}
             onChange={(v) => onChange(v)}
+          />
+        ) : schemaEntry.kind === 'string' && schemaEntry.multiline ? (
+          <TextAreaInput
+            value={typeof value === 'string' ? value : ''}
+            onChange={(v) => onChange(v)}
+            placeholder={schemaEntry.placeholder}
           />
         ) : (
           <TextInput
@@ -337,21 +480,36 @@ function TokenRow({
   // Fallback heuristic — same as before.
   if (typeof value === 'boolean') {
     return (
-      <div className="flex items-center justify-between gap-[var(--space-3)] py-[var(--space-1_5)]">
-        <span className="truncate text-[12px] text-[var(--color-text-primary)]">{labelText}</span>
-        <Switch checked={value} onChange={(v) => onChange(v)} label={labelText} />
+      <div
+        className={`flex items-center justify-between gap-[var(--space-3)] rounded-[var(--radius-md)] px-[var(--space-2)] py-[var(--space-2)] ${
+          isDirty ? 'bg-[var(--color-surface-hover)]' : ''
+        }`}
+      >
+        <div className="truncate text-[12px] text-[var(--color-text-primary)]">{labelText}</div>
+        <div className="flex items-center gap-[var(--space-1_5)]">
+          <button
+            type="button"
+            onClick={onReset}
+            title={`Reset ${labelText}`}
+            aria-label={`Reset ${labelText}`}
+            disabled={!isDirty}
+            className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-secondary)] transition-colors duration-[var(--duration-faster)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)] disabled:pointer-events-none disabled:opacity-25"
+          >
+            <RotateCcw className="h-[11px] w-[11px]" aria-hidden="true" />
+          </button>
+          <Switch checked={value} onChange={(v) => onChange(v)} label={labelText} />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-[var(--space-1_5)] py-[var(--space-1)]">
-      <span
-        className="text-[10px] uppercase text-[var(--color-text-muted)]"
-        style={{ letterSpacing: 'var(--tracking-label)' }}
-      >
-        {labelText}
-      </span>
+    <div
+      className={`flex flex-col gap-[var(--space-2)] rounded-[var(--radius-md)] px-[var(--space-2)] py-[var(--space-2)] ${
+        isDirty ? 'bg-[var(--color-surface-hover)]' : ''
+      }`}
+    >
+      {header}
       {isColorString(value) ? (
         <ColorSwatch value={value} onChange={(v) => onChange(v)} pickColorLabel={pickColorLabel} />
       ) : typeof value === 'number' ? (
@@ -374,6 +532,7 @@ export function TweakPanel({
   const previewHtml = useCodesignStore((s) => s.previewHtml);
   const setPreviewHtml = useCodesignStore((s) => s.setPreviewHtml);
   const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState('');
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Drag-to-reposition state. Null = default anchored position (top-right).
@@ -548,6 +707,45 @@ export function TweakPanel({
   const entries = liveTokens ? Object.entries(liveTokens) : [];
   const hasTokens = entries.length > 0;
 
+  const groupedEntries = useMemo(() => {
+    const query = filter.trim().toLowerCase();
+    const groups = new Map<
+      string,
+      Array<{ key: string; value: TokenValue; schemaEntry: TokenSchemaEntry | undefined; label: string }>
+    >();
+
+    for (const [key, value] of entries) {
+      const schemaEntry = schema?.[key];
+      const label = labelForToken(key, schemaEntry);
+      const description = descriptionForToken(schemaEntry) ?? '';
+      const group = inferGroupName(key, value, schemaEntry);
+      const haystack = `${key} ${label} ${group} ${description}`.toLowerCase();
+      if (query.length > 0 && !haystack.includes(query)) continue;
+      const bucket = groups.get(group) ?? [];
+      bucket.push({ key, value, schemaEntry, label });
+      groups.set(group, bucket);
+    }
+
+    const order = ['Color', 'Typography', 'Layout', 'Content', 'Behavior', 'Misc'];
+    return [...groups.entries()]
+      .sort(([left], [right]) => {
+        const leftIndex = order.indexOf(left);
+        const rightIndex = order.indexOf(right);
+        if (leftIndex !== -1 || rightIndex !== -1) {
+          if (leftIndex === -1) return 1;
+          if (rightIndex === -1) return -1;
+          return leftIndex - rightIndex;
+        }
+        return left.localeCompare(right);
+      })
+      .map(([group, rows]) => ({
+        group,
+        rows: rows.sort((left, right) => left.label.localeCompare(right.label)),
+      }));
+  }, [entries, filter, schema]);
+
+  const visibleCount = groupedEntries.reduce((sum, group) => sum + group.rows.length, 0);
+
   function postLive(tokens: Tokens): void {
     const win = iframeRef.current?.contentWindow;
     if (!win) return;
@@ -574,6 +772,11 @@ export function TweakPanel({
     applyTokens({ ...liveTokens, [key]: next });
   }
 
+  function resetKey(key: string): void {
+    if (!liveTokens || !initialTokensRef.current) return;
+    applyTokens({ ...liveTokens, [key]: initialTokensRef.current[key] });
+  }
+
   function reset(): void {
     if (initialTokensRef.current) applyTokens({ ...initialTokensRef.current });
   }
@@ -589,7 +792,11 @@ export function TweakPanel({
   const pickColorLabel = t('tweaks.pickColor');
   const emptyTitle = t('tweaks.emptyTitle');
   const emptyHint = t('tweaks.emptyHint');
-  const countBadge = hasTokens ? String(entries.length) : '—';
+  const countBadge = hasTokens
+    ? filter.trim().length > 0
+      ? `${visibleCount}/${entries.length}`
+      : String(entries.length)
+    : '—';
 
   return (
     <div
@@ -649,18 +856,58 @@ export function TweakPanel({
           </div>
 
           {hasTokens ? (
-            <div className="flex max-h-[60vh] flex-col gap-[var(--space-1)] overflow-y-auto px-[var(--space-3)] py-[var(--space-2)]">
-              {entries.map(([key, value]) => (
-                <TokenRow
-                  key={key}
-                  tokenKey={key}
-                  value={value}
-                  onChange={(next) => applyChange(key, next)}
-                  pickColorLabel={pickColorLabel}
-                  schemaEntry={schema?.[key]}
+            <>
+              <div className="border-b border-[var(--color-border-subtle)] px-[var(--space-3)] py-[var(--space-2)]">
+                <input
+                  type="text"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Filter tweaks"
+                  spellCheck={false}
+                  className="w-full rounded-[var(--radius-sm)] border border-transparent bg-[var(--color-surface-hover)] px-[var(--space-2)] py-[7px] text-[12px] text-[var(--color-text-primary)] transition-colors duration-[var(--duration-faster)] hover:bg-[var(--color-surface-active)] focus:border-[var(--color-accent)] focus:bg-[var(--color-surface)] focus:outline-none"
                 />
-              ))}
-            </div>
+              </div>
+              <div className="flex max-h-[60vh] flex-col gap-[var(--space-3)] overflow-y-auto px-[var(--space-3)] py-[var(--space-3)]">
+                {visibleCount > 0 ? (
+                  groupedEntries.map(({ group, rows }) => (
+                    <section key={group} className="flex flex-col gap-[var(--space-1_5)]">
+                      <div className="flex items-center justify-between gap-[var(--space-2)]">
+                        <span
+                          className="text-[10px] uppercase text-[var(--color-text-muted)]"
+                          style={{ letterSpacing: 'var(--tracking-label)' }}
+                        >
+                          {group}
+                        </span>
+                        <span
+                          className="text-[10px] text-[var(--color-text-muted)]"
+                          style={{ fontFamily: 'var(--font-mono)', fontFeatureSettings: "'tnum'" }}
+                        >
+                          {rows.length}
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-[var(--space-1_5)]">
+                        {rows.map(({ key, value, schemaEntry }) => (
+                          <TokenRow
+                            key={key}
+                            tokenKey={key}
+                            value={value}
+                            initialValue={initialTokensRef.current?.[key]}
+                            onChange={(next) => applyChange(key, next)}
+                            onReset={() => resetKey(key)}
+                            pickColorLabel={pickColorLabel}
+                            schemaEntry={schemaEntry}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  ))
+                ) : (
+                  <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-[var(--space-3)] py-[var(--space-3)] text-[11px] leading-[var(--leading-snug)] text-[var(--color-text-muted)]">
+                    No tweak controls match this filter.
+                  </div>
+                )}
+              </div>
+            </>
           ) : (
             <div className="flex flex-col items-start gap-[var(--space-1_5)] px-[var(--space-3)] py-[var(--space-3)]">
               <div className="text-[12px] font-medium text-[var(--color-text-primary)]">

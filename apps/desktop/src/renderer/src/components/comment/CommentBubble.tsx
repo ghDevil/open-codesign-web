@@ -1,4 +1,5 @@
 import { useT } from '@open-codesign/i18n';
+import type { CommentScope } from '@open-codesign/shared';
 import { Send, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -9,12 +10,13 @@ export interface CommentBubbleProps {
   outerHTML: string;
   rect: { top: number; left: number; width: number; height: number };
   initialText?: string;
+  initialScope?: CommentScope;
   /** Called on every keystroke so the host (PreviewPane) can persist an
    *  unsent draft keyed by anchor id. Without this, switching to a different
    *  chip / element silently discarded the current text. */
   onDraftChange?: (text: string) => void;
   onClose: () => void;
-  onSendToClaude: (text: string) => Promise<void> | void;
+  onSendToClaude: (text: string, scope: CommentScope) => Promise<void> | void;
 }
 
 /** English fallback text for each quick action id — sent to the LLM. */
@@ -34,12 +36,14 @@ export function CommentBubble({
   outerHTML,
   rect,
   initialText,
+  initialScope,
   onDraftChange,
   onClose,
   onSendToClaude,
 }: CommentBubbleProps) {
   const t = useT();
   const [draft, setDraft] = useState(initialText ?? '');
+  const [scope, setScope] = useState<CommentScope>(initialScope ?? 'element');
   const [pending, setPending] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -48,6 +52,14 @@ export function CommentBubble({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    setDraft(initialText ?? '');
+  }, [initialText]);
+
+  useEffect(() => {
+    setScope(initialScope ?? 'element');
+  }, [initialScope]);
 
   useEffect(() => {
     // Esc + the × button are the only ways to close. The previous mousedown-
@@ -69,7 +81,7 @@ export function CommentBubble({
     if (!text || pending) return;
     setPending(true);
     try {
-      await onSendToClaude(text);
+      await onSendToClaude(text, scope);
     } finally {
       setPending(false);
     }
@@ -116,6 +128,32 @@ export function CommentBubble({
 
       {/* Input + submit */}
       <div className="p-[var(--space-3)]">
+        <fieldset className="mb-[var(--space-2)] space-y-[var(--space-1_5)]">
+          <legend className="text-[11px] font-medium text-[var(--color-text-secondary)]">
+            {t('commentBubble.scope.legend')}
+          </legend>
+          <div className="inline-flex rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] p-[3px]">
+            {(['element', 'global'] as const).map((value) => {
+              const active = scope === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setScope(value)}
+                  disabled={pending}
+                  aria-pressed={active}
+                  className={`rounded-[10px] px-[10px] py-[6px] text-[11px] font-medium transition-colors duration-150 ${
+                    active
+                      ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)] shadow-sm'
+                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]'
+                  }`}
+                >
+                  {t(`commentBubble.scope.${value}`)}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
         <div className="relative">
           <textarea
             ref={textareaRef}

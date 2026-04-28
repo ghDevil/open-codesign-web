@@ -155,12 +155,24 @@ export function ensureEditmodeMarkers(source: string): string {
 // invalid blocks degrade silently.
 // ---------------------------------------------------------------------------
 
+interface TokenSchemaMeta {
+  label?: string;
+  description?: string;
+  group?: string;
+}
+
 export type TokenSchemaEntry =
-  | { kind: 'color' }
-  | { kind: 'number'; min?: number; max?: number; step?: number; unit?: string }
-  | { kind: 'enum'; options: string[] }
-  | { kind: 'boolean' }
-  | { kind: 'string'; placeholder?: string };
+  | (TokenSchemaMeta & { kind: 'color' })
+  | (TokenSchemaMeta & {
+      kind: 'number';
+      min?: number;
+      max?: number;
+      step?: number;
+      unit?: string;
+    })
+  | (TokenSchemaMeta & { kind: 'enum'; options: string[] })
+  | (TokenSchemaMeta & { kind: 'boolean' })
+  | (TokenSchemaMeta & { kind: 'string'; placeholder?: string; multiline?: boolean });
 
 export type TweakSchema = Record<string, TokenSchemaEntry>;
 
@@ -168,14 +180,26 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function assignCommonSchemaMeta(
+  source: Record<string, unknown>,
+  target: { label?: string; description?: string; group?: string },
+): void {
+  if (typeof source['label'] === 'string') target.label = source['label'];
+  if (typeof source['description'] === 'string') target.description = source['description'];
+  if (typeof source['group'] === 'string') target.group = source['group'];
+}
+
 function validateEntry(value: unknown): TokenSchemaEntry | null {
   if (!isPlainObject(value)) return null;
   const kind = value['kind'];
   if (kind === 'color' || kind === 'boolean') {
-    return { kind };
+    const out = { kind } as TokenSchemaEntry;
+    assignCommonSchemaMeta(value, out);
+    return out;
   }
   if (kind === 'number') {
     const out: TokenSchemaEntry = { kind: 'number' };
+    assignCommonSchemaMeta(value, out);
     if (typeof value['min'] === 'number') out.min = value['min'];
     if (typeof value['max'] === 'number') out.max = value['max'];
     if (typeof value['step'] === 'number') out.step = value['step'];
@@ -187,11 +211,15 @@ function validateEntry(value: unknown): TokenSchemaEntry | null {
     if (!Array.isArray(options)) return null;
     const opts = options.filter((o): o is string => typeof o === 'string');
     if (opts.length === 0) return null;
-    return { kind: 'enum', options: opts };
+    const out: TokenSchemaEntry = { kind: 'enum', options: opts };
+    assignCommonSchemaMeta(value, out);
+    return out;
   }
   if (kind === 'string') {
     const out: TokenSchemaEntry = { kind: 'string' };
+    assignCommonSchemaMeta(value, out);
     if (typeof value['placeholder'] === 'string') out.placeholder = value['placeholder'];
+    if (typeof value['multiline'] === 'boolean') out.multiline = value['multiline'];
     return out;
   }
   return null;

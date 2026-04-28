@@ -102,18 +102,23 @@ describe('replaceEditmodeBlock', () => {
 describe('parseTweakSchema', () => {
   it('parses each kind of entry', () => {
     const src = `const TWEAK_SCHEMA = /*TWEAK-SCHEMA-BEGIN*/{
-      "accentColor": { "kind": "color" },
+      "accentColor": { "kind": "color", "label": "Accent", "description": "Primary brand color", "group": "Color" },
       "radius": { "kind": "number", "min": 0, "max": 32, "step": 2, "unit": "px" },
       "density": { "kind": "enum", "options": ["compact", "comfortable"] },
       "showFooter": { "kind": "boolean" },
-      "caption": { "kind": "string", "placeholder": "Footer line" }
+      "caption": { "kind": "string", "placeholder": "Footer line", "multiline": true, "group": "Content" }
     }/*TWEAK-SCHEMA-END*/;`;
     expect(parseTweakSchema(src)).toEqual({
-      accentColor: { kind: 'color' },
+      accentColor: {
+        kind: 'color',
+        label: 'Accent',
+        description: 'Primary brand color',
+        group: 'Color',
+      },
       radius: { kind: 'number', min: 0, max: 32, step: 2, unit: 'px' },
       density: { kind: 'enum', options: ['compact', 'comfortable'] },
       showFooter: { kind: 'boolean' },
-      caption: { kind: 'string', placeholder: 'Footer line' },
+      caption: { kind: 'string', placeholder: 'Footer line', multiline: true, group: 'Content' },
     });
   });
 

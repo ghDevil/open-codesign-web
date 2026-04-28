@@ -42,12 +42,16 @@ const SchemaEntry = Type.Object({
     Type.Literal('boolean'),
     Type.Literal('string'),
   ]),
+  label: Type.Optional(Type.String()),
+  description: Type.Optional(Type.String()),
+  group: Type.Optional(Type.String()),
   min: Type.Optional(Type.Number()),
   max: Type.Optional(Type.Number()),
   step: Type.Optional(Type.Number()),
   unit: Type.Optional(Type.String()),
   options: Type.Optional(Type.Array(Type.String())),
   placeholder: Type.Optional(Type.String()),
+  multiline: Type.Optional(Type.Boolean()),
 });
 
 const DeclareTweakSchemaParams = Type.Object({
@@ -76,7 +80,8 @@ export function makeDeclareTweakSchemaTool(
     description:
       'Declare UI control hints for tokens already present in TWEAK_DEFAULTS. ' +
       'Each entry picks a control: { kind: "color" } | { kind: "number", min, max, step, unit } | ' +
-      '{ kind: "enum", options: [...] } | { kind: "boolean" } | { kind: "string", placeholder }. ' +
+      '{ kind: "enum", options: [...] } | { kind: "boolean" } | { kind: "string", placeholder, multiline }. ' +
+      'Optional metadata: { label, description, group }. ' +
       'Call AFTER writing TWEAK_DEFAULTS. The host injects/replaces a TWEAK_SCHEMA ' +
       'block right after TWEAK_DEFAULTS in `index.html`. Calling again replaces ' +
       'the previous schema. Tokens left out fall back to host heuristics.',

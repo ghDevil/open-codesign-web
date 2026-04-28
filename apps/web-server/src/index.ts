@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
@@ -35,6 +36,7 @@ import {
   type Config,
   ConfigV3Schema,
   ERROR_CODES,
+  GITHUB_COPILOT_PROVIDER_ID,
   type OnboardingState,
   type ProviderEntry,
   type WireApi,
@@ -52,6 +54,14 @@ import multer from 'multer';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 
 import { buildAuthHeadersForWire } from './auth-headers.js';
+import {
+  COPILOT_CONFIG_DIR,
+  COPILOT_VSCODE_HEADERS,
+  clearStoredCopilotAuth,
+  getCopilotSessionToken,
+  getStoredCopilotAccessToken,
+  readStoredCopilotAuth,
+} from './copilot-token-store.js';
 import {
   appendChatMessage,
   createComment,
@@ -88,6 +98,12 @@ import { readPreferences, writePreferences } from './preferences.js';
 import { resolveActiveModel } from './provider-settings.js';
 // ── Re-use logic from desktop main process (no electron deps) ─────────────────
 import { resolveActiveApiKey, resolveApiKeyWithKeylessFallback } from './resolve-api-key.js';
+import {
+  callMcpTool,
+  loadMcpTools,
+  type McpServerConfig,
+  type McpToolCallResult,
+} from './mcp-tools.js';
 import { createRuntimeTextEditorFs } from './runtime-fs.js';
 import { initSnapshotsDb } from './snapshots-db.js';
 
@@ -109,6 +125,51 @@ const _require = createRequire(import.meta.url);
 const PORT = Number.parseInt(process.env['PORT'] ?? '3000', 10);
 const USE_AGENT_RUNTIME = process.env['USE_AGENT_RUNTIME'] !== '0';
 const DATA_DIR = process.env['DATA_DIR'] ?? join(homedir(), '.config', 'open-codesign');
+
+// MCP servers bridged into the agent tool surface.
+// Keys are injected at runtime from env vars so no secrets live in source.
+const MCP_SERVERS: McpServerConfig[] = (() => {
+  if (process.env['MCP_DISABLED'] === '1') return [];
+  const servers: McpServerConfig[] = [];
+
+  // bcgpt — Basecamp MCP. Only loaded when user explicitly asks about Basecamp/projects.
+  // Not added to MCP_SERVERS by default — loaded on-demand via BCGPT_SERVER constant.
+  // (86 tools would exhaust the 128-tool OpenAI limit for all other generations)
+
+  // Official figma-mcp (local supergateway sidecar on port 3001, streamableHttp)
+  // Only enabled when MCP_FIGMA_LOCAL_ENABLED=1 (disabled by default due to supergateway stateless bug).
+  const figmaLocalUrl = process.env['MCP_FIGMA_LOCAL_URL'] ?? 'http://localhost:3001/mcp';
+  if (process.env['MCP_FIGMA_LOCAL_ENABLED'] === '1') {
+    servers.push({ name: 'figma-official', endpoint: figmaLocalUrl });
+  }
+
+  // Figma FM MCP (fm.wickedlab.io — Authorization: Bearer header, fallback)
+  const figmaToken = process.env['MCP_FIGMA_TOKEN'];
+  const figmaUrl = process.env['MCP_FIGMA_URL'] ?? 'https://fm.wickedlab.io/api/mcp';
+  if (figmaToken) {
+    servers.push({
+      name: 'figma-fm',
+      endpoint: figmaUrl,
+      headers: { Authorization: `Bearer ${figmaToken}` },
+    });
+  }
+
+  // Playwright MCP sidecar (HTTP transport) for browser automation and screenshots.
+  const playwrightUrl = process.env['MCP_PLAYWRIGHT_URL'] ?? 'http://playwright-mcp:8931/mcp';
+  if (process.env['MCP_PLAYWRIGHT_ENABLED'] === '1') {
+    servers.push({ name: 'playwright', endpoint: playwrightUrl });
+  }
+
+  return servers;
+})();
+
+// bcgpt loaded on-demand when prompt mentions Basecamp/projects
+const BCGPT_SERVER: McpServerConfig | null = (() => {
+  const key = process.env['MCP_BCGPT_KEY'];
+  const url = process.env['MCP_BCGPT_URL'] ?? 'https://bcgpt.wickedlab.io/mcp';
+  if (!key) return null;
+  return { name: 'bcgpt-basecamp', endpoint: url, bodyAuthKey: { paramName: 'api_key', value: key } };
+})();
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -240,11 +301,46 @@ const CHATGPT_CODEX_PROVIDER: ProviderEntry = {
   ],
 };
 
+function createGitHubCopilotProvider(baseUrl: string): ProviderEntry {
+  return {
+    id: GITHUB_COPILOT_PROVIDER_ID,
+    name: 'GitHub Copilot',
+    builtin: false,
+    wire: 'openai-responses',
+    baseUrl,
+    defaultModel: 'gpt-5.4',
+    requiresApiKey: false,
+    httpHeaders: {
+      ...COPILOT_VSCODE_HEADERS,
+      'X-GitHub-Api-Version': '2026-01-09',
+      'Openai-Intent': 'conversation-agent',
+      'X-Initiator': 'user',
+    },
+    capabilities: {
+      supportsKeyless: true,
+      supportsModelsEndpoint: true,
+      supportsResponsesApi: true,
+      supportsReasoning: true,
+      supportsToolCalling: true,
+      requiresClaudeCodeIdentity: false,
+      modelDiscoveryMode: 'models',
+    },
+  };
+}
+
 function getCodexTokenStore(): CodexTokenStore {
   if (!codexTokenStore) {
     codexTokenStore = new CodexTokenStore({ filePath: CODEX_AUTH_PATH });
   }
   return codexTokenStore;
+}
+
+function buildResolveActiveApiKeyDeps() {
+  return {
+    getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
+    getCopilotAccessToken: () => getCopilotSessionToken(),
+    getApiKeyForProvider,
+  };
 }
 
 async function persistProviderMutation(
@@ -311,6 +407,53 @@ async function ensureCodexProviderFromStoredAuth(): Promise<StoredCodexAuth | nu
   }
   await claimActiveCodexProviderIfUnset();
   return stored;
+}
+
+async function claimActiveProviderIfUnset(
+  providerId: string,
+  defaultModel: string,
+): Promise<void> {
+  const cfg = getCachedConfig();
+  if (cfg === null) return;
+  const current = cfg.activeProvider;
+  const hasValidActive =
+    current !== undefined &&
+    current !== null &&
+    current !== '' &&
+    cfg.providers[current] !== undefined;
+  if (hasValidActive) return;
+  const next: Config = hydrateConfig({
+    version: 3,
+    activeProvider: providerId,
+    activeModel: defaultModel,
+    secrets: cfg.secrets,
+    providers: cfg.providers,
+    ...(cfg.designSystem !== undefined ? { designSystem: cfg.designSystem } : {}),
+  });
+  await saveConfig(next);
+  setCachedConfig(next);
+}
+
+async function ensureCopilotProviderFromStoredAuth() {
+  const stored = await readStoredCopilotAuth();
+  if (stored === null) return null;
+
+  const provider = createGitHubCopilotProvider(stored.baseUrl);
+  const cfg = getCachedConfig();
+  const entry = cfg?.providers[GITHUB_COPILOT_PROVIDER_ID];
+  // Only write the default provider config if there is no existing entry.
+  // If the entry has been manually configured (e.g. pointing at a local proxy),
+  // preserve it so restarts don't clobber the stored settings.
+  const needsWrite = entry === undefined;
+
+  if (needsWrite) {
+    await persistProviderMutation((providers) => {
+      providers[GITHUB_COPILOT_PROVIDER_ID] = provider;
+      return providers;
+    });
+  }
+  await claimActiveProviderIfUnset(provider.id, provider.defaultModel);
+  return { ...stored, provider };
 }
 
 // ── SSE helpers ───────────────────────────────────────────────────────────────
@@ -395,6 +538,49 @@ app.post('/api/onboarding/validate-key', async (req, res) => {
   }
 });
 
+function resolveDiscoveryHintModels(entry: ProviderEntry): string[] {
+  return [...(entry.modelsHint ?? []), ...(entry.defaultModel ? [entry.defaultModel] : [])].filter(
+    (value, index, arr) => value && arr.indexOf(value) === index,
+  );
+}
+
+function extractModelIds(body: unknown): string[] | null {
+  if (body === null || typeof body !== 'object') return null;
+
+  const candidates = (body as { data?: unknown }).data ?? (body as { models?: unknown }).models;
+  if (!Array.isArray(candidates)) return null;
+
+  const ids: string[] = [];
+  for (const item of candidates) {
+    if (typeof item !== 'object' || item === null) return null;
+    const record = item as { id?: unknown; name?: unknown };
+    if (typeof record.id === 'string') {
+      ids.push(record.id);
+      continue;
+    }
+    if (typeof record.name === 'string') {
+      ids.push(record.name);
+      continue;
+    }
+    return null;
+  }
+
+  return ids;
+}
+
+function trimTrailingSlashes(value: string): string {
+  let out = value;
+  while (out.endsWith('/')) out = out.slice(0, -1);
+  return out;
+}
+
+function modelsUrlForStoredProvider(providerId: string, entry: ProviderEntry): string {
+  if (providerId === GITHUB_COPILOT_PROVIDER_ID) {
+    return `${trimTrailingSlashes(entry.baseUrl)}/models`;
+  }
+  return modelsEndpointUrl(entry.baseUrl, entry.wire);
+}
+
 app.post('/api/onboarding/save-key', async (req, res) => {
   try {
     const { provider, apiKey, modelPrimary, baseUrl } = req.body as Record<string, string>;
@@ -404,25 +590,6 @@ app.post('/api/onboarding/save-key', async (req, res) => {
       modelPrimary,
       baseUrl,
       setAsActive: true,
-    });
-    res.json(state);
-  } catch (err) {
-    handleError(res, err);
-  }
-});
-
-app.post('/api/config/set-provider-and-models', async (req, res) => {
-  try {
-    const { provider, apiKey, modelPrimary, baseUrl, setAsActive } = req.body as Record<
-      string,
-      unknown
-    >;
-    const state = await runSetProviderAndModels({
-      provider: String(provider),
-      apiKey: String(apiKey ?? ''),
-      modelPrimary: String(modelPrimary),
-      baseUrl: typeof baseUrl === 'string' ? baseUrl : undefined,
-      setAsActive: Boolean(setAsActive),
     });
     res.json(state);
   } catch (err) {
@@ -686,15 +853,12 @@ async function testStoredProvider(
   const apiKey = await resolveApiKeyWithKeylessFallback(
     providerId,
     entry.requiresApiKey === false,
-    {
-      getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
-      getApiKeyForProvider,
-    },
+    buildResolveActiveApiKeyDeps(),
   );
 
   let url: string;
   try {
-    url = modelsEndpointUrl(entry.baseUrl, entry.wire);
+    url = modelsUrlForStoredProvider(providerId, entry);
   } catch (err) {
     return {
       ok: false,
@@ -730,17 +894,58 @@ async function testStoredProvider(
   }
 }
 
-app.get('/api/models/provider/:id', (req, res) => {
+app.get('/api/models/provider/:id', async (req, res) => {
   try {
+    if (req.params.id === GITHUB_COPILOT_PROVIDER_ID) {
+      await ensureCopilotProviderFromStoredAuth();
+    }
     const cfg = getCachedConfig();
     if (!cfg) return res.json({ ok: true, models: [] });
     const entry = cfg.providers[req.params.id];
     if (!entry) return res.json({ ok: true, models: [] });
-    const hinted = [
-      ...(entry.modelsHint ?? []),
-      ...(entry.defaultModel ? [entry.defaultModel] : []),
-    ].filter((value, index, arr) => value && arr.indexOf(value) === index);
-    res.json({ ok: true, models: hinted });
+    const hinted = resolveDiscoveryHintModels(entry);
+    if (entry.modelsHint !== undefined && entry.modelsHint.length > 0) {
+      return res.json({ ok: true, models: hinted });
+    }
+
+    const apiKey = await resolveApiKeyWithKeylessFallback(
+      req.params.id,
+      entry.requiresApiKey === false,
+      buildResolveActiveApiKeyDeps(),
+    );
+
+    let url: string;
+    try {
+      url = modelsUrlForStoredProvider(req.params.id, entry);
+    } catch (err) {
+      return hinted.length > 0
+        ? res.json({ ok: true, models: hinted })
+        : res.json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+
+    const headers = buildAuthHeadersForWire(entry.wire, apiKey, entry.httpHeaders, entry.baseUrl);
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      return hinted.length > 0
+        ? res.json({ ok: true, models: hinted })
+        : res.json({ ok: false, error: `HTTP ${response.status}` });
+    }
+
+    const ids = extractModelIds(await response.json());
+    if (ids === null) {
+      return hinted.length > 0
+        ? res.json({ ok: true, models: hinted })
+        : res.json({ ok: false, error: 'unexpected response shape' });
+    }
+
+    return res.json({
+      ok: true,
+      models: [...ids, ...hinted].filter((value, index, arr) => arr.indexOf(value) === index),
+    });
   } catch (err) {
     res.json({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
@@ -837,13 +1042,13 @@ app.post('/api/generate', async (req: Request, res: Response) => {
     );
   }
 
-  const active = resolveActiveModel(cfg, payload.model);
+  const modelHint = payload.model ?? { provider: cfg.activeProvider, modelId: cfg.activeModel };
+  const active = resolveActiveModel(cfg, modelHint);
   const allowKeyless = active.allowKeyless;
   let apiKey: string;
   try {
     apiKey = await resolveApiKeyWithKeylessFallback(active.model.provider, allowKeyless, {
-      getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
-      getApiKeyForProvider,
+      ...buildResolveActiveApiKeyDeps(),
     });
   } catch (err) {
     return handleError(res, err);
@@ -874,6 +1079,19 @@ app.post('/api/generate', async (req: Request, res: Response) => {
 
   const designId = payload.designId ?? null;
   const previousHtml = payload.previousHtml ?? null;
+  const figmaPrefetch = await buildPrefetchedFigmaPromptContext(payload.prompt, payload.referenceUrl);
+  const browserPrefetch = await buildPrefetchedBrowserPromptContext(
+    figmaPrefetch.prompt,
+    // Skip browser prefetch for Figma URLs — they're handled above
+    extractFigmaFileUrls(payload.referenceUrl ?? '').length > 0 ? undefined : payload.referenceUrl,
+  );
+  const steeredPrompt = applyPlaywrightPromptSteering(browserPrefetch.prompt);
+  const baseMcpServers = browserPrefetch.toolServers ?? figmaPrefetch.toolServers ?? MCP_SERVERS;
+  // Load bcgpt on-demand only when the prompt explicitly mentions Basecamp/projects
+  const selectedMcpServers =
+    BCGPT_INTENT_RE.test(steeredPrompt) && BCGPT_SERVER !== null
+      ? [...baseMcpServers, BCGPT_SERVER]
+      : baseMcpServers;
 
   const { fs, fsMap } = createRuntimeTextEditorFs({
     db,
@@ -885,7 +1103,7 @@ app.post('/api/generate', async (req: Request, res: Response) => {
   });
 
   const generateInput = {
-    prompt: payload.prompt,
+    prompt: steeredPrompt,
     history: payload.history as never,
     model: active.model,
     apiKey,
@@ -893,8 +1111,7 @@ app.post('/api/generate', async (req: Request, res: Response) => {
       ? {
           getApiKey: () =>
             resolveApiKeyWithKeylessFallback(active.model.provider, allowKeyless, {
-              getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
-              getApiKeyForProvider,
+              ...buildResolveActiveApiKeyDeps(),
             }),
         }
       : {}),
@@ -926,9 +1143,15 @@ app.post('/api/generate', async (req: Request, res: Response) => {
       result = await generate(generateInput);
     } else {
       const runtimeVerify = makeRuntimeVerifier();
+      const loadedMcpTools = await loadMcpTools(selectedMcpServers);
+      const mcpTools = filterMcpToolsForPrompt(steeredPrompt, loadedMcpTools);
       result = await generateViaAgent(generateInput, {
         fs,
         runtimeVerify,
+        extraTools: mcpTools,
+        promptImages: figmaPrefetch.figmaImages.length > 0
+          ? figmaPrefetch.figmaImages as import('@mariozechner/pi-ai').ImageContent[]
+          : undefined,
         onEvent: (event: AgentEvent) => {
           if (designId === null) return;
           const baseCtx = { designId, generationId: id };
@@ -1019,10 +1242,7 @@ app.post('/api/generate/title', async (req, res) => {
     const apiKey = await resolveApiKeyWithKeylessFallback(
       active.model.provider,
       active.allowKeyless,
-      {
-        getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
-        getApiKeyForProvider,
-      },
+      buildResolveActiveApiKeyDeps(),
     );
     const title = await generateTitle({
       prompt,
@@ -1055,10 +1275,7 @@ app.post('/api/apply-comment', async (req, res) => {
     const apiKey = await resolveApiKeyWithKeylessFallback(
       active.model.provider,
       active.allowKeyless,
-      {
-        getCodexAccessToken: () => getCodexTokenStore().getValidAccessToken(),
-        getApiKeyForProvider,
-      },
+      buildResolveActiveApiKeyDeps(),
     );
     const result = await applyComment({
       html: payload.html,
@@ -1290,6 +1507,7 @@ app.patch('/api/comments/:id', (req, res) => {
     const updated = updateComment(getDb(), req.params.id, {
       ...(req.body.text !== undefined ? { text: req.body.text } : {}),
       ...(req.body.status !== undefined ? { status: req.body.status } : {}),
+      ...(req.body.scope !== undefined ? { scope: req.body.scope } : {}),
     });
     res.json(updated);
   } catch (err) {
@@ -1486,6 +1704,72 @@ app.post('/api/codex/logout', async (_req, res) => {
   }
 });
 
+app.get('/api/copilot/status', async (_req, res) => {
+  try {
+    const auth = await ensureCopilotProviderFromStoredAuth();
+    if (!auth) {
+      res.json({ loggedIn: false, login: null, host: null, expiresAt: null });
+    } else {
+      res.json({
+        loggedIn: true,
+        login: auth.login,
+        host: auth.host,
+        expiresAt: null,
+      });
+    }
+  } catch {
+    res.json({ loggedIn: false, login: null, host: null, expiresAt: null });
+  }
+});
+
+app.post('/api/copilot/adopt-existing-auth', async (_req, res) => {
+  try {
+    const auth = await ensureCopilotProviderFromStoredAuth();
+    if (!auth) {
+      return sendError(
+        res,
+        404,
+        `No GitHub Copilot auth found in ${COPILOT_CONFIG_DIR}. Run \`copilot login\` first.`,
+        ERROR_CODES.PROVIDER_AUTH_MISSING,
+      );
+    }
+    res.json({
+      loggedIn: true,
+      login: auth.login,
+      host: auth.host,
+      expiresAt: null,
+    });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+app.post('/api/copilot/logout', async (_req, res) => {
+  try {
+    await clearStoredCopilotAuth();
+    const cfg = getCachedConfig();
+    if (cfg) {
+      const { [GITHUB_COPILOT_PROVIDER_ID]: _removed, ...providers } = cfg.providers;
+      const { [GITHUB_COPILOT_PROVIDER_ID]: _removedS, ...secrets } = cfg.secrets;
+      const wasActive = cfg.activeProvider === GITHUB_COPILOT_PROVIDER_ID;
+      const fallback = Object.keys(providers)[0];
+      const next = hydrateConfig({
+        version: 3,
+        activeProvider: wasActive ? (fallback ?? '') : cfg.activeProvider,
+        activeModel: wasActive ? (providers[fallback]?.defaultModel ?? '') : cfg.activeModel,
+        secrets,
+        providers,
+        ...(cfg.designSystem !== undefined ? { designSystem: cfg.designSystem } : {}),
+      });
+      await saveConfig(next);
+      setCachedConfig(next);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 // ── Design system ──────────────────────────────────────────────────────────────
 
 app.post('/api/design-system/scan', async (req, res) => {
@@ -1577,9 +1861,533 @@ function resolveLocalAssetRefs(source: string, files: Map<string, string>): stri
   return resolved;
 }
 
+const FIGMA_FILE_URL_RE = /https?:\/\/(?:www\.)?figma\.com\/(?:file|design)\/[A-Za-z0-9]+[^\s)\]"']*/gi;
+const FIGMA_PROMPT_PREFIX = [
+  'Figma design context is preloaded below from the official Figma MCP.',
+  'Use that structured Figma data as the source of truth for layout, copy, and styling.',
+  'Do not fetch the same Figma URL with generic URL-reading tools.',
+].join(' ');
+const FIGMA_PREFETCH_CHAR_LIMIT = 18_000;
+const HTTP_URL_RE = /https?:\/\/[^\s)\]"']+/gi;
+const PLAYWRIGHT_INTENT_RE = /\b(playwright|browser|snapshot|screenshot)\b/i;
+const WEBPAGE_INTENT_RE = /\b(site|website|webpage|web page|page|screen|layout|inspect|review|audit|compare|check|test)\b/i;
+const PLAYWRIGHT_PROMPT_PREFIX = [
+  'When inspecting a web page, do not use generic URL-reading tools.',
+  'Use the Playwright MCP browser_navigate tool first, then browser_snapshot or browser_take_screenshot.',
+].join(' ');
+const PLAYWRIGHT_SNAPSHOT_PREFIX = [
+  'Live webpage inspection context is preloaded below from the Playwright MCP.',
+  'Use that browser snapshot as the source of truth for webpage structure and visible content.',
+  'Do not claim that Playwright tools are unavailable when this preloaded inspection context is present.',
+  'Do not re-fetch the same webpage with generic URL-reading tools.',
+].join(' ');
+const PLAYWRIGHT_TOOL_NAMES = new Set([
+  'browser_navigate',
+  'browser_snapshot',
+  'browser_take_screenshot',
+]);
+const PLAYWRIGHT_PREFETCH_CHAR_LIMIT = 12_000;
+
+function extractFigmaFileUrls(input: string): string[] {
+  return [...new Set(input.match(FIGMA_FILE_URL_RE) ?? [])];
+}
+
+function stringifyMcpText(result: McpToolCallResult): string {
+  const text = (result.content ?? [])
+    .filter((item): item is { type: string; text: string } => item.type === 'text' && typeof item.text === 'string')
+    .map((item) => item.text.trim())
+    .filter((item) => item.length > 0)
+    .join('\n\n');
+
+  if (text.length > 0) return text;
+  return JSON.stringify(result);
+}
+
+function truncateForPrompt(input: string, maxChars: number): string {
+  if (input.length <= maxChars) return input;
+  return `${input.slice(0, maxChars)}\n\n[truncated ${input.length - maxChars} chars]`;
+}
+
+function extractHttpUrls(input: string): string[] {
+  return [...new Set(input.match(HTTP_URL_RE) ?? [])];
+}
+
+function extractPlayableUrl(prompt: string, referenceUrl?: string): string | undefined {
+  return (
+    referenceUrl ??
+    extractHttpUrls(prompt).find((candidate) => !/https?:\/\/(?:www\.)?figma\.com\//i.test(candidate))
+  );
+}
+
+function shouldPrefetchBrowserContext(prompt: string, referenceUrl?: string): boolean {
+  if (referenceUrl !== undefined && referenceUrl.trim().length > 0) return true;
+
+  const playableUrl = extractPlayableUrl(prompt);
+  if (playableUrl === undefined) return false;
+
+  return PLAYWRIGHT_INTENT_RE.test(prompt) || WEBPAGE_INTENT_RE.test(prompt);
+}
+
+/** Extract file key and optional node-id from a figma.com/design URL */
+function parseFigmaUrl(url: string): { fileKey: string; nodeId: string | null } | null {
+  const m = url.match(/figma\.com\/(?:file|design)\/([A-Za-z0-9]+)/);
+  if (!m) return null;
+  const fileKey = m[1];
+  const nodeParam = new URL(url).searchParams.get('node-id');
+  // Figma URLs use "-" in node-id param; API /nodes endpoint also wants "-" (not ":")
+  const nodeId = nodeParam ?? null;
+  return { fileKey, nodeId };
+}
+
+// ── Figma types ──────────────────────────────────────────────────────────────
+
+interface FigmaColor { r: number; g: number; b: number; a?: number }
+interface FigmaFill {
+  type: string;
+  color?: FigmaColor;
+  imageRef?: string;
+  gradientStops?: Array<{ color: FigmaColor; position: number }>;
+}
+interface FigmaTypeStyle {
+  fontFamily?: string;
+  fontWeight?: number;
+  fontSize?: number;
+  lineHeightPx?: number;
+  letterSpacing?: number;
+  textCase?: string;
+}
+interface FigmaPadding {
+  paddingTop?: number; paddingRight?: number; paddingBottom?: number; paddingLeft?: number;
+}
+interface FigmaLayoutGrid { pattern?: string; sectionSize?: number; count?: number; gutterSize?: number }
+interface FigmaNode {
+  id?: string;
+  name?: string;
+  type?: string;
+  characters?: string;
+  fills?: FigmaFill[];
+  strokes?: FigmaFill[];
+  backgroundColor?: FigmaColor;
+  style?: FigmaTypeStyle;
+  cornerRadius?: number;
+  itemSpacing?: number;
+  layoutMode?: string;
+  primaryAxisAlignItems?: string;
+  counterAxisAlignItems?: string;
+  absoluteBoundingBox?: { x: number; y: number; width: number; height: number };
+  layoutGrids?: FigmaLayoutGrid[];
+  children?: FigmaNode[];
+  effects?: Array<{ type: string; color?: FigmaColor; radius?: number; offset?: { x: number; y: number } }>;
+  opacity?: number;
+  visible?: boolean;
+}
+
+function figmaColorToHex(c: FigmaColor): string {
+  const r = Math.round(c.r * 255).toString(16).padStart(2, '0');
+  const g = Math.round(c.g * 255).toString(16).padStart(2, '0');
+  const b = Math.round(c.b * 255).toString(16).padStart(2, '0');
+  return `#${r}${g}${b}`;
+}
+
+function figmaColorToRgba(c: FigmaColor): string {
+  const a = c.a ?? 1;
+  if (a === 1) return figmaColorToHex(c);
+  return `rgba(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)}, ${a.toFixed(2)})`;
+}
+
+interface FigmaContext {
+  text: string;
+  /** Base64-encoded screenshot of the target node/frame, if available */
+  screenshot?: { data: string; mimeType: string };
+}
+
+/** Fetch structured design context from the Figma REST API using MCP_FIGMA_API_KEY */
+async function fetchFigmaFileContext(
+  fileKey: string,
+  nodeId: string | null,
+): Promise<FigmaContext | null> {
+  const apiKey = process.env['MCP_FIGMA_API_KEY'];
+  if (!apiKey) return null;
+
+  try {
+    // Step 1: fetch node tree
+    const depth = nodeId ? 6 : 3;
+    const fileUrl = nodeId
+      ? `https://api.figma.com/v1/files/${fileKey}/nodes?ids=${encodeURIComponent(nodeId)}&depth=${depth}`
+      : `https://api.figma.com/v1/files/${fileKey}?depth=${depth}`;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    let fileData: Record<string, unknown>;
+    try {
+      const res = await fetch(fileUrl, { headers: { 'X-Figma-Token': apiKey }, signal: controller.signal });
+      if (!res.ok) return null;
+      fileData = (await res.json()) as Record<string, unknown>;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const fileName = (fileData.name as string | undefined) ?? 'Untitled';
+    const nodeKey = nodeId ? nodeId.replace(/-/g, ':') : null;
+    const nodesMap = fileData.nodes as Record<string, { document?: FigmaNode }> | undefined;
+    const nodeEntry = nodeKey ? nodesMap?.[nodeKey] : undefined;
+    const rootDoc = (nodeId ? nodeEntry?.document : (fileData.document as FigmaNode | undefined));
+
+    // Step 2: walk the tree to collect everything
+    const layerLines: string[] = [];
+    const textNodes: Array<{ name: string; text: string; style?: FigmaTypeStyle }> = [];
+    const colorSet = new Set<string>();
+    const imageNodeIds: string[] = [];
+    const imageRefs = new Set<string>();
+    const typographySet = new Map<string, FigmaTypeStyle>();
+
+    function collectImageFills(fills: FigmaFill[] | undefined) {
+      if (!fills) return;
+      for (const f of fills) {
+        if (f.type === 'IMAGE' && f.imageRef) imageRefs.add(f.imageRef);
+        if (f.type === 'SOLID' && f.color) colorSet.add(figmaColorToHex(f.color));
+        if (f.type === 'GRADIENT_LINEAR' || f.type === 'GRADIENT_RADIAL') {
+          for (const stop of f.gradientStops ?? []) colorSet.add(figmaColorToHex(stop.color));
+        }
+      }
+    }
+
+    function walkFull(node: FigmaNode, depth: number): void {
+      if (!node || node.visible === false) return;
+      const indent = '  '.repeat(Math.min(depth, 6));
+      const bbox = node.absoluteBoundingBox;
+      const sizeStr = bbox ? ` (${Math.round(bbox.width)}×${Math.round(bbox.height)})` : '';
+      const radius = node.cornerRadius ? ` radius=${node.cornerRadius}` : '';
+
+      if (node.type === 'TEXT' && node.characters) {
+        const st = node.style;
+        const styleStr = st
+          ? ` font="${st.fontFamily ?? ''}" size=${st.fontSize ?? '?'} weight=${st.fontWeight ?? '?'}`
+          : '';
+        layerLines.push(`${indent}TEXT: "${node.characters.slice(0, 100)}"${styleStr}${sizeStr}`);
+        textNodes.push({ name: node.name ?? '', text: node.characters, style: node.style });
+        if (st?.fontFamily) typographySet.set(`${st.fontFamily}-${st.fontWeight}`, st);
+        collectImageFills(node.fills);
+      } else if (node.type === 'RECTANGLE' || node.type === 'ELLIPSE' || node.type === 'VECTOR') {
+        const hasFills = (node.fills ?? []).length > 0;
+        const hasImage = (node.fills ?? []).some((f) => f.type === 'IMAGE');
+        if (hasImage && node.id) imageNodeIds.push(node.id);
+        const fillDesc = hasImage ? ' [IMAGE]' : '';
+        layerLines.push(`${indent}${node.type}: ${node.name ?? ''}${fillDesc}${sizeStr}${radius}`);
+        collectImageFills(node.fills);
+      } else if (node.type === 'FRAME' || node.type === 'COMPONENT' || node.type === 'INSTANCE' || node.type === 'GROUP') {
+        const layout = node.layoutMode ? ` layout=${node.layoutMode}` : '';
+        const gap = node.itemSpacing ? ` gap=${node.itemSpacing}` : '';
+        const pad = (node as FigmaPadding);
+        const padStr = pad.paddingTop !== undefined
+          ? ` pad=${pad.paddingTop}/${pad.paddingRight}/${pad.paddingBottom}/${pad.paddingLeft}`
+          : '';
+        if (node.id && (node.type === 'FRAME' || node.type === 'COMPONENT')) imageNodeIds.push(node.id);
+        layerLines.push(`${indent}${node.type}: ${node.name ?? ''}${layout}${gap}${padStr}${sizeStr}${radius}`);
+        collectImageFills(node.fills);
+        if (node.backgroundColor) colorSet.add(figmaColorToHex(node.backgroundColor));
+      } else if (node.type) {
+        layerLines.push(`${indent}${node.type}: ${node.name ?? ''}${sizeStr}`);
+        collectImageFills(node.fills);
+      }
+
+      if (node.children && depth < 7) {
+        for (const child of node.children.slice(0, 40)) {
+          walkFull(child, depth + 1);
+        }
+      }
+    }
+
+    if (rootDoc?.children) {
+      for (const child of (rootDoc.children ?? []).slice(0, 30)) {
+        walkFull(child, 0);
+      }
+    } else if (rootDoc) {
+      walkFull(rootDoc, 0);
+    }
+
+    // Step 3: fetch rendered image URLs for key nodes (max 20 to stay within API limits)
+    const renderIds = [...new Set(imageNodeIds)].slice(0, 20);
+    const imageUrlMap = new Map<string, string>();
+
+    if (renderIds.length > 0) {
+      try {
+        const imgController = new AbortController();
+        const imgTimer = setTimeout(() => imgController.abort(), 20_000);
+        try {
+          const idsParam = renderIds.map((id) => id.replace(/:/g, ':')).join(',');
+          const imgRes = await fetch(
+            `https://api.figma.com/v1/images/${fileKey}?ids=${encodeURIComponent(idsParam)}&format=png&scale=2`,
+            { headers: { 'X-Figma-Token': apiKey }, signal: imgController.signal },
+          );
+          if (imgRes.ok) {
+            const imgData = (await imgRes.json()) as { images?: Record<string, string> };
+            for (const [id, url] of Object.entries(imgData.images ?? {})) {
+              if (url) imageUrlMap.set(id, url);
+            }
+          }
+        } finally {
+          clearTimeout(imgTimer);
+        }
+      } catch {
+        // image fetch is best-effort
+      }
+    }
+
+    // Step 4: assemble context block
+    const summary: string[] = [
+      `File: ${fileName}`,
+      `Key: ${fileKey}`,
+      ...(nodeId ? [`Node: ${nodeId}`] : []),
+    ];
+
+    if (layerLines.length > 0) {
+      summary.push('', '=== Layer Structure ===');
+      summary.push(...layerLines.slice(0, 120));
+      if (layerLines.length > 120) summary.push(`  ... (${layerLines.length - 120} more layers)`);
+    }
+
+    // Deduplicated text content
+    const uniqueTexts = [...new Set(textNodes.map((t) => t.text))].slice(0, 40);
+    if (uniqueTexts.length > 0) {
+      summary.push('', '=== Text Content ===');
+      for (const t of uniqueTexts) summary.push(`  - "${t.slice(0, 150)}"`);
+    }
+
+    // Typography system
+    if (typographySet.size > 0) {
+      summary.push('', '=== Typography ===');
+      for (const [, st] of typographySet) {
+        summary.push(
+          `  ${st.fontFamily ?? '?'} ${st.fontWeight ?? '?'} — ${st.fontSize ?? '?'}px` +
+          (st.lineHeightPx ? ` / line-height ${Math.round(st.lineHeightPx)}px` : '') +
+          (st.letterSpacing ? ` tracking ${st.letterSpacing}` : ''),
+        );
+      }
+    }
+
+    // Color palette
+    const colors = [...colorSet].slice(0, 30);
+    if (colors.length > 0) {
+      summary.push('', '=== Color Palette ===');
+      summary.push(colors.map((c) => `  ${c}`).join('\n'));
+    }
+
+    // Rendered image URLs (the main addition — gives AI actual CDN image URLs to embed)
+    if (imageUrlMap.size > 0) {
+      summary.push('', '=== Rendered Node Images (embed these URLs directly in HTML) ===');
+      for (const [nodeId, url] of imageUrlMap) {
+        const label = renderIds.includes(nodeId) ? nodeId : nodeId;
+        summary.push(`  ${label}: ${url}`);
+      }
+    }
+
+    // Design styles from file metadata
+    const styles = fileData.styles as Record<string, { name?: string; styleType?: string }> | undefined;
+    if (styles) {
+      const styleLines = Object.values(styles).slice(0, 25)
+        .map((s) => `  ${s.styleType ?? '?'}: ${s.name ?? '?'}`).join('\n');
+      if (styleLines) {
+        summary.push('', '=== Named Styles ===', styleLines);
+      }
+    }
+
+    const textContext = summary.join('\n');
+
+    // Step 5: fetch a rendered screenshot of the target node so the LLM can SEE the design.
+    // Use scale=0.15 + jpeg to keep the image under ~150KB (acceptable for vision context).
+    let screenshot: { data: string; mimeType: 'image/png' } | undefined;
+    const screenshotNodeId = nodeId ?? (rootDoc?.id ?? null);
+    if (screenshotNodeId) {
+      try {
+        const sController = new AbortController();
+        const sTimer = setTimeout(() => sController.abort(), 25_000);
+        try {
+          const screenshotId = screenshotNodeId.replace(/-/g, ':');
+          const sRes = await fetch(
+            `https://api.figma.com/v1/images/${fileKey}?ids=${encodeURIComponent(screenshotId)}&format=jpg&scale=0.5`,
+            { headers: { 'X-Figma-Token': apiKey }, signal: sController.signal },
+          );
+          if (sRes.ok) {
+            const sData = (await sRes.json()) as { images?: Record<string, string> };
+            const screenshotUrl = sData.images?.[screenshotId];
+            if (screenshotUrl) {
+              const imgRes = await fetch(screenshotUrl, { signal: sController.signal });
+              if (imgRes.ok) {
+                const buffer = await imgRes.arrayBuffer();
+                // Hard cap: if image > 800KB base64 (~600KB raw), skip — too large for context
+                if (buffer.byteLength < 600_000) {
+                  const base64 = Buffer.from(buffer).toString('base64');
+                  screenshot = { data: base64, mimeType: 'image/jpeg' };
+                } else {
+                  console.log(`[figma] screenshot too large (${buffer.byteLength} bytes), skipping vision`);
+                }
+              }
+            }
+          }
+        } finally {
+          clearTimeout(sTimer);
+        }
+      } catch {
+        // screenshot is best-effort
+      }
+    }
+
+    console.log(`[figma] context built for ${fileKey}: ${layerLines.length} layers, ${uniqueTexts.length} texts, ${colors.length} colors, ${imageUrlMap.size} images, screenshot=${!!screenshot}`);
+    return { text: textContext, screenshot };
+  } catch (err) {
+    console.warn('[figma] fetchFigmaFileContext failed:', err);
+    return null;
+  }
+}
+
+async function buildPrefetchedFigmaPromptContext(prompt: string, referenceUrl?: string): Promise<{
+  prompt: string;
+  toolServers: McpServerConfig[] | null;
+  figmaImages: Array<{ data: string; mimeType: string }>;
+}> {
+  const allText = referenceUrl ? `${prompt}\n${referenceUrl}` : prompt;
+  const figmaUrls = extractFigmaFileUrls(allText);
+  if (figmaUrls.length === 0) {
+    return { prompt, toolServers: null, figmaImages: [] };
+  }
+
+  const blocks: string[] = [];
+  const figmaImages: Array<{ data: string; mimeType: string }> = [];
+
+  for (const url of figmaUrls) {
+    const parsed = parseFigmaUrl(url);
+    if (!parsed) continue;
+
+    const context = await fetchFigmaFileContext(parsed.fileKey, parsed.nodeId);
+    if (context) {
+      blocks.push(`Figma URL: ${url}\n${context.text}`);
+      if (context.screenshot) figmaImages.push(context.screenshot);
+    } else {
+      blocks.push(`Figma URL: ${url}\n(Live context unavailable — refer to the URL above.)`);
+    }
+  }
+
+  if (blocks.length === 0) {
+    return { prompt, toolServers: null, figmaImages: [] };
+  }
+
+  const screenshotNote = figmaImages.length > 0
+    ? `\nIMPORTANT: A screenshot of the Figma design is attached as an image. Use it as the primary visual reference — match the layout, spacing, colors, typography, and visual style exactly as you see it.`
+    : '';
+
+  const nextPrompt = [
+    FIGMA_PROMPT_PREFIX + screenshotNote,
+    prompt,
+    '--- PRELOADED FIGMA CONTEXT ---',
+    ...blocks,
+    '--- END PRELOADED FIGMA CONTEXT ---',
+  ].join('\n\n');
+
+  const toolServers = MCP_SERVERS.filter(
+    (server) => server.name === 'playwright' || server.name === 'bcgpt-basecamp',
+  );
+
+  return { prompt: nextPrompt, toolServers, figmaImages };
+}
+
+function applyPlaywrightPromptSteering(prompt: string): string {
+  if (!PLAYWRIGHT_INTENT_RE.test(prompt)) return prompt;
+  return `${PLAYWRIGHT_PROMPT_PREFIX}\n\n${prompt}`;
+}
+
+async function buildPrefetchedBrowserPromptContext(
+  prompt: string,
+  referenceUrl?: string,
+): Promise<{
+  prompt: string;
+  toolServers: McpServerConfig[] | null;
+}> {
+  if (!shouldPrefetchBrowserContext(prompt, referenceUrl)) {
+    return { prompt, toolServers: null };
+  }
+
+  const playableUrl = extractPlayableUrl(prompt, referenceUrl);
+  if (playableUrl === undefined) {
+    return { prompt, toolServers: null };
+  }
+
+  const playwrightServer = MCP_SERVERS.find((server) => server.name === 'playwright');
+  if (playwrightServer === undefined) {
+    return { prompt, toolServers: null };
+  }
+
+  try {
+    await callMcpTool(playwrightServer, 'browser_navigate', { url: playableUrl });
+    const snapshot = await callMcpTool(playwrightServer, 'browser_snapshot', {});
+    const snapshotText = truncateForPrompt(
+      stringifyMcpText(snapshot),
+      PLAYWRIGHT_PREFETCH_CHAR_LIMIT,
+    );
+    const nextPrompt = [
+      PLAYWRIGHT_SNAPSHOT_PREFIX,
+      prompt,
+      '--- PRELOADED PLAYWRIGHT SNAPSHOT ---',
+      `Inspected URL: ${playableUrl}`,
+      snapshotText,
+      '--- END PRELOADED PLAYWRIGHT SNAPSHOT ---',
+    ].join('\n\n');
+
+    return {
+      prompt: nextPrompt,
+      toolServers: MCP_SERVERS.filter((server) => server.name !== 'playwright'),
+    };
+  } catch {
+    return { prompt, toolServers: null };
+  }
+}
+
+// Basecamp-related keywords that justify loading bcgpt tools
+const BCGPT_INTENT_RE = /basecamp|project|todo|message|campfire|schedule|checkin/i;
+
+function filterMcpToolsForPrompt<T extends { name: string }>(prompt: string, tools: T[]): T[] {
+  if (!PLAYWRIGHT_INTENT_RE.test(prompt)) return tools.slice(0, 128);
+
+  const browserTools = tools.filter((tool) => PLAYWRIGHT_TOOL_NAMES.has(tool.name));
+  const nonBrowserTools = tools.filter((tool) => !tool.name.startsWith('browser_'));
+  return [...nonBrowserTools, ...browserTools].slice(0, 128);
+}
+
+// ── Figma MCP sidecar ─────────────────────────────────────────────────────────
+
+/**
+ * Starts the official figma-mcp via supergateway (stdio→streamableHttp) on port 3001.
+ * Requires /tmp/node_modules/.bin/supergateway and /tmp/node_modules/.bin/figma-mcp
+ * to be pre-installed (run: cd /tmp && npm install figma-mcp supergateway).
+ * Skipped if binaries are absent or MCP_FIGMA_LOCAL_DISABLED=1.
+ */
+function spawnFigmaMcpSidecar(): void {
+  if (process.env['MCP_FIGMA_LOCAL_DISABLED'] === '1') return;
+  const figmaApiKey = process.env['MCP_FIGMA_API_KEY'];
+  if (!figmaApiKey) return;
+  const supergateway = '/tmp/node_modules/.bin/supergateway';
+  const figmaMcp = '/tmp/node_modules/.bin/figma-mcp';
+  stat(supergateway).then(() => stat(figmaMcp)).then(() => {
+    const child = spawn(
+      supergateway,
+      ['--port', '3001', '--outputTransport', 'streamableHttp', '--stdio', figmaMcp],
+      {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, FIGMA_API_KEY: figmaApiKey },
+      },
+    );
+    child.unref();
+    console.log('[web-server] figma-mcp sidecar started on port 3001');
+  }).catch(() => {
+    console.log('[web-server] figma-mcp sidecar skipped (binaries not found in /tmp/node_modules)');
+  });
+}
+
 // ── Boot ───────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  spawnFigmaMcpSidecar();
   await loadConfig();
   console.log('[web-server] Config loaded, hasConfig:', cachedConfig !== null);
   try {

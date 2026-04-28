@@ -181,6 +181,7 @@ export interface CommentCreateInput {
 export interface CommentUpdateInput {
   text?: string;
   status?: CommentStatus;
+  scope?: CommentScope;
 }
 
 export interface SnapshotCreateInput {

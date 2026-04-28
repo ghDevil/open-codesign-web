@@ -237,6 +237,19 @@
         "unknownError": "Unknown error",
         "unsupportedCountryRegion": "ChatGPT subscription login is not available for this account, country, region, or territory."
       },
+      "copilotLogin": {
+        "title": "Use existing GitHub Copilot login",
+        "description": "Reuse the GitHub Copilot CLI session already present on the server to call Copilot-backed chat models without storing another API key.",
+        "signIn": "Use Copilot login",
+        "inProgress": "Checking Copilot login…",
+        "loggedInBadge": "Signed in with Copilot",
+        "logout": "Sign out",
+        "confirmLogout": "Sign out of GitHub Copilot?",
+        "loginFailedTitle": "GitHub Copilot sign-in failed",
+        "logoutFailedTitle": "GitHub Copilot sign-out failed",
+        "statusFailedTitle": "GitHub Copilot status check failed",
+        "unknownError": "Unknown error"
+      },
       "addProvider": "Add provider",
       "addCustom": "Add custom",
       "empty": "No providers configured yet. Add one to start generating.",

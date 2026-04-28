@@ -574,6 +574,7 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
                   outerHTML={commentBubble.outerHTML}
                   rect={scaled}
                   {...(initialText !== undefined ? { initialText } : {})}
+                  {...(commentBubble.initialScope ? { initialScope: commentBubble.initialScope } : {})}
                   onDraftChange={(text) => {
                     if (text.length === 0) bubbleDraftsRef.current.delete(bubbleKey);
                     else bubbleDraftsRef.current.set(bubbleKey, text);
@@ -589,7 +590,7 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
                     }
                     closeCommentBubble();
                   }}
-                  onSendToClaude={async (text: string) => {
+                  onSendToClaude={async (text: string, scope) => {
                     const row = await submitComment({
                       kind: 'edit',
                       selector: commentBubble.selector,
@@ -597,7 +598,7 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
                       outerHTML: commentBubble.outerHTML,
                       rect: commentBubble.rect,
                       text,
-                      scope: 'element',
+                      scope,
                       ...(existingId ? { existingCommentId: existingId } : {}),
                       ...(commentBubble.parentOuterHTML
                         ? { parentOuterHTML: commentBubble.parentOuterHTML }

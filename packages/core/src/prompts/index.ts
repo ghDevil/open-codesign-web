@@ -222,6 +222,14 @@ The host scans for the markers regardless of contents.
 | Number (e.g. \`1.0\`, \`16\`, \`0.5\`)             | Slider           |
 | Plain string                                 | Text input       |
 
+## Optional schema metadata
+
+When you also declare a \`TWEAK_SCHEMA\` block, enrich controls with:
+- \`label\` — friendly control name shown in the host UI
+- \`description\` — short helper text for manual editing
+- \`group\` — section name such as \`Color\`, \`Type\`, \`Layout\`, \`Content\`, or \`Behavior\`
+- \`multiline: true\` for long string fields so the host renders a textarea
+
 ## When to use
 
 Always for artifacts with theming options. Examples:

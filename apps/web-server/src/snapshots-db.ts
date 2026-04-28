@@ -568,7 +568,7 @@ export function listPendingEdits(db: BetterSqlite3.Database, designId: string): 
 export function updateComment(
   db: BetterSqlite3.Database,
   id: string,
-  patch: { text?: string; status?: CommentStatus },
+  patch: { text?: string; status?: CommentStatus; scope?: CommentScope },
 ): CommentRow | null {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -579,6 +579,10 @@ export function updateComment(
   if (patch.status !== undefined) {
     fields.push('status = ?');
     values.push(patch.status);
+  }
+  if (patch.scope !== undefined) {
+    fields.push('scope = ?');
+    values.push(patch.scope);
   }
   if (fields.length === 0) {
     const row = db.prepare('SELECT * FROM comments WHERE id = ?').get(id) as

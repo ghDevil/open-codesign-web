@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { copyFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 /**
  * esbuild script for the web server.
@@ -53,3 +53,15 @@ await build({
   // Allow esbuild to resolve workspace packages via the monorepo node_modules
   nodePaths: [join(__dirname, '../../node_modules'), join(__dirname, 'node_modules')],
 });
+
+// Copy builtin skill .md files to dist/builtin/ so import.meta.url path resolution works at runtime.
+// loadBuiltinSkills() resolves './builtin/' relative to the bundle file (dist/index.js).
+const skillsSrc = join(__dirname, '../../packages/core/src/skills/builtin');
+const skillsDst = join(__dirname, 'dist/builtin');
+mkdirSync(skillsDst, { recursive: true });
+for (const entry of readdirSync(skillsSrc)) {
+  if (extname(entry) === '.md') {
+    copyFileSync(join(skillsSrc, entry), join(skillsDst, entry));
+    console.log(`[build] copied skill: ${entry}`);
+  }
+}

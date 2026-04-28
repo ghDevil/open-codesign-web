@@ -565,6 +565,8 @@ const AGENTIC_TOOL_GUIDANCE = [
   '- A small fixed set of string options (e.g. density, variant) → `{ kind: "enum", options: [...] }`',
   '- True/false flag → `{ kind: "boolean" }`',
   '- Free-form text (heading, label, caption) → `{ kind: "string", placeholder: "Hint text" }`',
+  '- Add optional panel metadata when it improves manual editing: `label`, `description`, and `group` (for example `Color`, `Type`, `Layout`, `Content`, `Behavior`).',
+  '- Long copy fields should use `{ kind: "string", multiline: true }` so the host renders a textarea instead of a single-line input.',
   '',
   "Tokens you leave out of the schema fall back to the host's heuristic, so it",
   'is fine to declare hints only for the tokens whose UI matters.',
@@ -667,6 +669,13 @@ export interface GenerateViaAgentDeps {
    */
   tools?: AgentTool<TSchema, unknown>[] | undefined;
   /**
+   * Additional tools appended to the default toolset without replacing it.
+   * Useful for bridging external MCP servers into the agent without
+   * losing built-in tools (text_editor, set_todos, read_url, etc.).
+   * Ignored when `tools` is provided explicitly.
+   */
+  extraTools?: AgentTool<TSchema, unknown>[] | undefined;
+  /**
    * Virtual filesystem callbacks for the text_editor tool. When provided,
    * the default toolset includes `str_replace_based_edit_tool` wired to
    * these callbacks. When undefined, only `set_todos` is included.
@@ -692,6 +701,11 @@ export interface GenerateViaAgentDeps {
    * poster/background asset is worth generating.
    */
   generateImageAsset?: GenerateImageAssetFn | undefined;
+  /**
+   * Vision images to attach to the first user turn (e.g. Figma screenshots).
+   * Passed directly to agent.prompt(text, images) so the LLM sees them inline.
+   */
+  promptImages?: import('@mariozechner/pi-ai').ImageContent[] | undefined;
 }
 
 /**
@@ -791,7 +805,11 @@ export async function generateViaAgent(
       >,
     );
   }
-  const tools = deps.tools ?? defaultTools;
+  const tools =
+    deps.tools ??
+    (deps.extraTools && deps.extraTools.length > 0
+      ? [...defaultTools, ...deps.extraTools]
+      : defaultTools);
   const encourageToolUse = deps.encourageToolUse ?? tools.length > 0;
   const activeGuidance = deps.generateImageAsset
     ? `${AGENTIC_TOOL_GUIDANCE}\n\n${IMAGE_ASSET_TOOL_GUIDANCE}`
@@ -912,10 +930,11 @@ export async function generateViaAgent(
   const isFirstTurn = input.history.length === 0;
   const RETRY_BLOCKED = Symbol.for('open-codesign.retry.blocked');
   type RetryBlockedError = Error & { [RETRY_BLOCKED]?: true };
+  const promptImages = deps.promptImages && deps.promptImages.length > 0 ? deps.promptImages : undefined;
   const sendOnce = async (): Promise<void> => {
     const preLen = agent.state.messages.length;
     try {
-      await agent.prompt(userContent);
+      await agent.prompt(userContent, promptImages);
       await agent.waitForIdle();
     } catch (err) {
       if (agent.state.messages.length > preLen) {

@@ -884,6 +884,10 @@ export function updateComment(
     fields.push('status = ?');
     values.push(patch.status);
   }
+  if (patch.scope !== undefined) {
+    fields.push('scope = ?');
+    values.push(patch.scope);
+  }
   if (fields.length === 0) {
     const row = db.prepare('SELECT * FROM comments WHERE id = ?').get(id) as
       | CommentRowDb

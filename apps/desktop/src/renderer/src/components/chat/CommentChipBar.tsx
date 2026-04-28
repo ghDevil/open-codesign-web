@@ -72,6 +72,8 @@ export function CommentChipBar() {
                   },
                   existingCommentId: c.id,
                   initialText: c.text,
+                  ...(c.scope ? { initialScope: c.scope } : {}),
+                  ...(c.parentOuterHTML ? { parentOuterHTML: c.parentOuterHTML } : {}),
                 })
               }
               className="inline-flex min-w-0 items-center gap-[var(--space-1)]"

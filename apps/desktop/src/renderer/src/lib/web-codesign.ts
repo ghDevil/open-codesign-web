@@ -4,6 +4,20 @@ import type {
   ImageGenerationSettingsView,
 } from '../../../preload/index';
 
+interface CopilotOAuthStatus {
+  loggedIn: boolean;
+  login: string | null;
+  host: string | null;
+  expiresAt: number | null;
+}
+
+interface CopilotOAuthApi {
+  status(): Promise<CopilotOAuthStatus>;
+  login(): Promise<CopilotOAuthStatus>;
+  cancelLogin(): Promise<boolean>;
+  logout(): Promise<CopilotOAuthStatus>;
+}
+
 const LOCALE_KEY = 'open-codesign.locale';
 const IMAGE_SETTINGS_KEY = 'open-codesign.image-generation';
 
@@ -253,10 +267,23 @@ async function beginCodexLogin(): Promise<CodexOAuthStatus> {
   }
 }
 
+async function beginCopilotLogin(): Promise<CopilotOAuthStatus> {
+  try {
+    return await apiJson<CopilotOAuthStatus>('/api/copilot/adopt-existing-auth', {
+      method: 'POST',
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unable to connect GitHub Copilot.';
+    throw new Error(
+      `${message} To use GitHub Copilot login in the hosted web app, install the official GitHub Copilot CLI in the container, run \`copilot login\` once there, then try again.`,
+    );
+  }
+}
+
 function installWebCodesign(): void {
   if (typeof window === 'undefined' || window.codesign) return;
 
-  const api: Partial<CodesignApi> = {
+  const api: Partial<CodesignApi> & { copilotOAuth: CopilotOAuthApi } = {
     detectProvider: async (key: string) => {
       const result = await apiJson<{ provider: string | null }>('/api/detect-provider', {
         method: 'POST',
@@ -424,6 +451,15 @@ function installWebCodesign(): void {
       logout: async () => {
         await apiJson('/api/codex/logout', { method: 'POST' });
         return apiJson('/api/codex/status');
+      },
+    },
+    copilotOAuth: {
+      status: () => apiJson('/api/copilot/status'),
+      login: beginCopilotLogin,
+      cancelLogin: async () => false,
+      logout: async () => {
+        await apiJson('/api/copilot/logout', { method: 'POST' });
+        return apiJson('/api/copilot/status');
       },
     },
     connection: {

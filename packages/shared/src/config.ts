@@ -47,6 +47,7 @@ export type WireApi = z.infer<typeof WireApiSchema>;
  * introducing import cycles.
  */
 export const CHATGPT_CODEX_PROVIDER_ID = 'chatgpt-codex';
+export const GITHUB_COPILOT_PROVIDER_ID = 'github-copilot';
 
 // ── Secrets & StoredDesignSystem ─────────────────────────────────────────────
 

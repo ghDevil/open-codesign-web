@@ -430,7 +430,7 @@ interface CodesignState {
     scope?: CommentScope;
     parentOuterHTML?: string;
   }) => Promise<CommentRow | null>;
-  updateComment: (id: string, patch: { text?: string }) => Promise<CommentRow | null>;
+  updateComment: (id: string, patch: { text?: string; scope?: CommentScope }) => Promise<CommentRow | null>;
   /** Single entry point used by CommentBubble. If `existingCommentId` is set,
    *  routes to updateComment (editing a saved comment); otherwise addComment
    *  (creating a new one). Returns the resulting row on success, null on
@@ -1264,6 +1264,12 @@ export interface PendingEditEnrichment {
   parentOuterHTML?: string | null | undefined;
 }
 
+const HUMAN_TWEAK_AUTHORITY_LINES = [
+  'Human tweak values already present in the artifact source are authoritative.',
+  'If the artifact contains EDITMODE or TWEAK_SCHEMA blocks, preserve their current values unless an instruction explicitly asks you to change them.',
+  'When an edit is scoped to one element, keep the change local and avoid unrelated design drift.',
+].join(' ');
+
 export function buildEnrichedPrompt(
   userPrompt: string,
   pendingEdits: PendingEditEnrichment[],
@@ -1278,12 +1284,16 @@ export function buildEnrichedPrompt(
     '',
     'Each edit targets a specific element identified by its selector and outerHTML.',
     'Use text_editor str_replace to find and modify the element. Do NOT skip any edit.',
+    HUMAN_TWEAK_AUTHORITY_LINES,
     '',
   ];
 
   pendingEdits.forEach((edit, i) => {
-    const scope =
-      edit.scope === 'global' ? 'global (apply design-wide)' : 'element (this element only)';
+    const isGlobal = edit.scope === 'global';
+    const scope = isGlobal ? 'global (apply design-wide)' : 'element (this element only)';
+    const scopeGuidance = isGlobal
+      ? 'You may propagate this change across the design, but keep existing human-chosen tweak values unless this instruction clearly changes them.'
+      : 'Constrain the change to this target unless the instruction explicitly requires nearby supporting adjustments.';
     lines.push(`### Edit ${i + 1}: ${edit.text}`);
     lines.push(`- **Target**: \`<${edit.tag}>\` at \`${edit.selector}\``);
     lines.push(`- **Current HTML**: \`${truncate(edit.outerHTML)}\``);
@@ -1291,6 +1301,7 @@ export function buildEnrichedPrompt(
       lines.push(`- **Parent context**: \`${truncate(edit.parentOuterHTML)}\``);
     }
     lines.push(`- **Scope**: ${scope}`);
+    lines.push(`- **Scope guidance**: ${scopeGuidance}`);
     lines.push(`- **Instruction**: ${edit.text}`);
     lines.push('');
   });
@@ -2673,7 +2684,10 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     // a fresh click in comment mode falls through to addComment. Both return
     // the row on success so the bubble can decide whether to close.
     if (input.existingCommentId) {
-      return get().updateComment(input.existingCommentId, { text: input.text });
+      return get().updateComment(input.existingCommentId, {
+        text: input.text,
+        ...(input.scope ? { scope: input.scope } : {}),
+      });
     }
     const payload: Parameters<CodesignState['addComment']>[0] = {
       kind: input.kind,

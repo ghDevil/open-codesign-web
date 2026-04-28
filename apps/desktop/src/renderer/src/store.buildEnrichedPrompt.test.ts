@@ -78,6 +78,29 @@ describe('buildEnrichedPrompt', () => {
     expect(prompt).toMatch(/Scope.*?: global/);
   });
 
+  it('tells the model to preserve existing human tweak values by default', () => {
+    const prompt = buildEnrichedPrompt('go', [
+      { selector: 'a', tag: 'a', outerHTML: '<a/>', text: 'A' },
+    ]);
+    expect(prompt).toContain('Human tweak values already present in the artifact source are authoritative.');
+    expect(prompt).toContain('preserve their current values unless an instruction explicitly asks you to change them');
+  });
+
+  it('emits local scope guidance for element-scoped edits', () => {
+    const prompt = buildEnrichedPrompt('go', [
+      { selector: 'a', tag: 'a', outerHTML: '<a/>', text: 'A', scope: 'element' },
+    ]);
+    expect(prompt).toContain('Constrain the change to this target');
+  });
+
+  it('emits broader guidance for global edits while still preserving tweak authority', () => {
+    const prompt = buildEnrichedPrompt('go', [
+      { selector: 'a', tag: 'a', outerHTML: '<a/>', text: 'A', scope: 'global' },
+    ]);
+    expect(prompt).toContain('You may propagate this change across the design');
+    expect(prompt).toContain('keep existing human-chosen tweak values');
+  });
+
   it('emits a Parent context line only when parentOuterHTML is present and non-empty', () => {
     const withParent = buildEnrichedPrompt('go', [
       {

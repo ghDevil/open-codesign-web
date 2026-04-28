@@ -332,6 +332,7 @@ function buildRevisionPrompt(input: ApplyCommentInput, contextSections: string[]
     'Revise the existing HTML artifact below.',
     'Keep the overall structure, copy, and layout intact unless the user request requires a broader change.',
     'Prioritize the selected element first and avoid unrelated edits.',
+    'If the artifact already contains EDITMODE or TWEAK_SCHEMA blocks, treat their current values as deliberate human choices and preserve them unless the request explicitly asks you to change them.',
     `User request: ${input.comment.trim()}`,
     `Selected element tag: <${input.selection.tag}>`,
     `Selected element selector: ${input.selection.selector}`,

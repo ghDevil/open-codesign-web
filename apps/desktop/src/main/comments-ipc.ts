@@ -190,7 +190,7 @@ export function registerCommentsIpc(db: Database): void {
     const r = asObject(raw, channel);
     requireSchemaV1(r, channel);
     const id = parseNonEmptyString(r, 'id', channel);
-    const patch: { text?: string; status?: CommentStatus } = {};
+    const patch: { text?: string; status?: CommentStatus; scope?: 'element' | 'global' } = {};
     if (r['text'] !== undefined) {
       if (typeof r['text'] !== 'string') {
         throw new CodesignError(`${channel}: text must be a string`, ERROR_CODES.IPC_BAD_INPUT);
@@ -206,6 +206,16 @@ export function registerCommentsIpc(db: Database): void {
         );
       }
       patch.status = s as CommentStatus;
+    }
+    if (r['scope'] !== undefined) {
+      const scope = r['scope'];
+      if (scope !== 'element' && scope !== 'global') {
+        throw new CodesignError(
+          `${channel}: scope must be 'element' or 'global'`,
+          ERROR_CODES.IPC_BAD_INPUT,
+        );
+      }
+      patch.scope = scope;
     }
     return updateComment(db, id, patch);
   });

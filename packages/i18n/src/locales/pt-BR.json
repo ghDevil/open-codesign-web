@@ -209,6 +209,19 @@
         "unknownError": "Erro desconhecido",
         "unsupportedCountryRegion": "O login com assinatura do ChatGPT não está disponível para esta conta, país, região ou território."
       },
+      "copilotLogin": {
+        "title": "Usar login existente do GitHub Copilot",
+        "description": "Reaproveite a sessão do CLI do GitHub Copilot já presente no servidor para chamar modelos de chat do Copilot sem armazenar outra chave de API.",
+        "signIn": "Usar login do Copilot",
+        "inProgress": "Verificando login do Copilot…",
+        "loggedInBadge": "Conectado com Copilot",
+        "logout": "Sair",
+        "confirmLogout": "Sair do GitHub Copilot?",
+        "loginFailedTitle": "Falha ao entrar no GitHub Copilot",
+        "logoutFailedTitle": "Falha ao sair do GitHub Copilot",
+        "statusFailedTitle": "Falha ao verificar status do GitHub Copilot",
+        "unknownError": "Erro desconhecido"
+      },
       "addProvider": "Adicionar provedor",
       "addCustom": "Adicionar personalizado",
       "empty": "Nenhum provedor configurado ainda. Adicione um para começar a gerar.",

@@ -7,12 +7,35 @@ services:
       PORT: '3000'
       DATA_DIR: /data/open-codesign
       USE_AGENT_RUNTIME: '1'
+      MCP_PLAYWRIGHT_ENABLED: '1'
+      MCP_PLAYWRIGHT_URL: http://playwright-mcp:8931/mcp
     volumes:
       - open-codesign-data:/data/open-codesign
       - open-codesign-codex:/root/.codex
+      - open-codesign-copilot:/root/.copilot
     expose:
       - '3000'
+
+  playwright-mcp:
+    image: mcr.microsoft.com/playwright/mcp
+    restart: unless-stopped
+    command:
+      - --headless
+      - --browser
+      - chromium
+      - --no-sandbox
+      - --port
+      - '8931'
+      - --host
+      - 0.0.0.0
+      - --allowed-hosts
+      - '*'
+      - --output-dir
+      - /data/open-codesign/playwright
+    volumes:
+      - open-codesign-data:/data/open-codesign
 
 volumes:
   open-codesign-data:
   open-codesign-codex:
+  open-codesign-copilot:
