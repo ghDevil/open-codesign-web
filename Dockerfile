@@ -31,7 +31,8 @@ FROM node:22-slim AS runtime
 WORKDIR /app
 
 # git + ca-certificates: needed by /api/design-system/scan-github (shallow clone of public repos).
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+# chromium: required for hosted PDF export via puppeteer-core.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates chromium && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@9.15.0 @openai/codex @github/copilot
 RUN cd /tmp && npm install figma-mcp supergateway
 ENV HUSKY=0

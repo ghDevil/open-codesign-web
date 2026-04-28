@@ -6,9 +6,9 @@
 
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import {
   type CoreLogger,
@@ -20,6 +20,7 @@ import {
   generateTitle,
   generateViaAgent,
 } from '@open-codesign/core';
+import { type ExporterFormat, exportArtifact } from '@open-codesign/exporters';
 import type { AgentEvent } from '@open-codesign/core';
 import { pingProvider } from '@open-codesign/providers';
 import {
@@ -557,6 +558,67 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+interface WebExportRequest {
+  format: ExporterFormat;
+  htmlContent: string;
+  defaultFilename?: string;
+}
+
+const EXPORT_CONTENT_TYPES: Record<ExporterFormat, string> = {
+  html: 'text/html; charset=utf-8',
+  markdown: 'text/markdown; charset=utf-8',
+  pdf: 'application/pdf',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  zip: 'application/zip',
+};
+
+function parseWebExportRequest(raw: unknown): WebExportRequest {
+  if (raw === null || typeof raw !== 'object') {
+    throw new CodesignError('export expects an object payload', ERROR_CODES.IPC_BAD_INPUT);
+  }
+  const record = raw as Record<string, unknown>;
+  const format = record['format'];
+  const htmlContent = record['htmlContent'];
+  const defaultFilename = record['defaultFilename'];
+  if (
+    format !== 'html' &&
+    format !== 'pdf' &&
+    format !== 'pptx' &&
+    format !== 'zip' &&
+    format !== 'markdown'
+  ) {
+    throw new CodesignError(
+      `Unknown export format: ${String(format)}`,
+      ERROR_CODES.EXPORTER_UNKNOWN,
+    );
+  }
+  if (typeof htmlContent !== 'string' || htmlContent.trim().length === 0) {
+    throw new CodesignError('export requires non-empty htmlContent', ERROR_CODES.IPC_BAD_INPUT);
+  }
+
+  const out: WebExportRequest = { format, htmlContent };
+  if (typeof defaultFilename === 'string' && defaultFilename.trim().length > 0) {
+    out.defaultFilename = defaultFilename.trim();
+  }
+  return out;
+}
+
+function sanitizeExportFilename(input: string | undefined, format: ExporterFormat): string {
+  const defaultExt = format === 'markdown' ? 'md' : format;
+  const fallback = `codesign-export.${defaultExt}`;
+  if (!input) return fallback;
+  const candidate = input
+    .replace(/[/\\]/g, '-')
+    .replace(/[\u0000-\u001f<>:"|?*]/g, '-')
+    .trim();
+  return candidate.length > 0 ? candidate : fallback;
+}
+
+function encodeContentDispositionFilename(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, "'");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
 
 function sendError(res: Response, status: number, message: string, code?: string): void {
   res
@@ -1518,7 +1580,11 @@ app.post('/api/designs/:id/duplicate', (req, res) => {
 
 app.post('/api/designs/:id/workspace', upload.array('files'), async (req, res) => {
   try {
-    const designId = req.params.id;
+    const designIdParam = req.params.id;
+    const designId = Array.isArray(designIdParam) ? designIdParam[0] : designIdParam;
+    if (typeof designId !== 'string' || designId.trim().length === 0) {
+      return sendError(res, 400, 'Design id is required', 'bad_request');
+    }
     const design = getDesign(getDb(), designId);
     if (!design) return sendError(res, 404, 'Design not found', 'not_found');
 
@@ -1552,10 +1618,13 @@ app.post('/api/designs/:id/workspace', upload.array('files'), async (req, res) =
       return sendError(res, 400, 'Uploaded workspace contained no valid files', 'workspace_empty');
     }
 
+    const workspaceLabelRaw = req.body['workspaceLabel'];
     const updated = updateDesignWorkspace(
       getDb(),
       designId,
-      normalizeHostedWorkspaceLabel(req.body['workspaceLabel']),
+      normalizeHostedWorkspaceLabel(
+        Array.isArray(workspaceLabelRaw) ? workspaceLabelRaw[0] : workspaceLabelRaw,
+      ),
     );
     if (!updated) return sendError(res, 404, 'Design not found', 'not_found');
     res.json(updated);
@@ -1759,6 +1828,28 @@ app.post('/api/upload-files', upload.array('files'), async (req, res) => {
     res.json(result);
   } catch (err) {
     handleError(res, err);
+  }
+});
+
+app.post('/api/export', async (req, res) => {
+  let stagingDir: string | null = null;
+  try {
+    const request = parseWebExportRequest(req.body);
+    const filename = sanitizeExportFilename(request.defaultFilename, request.format);
+    stagingDir = await mkdtemp(join(tmpdir(), 'codesign-export-'));
+    const destinationPath = join(stagingDir, filename);
+    await exportArtifact(request.format, request.htmlContent, destinationPath);
+    const bytes = await readFile(destinationPath);
+    res.setHeader('Content-Type', EXPORT_CONTENT_TYPES[request.format]);
+    res.setHeader('Content-Length', String(bytes.byteLength));
+    res.setHeader('Content-Disposition', encodeContentDispositionFilename(filename));
+    res.status(200).send(bytes);
+  } catch (err) {
+    handleError(res, err);
+  } finally {
+    if (stagingDir) {
+      await rm(stagingDir, { recursive: true, force: true });
+    }
   }
 });
 

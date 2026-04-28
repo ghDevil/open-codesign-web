@@ -5,6 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   type AgentEvent,
+  type ClarifyPromptOutput,
   type CoreLogger,
   DESIGN_SKILLS,
   FRAME_TEMPLATES,
@@ -24,6 +25,7 @@ import {
   CodesignError,
   GeneratePayload,
   GeneratePayloadV1,
+  type LocalInputFile,
 } from '@open-codesign/shared';
 import { computeFingerprint } from '@open-codesign/shared/fingerprint';
 import type BetterSqlite3 from 'better-sqlite3';
@@ -1360,17 +1362,7 @@ function registerIpcHandlers(db: Database | null): void {
     async (
       _e,
       raw: unknown,
-    ): Promise<{
-      intro: string;
-      questions: Array<{
-        id: string;
-        label: string;
-        kind: 'text' | 'single_choice' | 'multi_choice';
-        options?: string[];
-        allowCustom?: boolean;
-        placeholder?: string;
-      }>;
-    }> => {
+    ): Promise<ClarifyPromptOutput> => {
       const runId = crypto.randomUUID();
       return withRun(runId, async () => {
         if (typeof raw !== 'object' || raw === null) {

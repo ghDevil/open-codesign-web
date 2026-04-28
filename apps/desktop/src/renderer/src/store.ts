@@ -1885,7 +1885,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
           return;
         }
       } catch (err) {
-        rendererLogger.warn('clarify.preflight.failed', {
+        rendererLogger.warn('store', 'clarify.preflight.failed', {
           designId: designIdAtStart,
           message: err instanceof Error ? err.message : String(err),
         });

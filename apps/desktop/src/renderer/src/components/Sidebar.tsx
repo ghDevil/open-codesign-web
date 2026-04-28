@@ -248,13 +248,15 @@ export function Sidebar({ prompt, setPrompt, onSubmit }: SidebarProps) {
             onCancel={cancelGeneration}
             isGenerating={isGenerating}
             disabled={isClarifying || activeClarification !== null}
-            disabledReason={
-              activeClarification !== null
-                ? t('sidebar.clarify.disabledReason')
-                : isClarifying
-                  ? t('sidebar.clarify.loading')
-                  : undefined
-            }
+            {...(() => {
+              const disabledReason =
+                activeClarification !== null
+                  ? t('sidebar.clarify.disabledReason')
+                  : isClarifying
+                    ? t('sidebar.clarify.loading')
+                    : null;
+              return disabledReason ? { disabledReason } : {};
+            })()}
             contextSummary={
               contextItems.length > 0 ? (
                 <div className="flex flex-wrap gap-[8px]">

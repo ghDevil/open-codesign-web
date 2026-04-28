@@ -4,6 +4,7 @@ import type {
   DesignSystemLibraryItem,
   ImageGenerationSettingsView,
 } from '../../../preload/index';
+import type { Design } from '@open-codesign/shared';
 import {
   buildHostedWorkspaceDisplayPath,
   normalizeHostedWorkspaceUploadPath,
@@ -189,6 +190,10 @@ function pickFilesViaInput(): Promise<Array<Record<string, unknown>>> {
 
 function downloadText(filename: string, content: string, type: string): void {
   const blob = new Blob([content], { type });
+  downloadBlob(filename, blob);
+}
+
+function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -197,6 +202,22 @@ function downloadText(filename: string, content: string, type: string): void {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function parseContentDispositionFilename(value: string | null): string | null {
+  if (!value) return null;
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(value);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+  const quotedMatch = /filename="([^"]+)"/i.exec(value);
+  if (quotedMatch?.[1]) return quotedMatch[1];
+  const plainMatch = /filename=([^;]+)/i.exec(value);
+  return plainMatch?.[1]?.trim() ?? null;
 }
 
 function nextWorkspaceSelectionToken(): string {
@@ -253,13 +274,13 @@ function pickWorkspaceFolderViaInput(): Promise<string | null> {
 async function uploadPendingWorkspaceSelection(
   designId: string,
   selection: PendingWorkspaceSelection,
-): Promise<Awaited<ReturnType<CodesignApi['snapshots']['getDesign']>>> {
+): Promise<Design> {
   const form = new FormData();
   form.append('workspaceLabel', selection.workspaceLabel);
   for (const entry of selection.files) {
     form.append('files', entry.file, entry.relativePath);
   }
-  return apiJson(`/api/designs/${encodeURIComponent(designId)}/workspace`, {
+  return apiJson<Design>(`/api/designs/${encodeURIComponent(designId)}/workspace`, {
     method: 'POST',
     body: form,
   });
@@ -451,15 +472,19 @@ function installWebCodesign(): void {
     },
     export: async ({ format, htmlContent, defaultFilename }) => {
       const filename = defaultFilename ?? `open-codesign.${format === 'markdown' ? 'md' : format}`;
-      if (format === 'html') {
-        downloadText(filename, htmlContent, 'text/html;charset=utf-8');
-        return { status: 'saved', path: filename };
+      const response = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ format, htmlContent, defaultFilename: filename }),
+      });
+      if (!response.ok) {
+        throw new Error(await readError(response));
       }
-      if (format === 'markdown') {
-        downloadText(filename, htmlContent, 'text/markdown;charset=utf-8');
-        return { status: 'saved', path: filename };
-      }
-      throw unsupportedDesktopFeature(`${format.toUpperCase()} export`);
+      const blob = await response.blob();
+      const downloadedFilename =
+        parseContentDispositionFilename(response.headers.get('Content-Disposition')) ?? filename;
+      downloadBlob(downloadedFilename, blob);
+      return { status: 'saved', path: downloadedFilename, bytes: blob.size };
     },
     locale: {
       getSystem: async () => {
