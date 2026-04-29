@@ -52,6 +52,12 @@ export type GenerationStage =
 
 export type ToastVariant = 'success' | 'error' | 'info';
 
+export interface CreateDesignOptions {
+  workspacePath?: string | null;
+  referenceUrl?: string | undefined;
+  projectInstructions?: string | null | undefined;
+}
+
 /** Cap on the in-memory ReportableError ring. Dropping the oldest entries keeps
  *  the store bounded during long sessions while still covering every recent
  *  user-visible error — the Report dialog only needs whatever is on-screen. */
@@ -384,7 +390,7 @@ interface CodesignState {
   ensureCurrentDesign: () => Promise<void>;
   openNewDesignDialog: () => void;
   closeNewDesignDialog: () => void;
-  createNewDesign: (workspacePath?: string | null) => Promise<Design | null>;
+  createNewDesign: (workspacePath?: string | null | CreateDesignOptions) => Promise<Design | null>;
   switchDesign: (id: string) => Promise<void>;
   renameCurrentDesign: (name: string) => Promise<void>;
   renameDesign: (id: string, name: string) => Promise<void>;
@@ -2366,7 +2372,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     await get().createNewDesign();
   },
 
-  async createNewDesign(workspacePath?: string | null) {
+  async createNewDesign(workspacePath?: string | null | CreateDesignOptions) {
     if (!window.codesign) return null;
     if (get().isGenerating) {
       // Don't silently drop the request — callers like the Examples flow
@@ -2383,6 +2389,12 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     let n = 1;
     while (existingNames.has(`Untitled design ${n}`)) n += 1;
     const name = `Untitled design ${n}`;
+    const options: CreateDesignOptions =
+      typeof workspacePath === 'object' && workspacePath !== null
+        ? workspacePath
+        : { workspacePath: workspacePath ?? null };
+    const normalizedReferenceUrl = options.referenceUrl?.trim() ?? '';
+    const normalizedProjectInstructions = options.projectInstructions?.trim() || null;
     try {
       const design = await window.codesign.snapshots.createDesign(name);
       set({
@@ -2403,17 +2415,35 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         canvasTabs: [FILES_TAB],
         activeCanvasTab: 0,
         inputFiles: [],
-        referenceUrl: '',
+        referenceUrl: normalizedReferenceUrl,
         isClarifying: false,
         pendingClarification: null,
       });
-      persistDesignContext(design.id, { inputFiles: [], referenceUrl: '' });
+      persistDesignContext(design.id, { inputFiles: [], referenceUrl: normalizedReferenceUrl });
       await get().loadDesigns();
       void get().loadChatForCurrentDesign();
       void get().loadCommentsForCurrentDesign();
-      if (workspacePath) {
+      if (normalizedProjectInstructions !== null) {
         try {
-          await window.codesign.snapshots.updateWorkspace(design.id, workspacePath, false);
+          const updated = await window.codesign.snapshots.setProjectInstructions(
+            design.id,
+            normalizedProjectInstructions,
+          );
+          set((state) => ({
+            designs: state.designs.map((entry) => (entry.id === updated.id ? updated : entry)),
+          }));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : tr('errors.unknown');
+          get().pushToast({
+            variant: 'error',
+            title: tr('canvas.projectInstructions.saveFailed'),
+            description: msg,
+          });
+        }
+      }
+      if (options.workspacePath) {
+        try {
+          await window.codesign.snapshots.updateWorkspace(design.id, options.workspacePath, false);
           await get().loadDesigns();
         } catch (err) {
           const msg = err instanceof Error ? err.message : tr('errors.unknown');

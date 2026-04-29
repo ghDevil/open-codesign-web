@@ -320,6 +320,56 @@ describe('generateViaAgent() — Phase 1 pass-through', () => {
     expect(prompt).toContain('src/App.tsx');
   });
 
+  it('keeps linked project context compact in the first user turn and exposes detail through tools', async () => {
+    scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT };
+    await generateViaAgent({
+      prompt: 'design a landing page',
+      history: [],
+      model: MODEL,
+      apiKey: 'sk-test',
+      projectInstructions: {
+        instructions:
+          'Build the marketing site to feel editorial and premium. Reuse the existing product language and do not drift into generic startup visuals.',
+      },
+      workspaceContext: {
+        rootPath: '/workspace/app',
+        summary: 'Sampled 1 workspace file from the bound app.',
+        files: [
+          {
+            path: 'src/App.tsx',
+            excerpt: 'export function App() { return <main>Revenue dashboard</main>; }',
+          },
+        ],
+      },
+      attachments: [
+        {
+          name: 'brief.md',
+          path: '/tmp/brief.md',
+          excerpt: 'Audience: climate founders. Tone: premium and calm.',
+        },
+      ],
+      referenceUrl: {
+        url: 'https://example.com',
+        title: 'Example',
+        description: 'A warm editorial layout',
+        excerpt: 'Long extracted reference notes that should stay out of the initial prompt.',
+      },
+    });
+
+    const init = agentCalls[0]?.options.initialState;
+    const toolNames = (init?.tools ?? []).map((tool) => tool.name);
+    const prompt = agentCalls[0]?.prompts[0]?.message;
+
+    expect(typeof prompt).toBe('string');
+    expect(toolNames).toContain('read_project_context');
+    expect(prompt).toContain('read_project_context');
+    expect(prompt).toContain('Project workspace context');
+    expect(prompt).toContain('src/App.tsx');
+    expect(prompt).not.toContain('Revenue dashboard');
+    expect(prompt).not.toContain('Audience: climate founders. Tone: premium and calm.');
+    expect(prompt).not.toContain('Long extracted reference notes that should stay out of the initial prompt.');
+  });
+
   it('forwards apiKey through getApiKey callback', async () => {
     scriptedAgent = { assistantText: RESPONSE_WITH_ARTIFACT };
     await generateViaAgent({

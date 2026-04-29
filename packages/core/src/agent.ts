@@ -72,6 +72,7 @@ import {
 } from './tools/generate-image-asset.js';
 import { makeListFilesTool } from './tools/list-files.js';
 import { makeReadDesignSystemTool } from './tools/read-design-system.js';
+import { makeReadProjectContextTool } from './tools/read-project-context.js';
 import { makeReadUrlTool } from './tools/read-url.js';
 import { makeSetTodosTool } from './tools/set-todos.js';
 import { type TextEditorFsCallbacks, makeTextEditorTool } from './tools/text-editor.js';
@@ -106,19 +107,54 @@ function escapeUntrustedXml(text: string): string {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
-function formatDesignSystem(designSystem: StoredDesignSystem): string {
+function truncateInline(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}...`;
+}
+
+function formatList(items: string[], maxItems: number): string | null {
+  if (items.length === 0) return null;
+  const visible = items.slice(0, maxItems);
+  const suffix = items.length > maxItems ? ` (+${items.length - maxItems} more)` : '';
+  return `${visible.join(', ')}${suffix}`;
+}
+
+function fitContextSections(sections: string[], maxChars: number): string[] {
+  const fitted: string[] = [];
+  let remaining = maxChars;
+  for (const section of sections) {
+    if (remaining < 120) break;
+    if (section.length <= remaining) {
+      fitted.push(section);
+      remaining -= section.length + 2;
+      continue;
+    }
+    fitted.push(truncateInline(section, remaining));
+    break;
+  }
+  return fitted;
+}
+
+function formatDesignSystem(
+  designSystem: StoredDesignSystem,
+  options: { hasReadDesignSystemTool: boolean },
+): string {
   const lines = [
     '## Design system to follow',
     `Root path: ${designSystem.rootPath}`,
     `Summary: ${designSystem.summary}`,
   ];
-  if (designSystem.colors.length > 0) lines.push(`Colors: ${designSystem.colors.join(', ')}`);
-  if (designSystem.fonts.length > 0) lines.push(`Fonts: ${designSystem.fonts.join(', ')}`);
-  if (designSystem.spacing.length > 0) lines.push(`Spacing: ${designSystem.spacing.join(', ')}`);
-  if (designSystem.radius.length > 0) lines.push(`Radius: ${designSystem.radius.join(', ')}`);
-  if (designSystem.shadows.length > 0) lines.push(`Shadows: ${designSystem.shadows.join(', ')}`);
-  if (designSystem.sourceFiles.length > 0) {
-    lines.push(`Source files: ${designSystem.sourceFiles.join(', ')}`);
+  lines.push(
+    `Token counts: ${designSystem.colors.length} colors, ${designSystem.fonts.length} fonts, ${designSystem.spacing.length} spacing values, ${designSystem.radius.length} radii, ${designSystem.shadows.length} shadows.`,
+  );
+  const colors = formatList(designSystem.colors, 2);
+  if (colors) lines.push(`Key colors: ${colors}`);
+  const fonts = formatList(designSystem.fonts, 2);
+  if (fonts) lines.push(`Key fonts: ${fonts}`);
+  const sourceFiles = formatList(designSystem.sourceFiles, 4);
+  if (sourceFiles) lines.push(`Source files: ${sourceFiles}`);
+  if (options.hasReadDesignSystemTool) {
+    lines.push('Need exact tokens? Call read_design_system instead of guessing.');
   }
   const payload = escapeUntrustedXml(lines.join('\n'));
   return `<untrusted_scanned_content type="design_system">
@@ -128,22 +164,20 @@ ${payload}
 </untrusted_scanned_content>`;
 }
 
-function formatWorkspaceContext(workspaceContext: WorkspaceContext): string {
+function formatWorkspaceContext(
+  workspaceContext: WorkspaceContext,
+  options: { hasReadProjectContextTool: boolean },
+): string {
   const lines = [
     '## Project workspace context',
     `Workspace root: ${workspaceContext.rootPath}`,
     `Summary: ${workspaceContext.summary}`,
   ];
   if (workspaceContext.files.length > 0) {
-    lines.push(
-      '',
-      ...workspaceContext.files.map((file, index) => {
-        const parts = [`${index + 1}. ${file.path}`];
-        if (file.note) parts.push(`Note: ${file.note}`);
-        parts.push(`Excerpt:\n${file.excerpt}`);
-        return parts.join('\n');
-      }),
-    );
+    lines.push('', `Sampled files: ${workspaceContext.files.slice(0, 6).map((file) => file.path).join(', ')}`);
+  }
+  if (options.hasReadProjectContextTool) {
+    lines.push('Need a sampled file excerpt? Call read_project_context with section="workspace" and the file path.');
   }
   const payload = escapeUntrustedXml(lines.join('\n'));
   return `<untrusted_scanned_content type="workspace_context">
@@ -155,32 +189,51 @@ ${payload}
 
 function formatProjectInstructions(
   projectInstructions: ProjectInstructionsContext | null | undefined,
+  options: { hasReadProjectContextTool: boolean },
 ): string | null {
   const instructions = projectInstructions?.instructions?.trim();
   if (!instructions) return null;
+  const compact = truncateInline(instructions, 600);
+  const suffix =
+    options.hasReadProjectContextTool && compact !== instructions
+      ? '\n\nNeed the full brief? Call read_project_context with section="project_instructions".'
+      : '';
   return `## Project instructions
-${instructions}`;
+${compact}${suffix}`;
 }
 
-function formatAttachments(attachments: AttachmentContext[]): string | null {
+function formatAttachments(
+  attachments: AttachmentContext[],
+  options: { hasReadProjectContextTool: boolean },
+): string | null {
   if (attachments.length === 0) return null;
   const body = attachments
+    .slice(0, 4)
     .map((file, index) => {
-      const lines = [`${index + 1}. ${file.name} (${file.path})`];
-      if (file.note) lines.push(`Note: ${file.note}`);
-      if (file.excerpt) lines.push(`Excerpt:\n${file.excerpt}`);
-      return lines.join('\n');
+      const kind = file.mediaType ? file.mediaType : file.excerpt ? 'text excerpt available' : 'filename only';
+      return `${index + 1}. ${file.name} (${kind})`;
     })
-    .join('\n\n');
-  return `## Attached local references\n${body}`;
+    .join('\n');
+  const more = attachments.length > 4 ? `\n${attachments.length - 4} more attachment(s) linked.` : '';
+  const suffix = options.hasReadProjectContextTool
+    ? '\nCall read_project_context with section="attachments" and the attachment name for detail.'
+    : '';
+  return `## Attached local references\n${body}${more}${suffix}`;
 }
 
-function formatReferenceUrl(referenceUrl: ReferenceUrlContext | null | undefined): string | null {
+function formatReferenceUrl(
+  referenceUrl: ReferenceUrlContext | null | undefined,
+  options: { hasReadProjectContextTool: boolean },
+): string | null {
   if (!referenceUrl) return null;
   const lines = ['## Reference URL', `URL: ${referenceUrl.url}`];
   if (referenceUrl.title) lines.push(`Title: ${referenceUrl.title}`);
   if (referenceUrl.description) lines.push(`Description: ${referenceUrl.description}`);
-  if (referenceUrl.excerpt) lines.push(`Excerpt:\n${referenceUrl.excerpt}`);
+  if (referenceUrl.excerpt && !options.hasReadProjectContextTool) {
+    lines.push(`Excerpt:\n${truncateInline(referenceUrl.excerpt, 400)}`);
+  } else if (referenceUrl.excerpt) {
+    lines.push('Extracted notes are available via read_project_context with section="reference".');
+  }
   return lines.join('\n');
 }
 
@@ -190,25 +243,58 @@ function buildContextSections(input: {
   workspaceContext?: WorkspaceContext | null | undefined;
   attachments?: AttachmentContext[] | undefined;
   referenceUrl?: ReferenceUrlContext | null | undefined;
+  hasReadDesignSystemTool: boolean;
+  hasReadProjectContextTool: boolean;
 }): string[] {
   const sections: string[] = [];
-  if (input.designSystem) sections.push(formatDesignSystem(input.designSystem));
-  const projectInstructionsSection = formatProjectInstructions(input.projectInstructions);
+  if (input.designSystem) {
+    sections.push(
+      formatDesignSystem(input.designSystem, {
+        hasReadDesignSystemTool: input.hasReadDesignSystemTool,
+      }),
+    );
+  }
+  const projectInstructionsSection = formatProjectInstructions(input.projectInstructions, {
+    hasReadProjectContextTool: input.hasReadProjectContextTool,
+  });
   if (projectInstructionsSection) sections.push(projectInstructionsSection);
-  if (input.workspaceContext) sections.push(formatWorkspaceContext(input.workspaceContext));
-  const attachmentSection = formatAttachments(input.attachments ?? []);
+  if (input.workspaceContext) {
+    sections.push(
+      formatWorkspaceContext(input.workspaceContext, {
+        hasReadProjectContextTool: input.hasReadProjectContextTool,
+      }),
+    );
+  }
+  const attachmentSection = formatAttachments(input.attachments ?? [], {
+    hasReadProjectContextTool: input.hasReadProjectContextTool,
+  });
   if (attachmentSection) sections.push(attachmentSection);
-  const referenceSection = formatReferenceUrl(input.referenceUrl);
+  const referenceSection = formatReferenceUrl(input.referenceUrl, {
+    hasReadProjectContextTool: input.hasReadProjectContextTool,
+  });
   if (referenceSection) sections.push(referenceSection);
   return sections;
 }
 
-function buildUserPromptWithContext(prompt: string, contextSections: string[]): string {
+function buildUserPromptWithContext(
+  prompt: string,
+  contextSections: string[],
+  options: { hasReadDesignSystemTool: boolean; hasReadProjectContextTool: boolean },
+): string {
   if (contextSections.length === 0) return prompt.trim();
+  const packedSections = fitContextSections(contextSections, 2_600);
+  const toolHints: string[] = [];
+  if (options.hasReadDesignSystemTool) toolHints.push('read_design_system for exact tokens');
+  if (options.hasReadProjectContextTool) {
+    toolHints.push('read_project_context for workspace samples, attachments, and reference notes');
+  }
+  const guidance = toolHints.length > 0
+    ? `Use the following compact local context summaries first. When you need detail, call ${toolHints.join(' and ')} instead of assuming.`
+    : 'Use the following local context and references when making design decisions. Follow the design system closely when one is provided.';
   return [
     prompt.trim(),
-    'Use the following local context and references when making design decisions. Follow the design system closely when one is provided.',
-    contextSections.join('\n\n'),
+    guidance,
+    packedSections.join('\n\n'),
   ].join('\n\n');
 }
 
@@ -804,19 +890,6 @@ export async function generateViaAgent(
       ...(skillResult.blobs.length > 0 ? { skills: skillResult.blobs } : {}),
     });
 
-  const userContent = buildUserPromptWithContext(
-    input.prompt,
-    buildContextSections({
-      ...(input.designSystem !== undefined ? { designSystem: input.designSystem } : {}),
-      ...(input.projectInstructions !== undefined
-        ? { projectInstructions: input.projectInstructions }
-        : {}),
-      ...(input.workspaceContext !== undefined ? { workspaceContext: input.workspaceContext } : {}),
-      ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
-      ...(input.referenceUrl !== undefined ? { referenceUrl: input.referenceUrl } : {}),
-    }),
-  );
-
   // Assemble the toolset. Caller can pass an explicit list (including []) to
   // override the default. Defaults:
   //   - set_todos       (always — no deps)
@@ -831,6 +904,16 @@ export async function generateViaAgent(
       TSchema,
       unknown
     >,
+  );
+  defaultTools.push(
+    makeReadProjectContextTool(() => ({
+      ...(input.projectInstructions !== undefined
+        ? { projectInstructions: input.projectInstructions }
+        : {}),
+      ...(input.workspaceContext !== undefined ? { workspaceContext: input.workspaceContext } : {}),
+      ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
+      ...(input.referenceUrl !== undefined ? { referenceUrl: input.referenceUrl } : {}),
+    })) as unknown as AgentTool<TSchema, unknown>,
   );
   if (deps.fs) {
     defaultTools.push(makeTextEditorTool(deps.fs) as unknown as AgentTool<TSchema, unknown>);
@@ -855,6 +938,23 @@ export async function generateViaAgent(
     (deps.extraTools && deps.extraTools.length > 0
       ? [...defaultTools, ...deps.extraTools]
       : defaultTools);
+  const hasReadDesignSystemTool = tools.some((tool) => tool.name === 'read_design_system');
+  const hasReadProjectContextTool = tools.some((tool) => tool.name === 'read_project_context');
+  const userContent = buildUserPromptWithContext(
+    input.prompt,
+    buildContextSections({
+      ...(input.designSystem !== undefined ? { designSystem: input.designSystem } : {}),
+      ...(input.projectInstructions !== undefined
+        ? { projectInstructions: input.projectInstructions }
+        : {}),
+      ...(input.workspaceContext !== undefined ? { workspaceContext: input.workspaceContext } : {}),
+      ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
+      ...(input.referenceUrl !== undefined ? { referenceUrl: input.referenceUrl } : {}),
+      hasReadDesignSystemTool,
+      hasReadProjectContextTool,
+    }),
+    { hasReadDesignSystemTool, hasReadProjectContextTool },
+  );
   const encourageToolUse = deps.encourageToolUse ?? tools.length > 0;
   const activeGuidance = deps.generateImageAsset
     ? `${AGENTIC_TOOL_GUIDANCE}\n\n${IMAGE_ASSET_TOOL_GUIDANCE}`

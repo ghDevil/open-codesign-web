@@ -293,20 +293,49 @@ function escapeUntrustedXml(text: string): string {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
+function truncateInline(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}...`;
+}
+
+function formatList(items: string[], maxItems: number): string | null {
+  if (items.length === 0) return null;
+  const visible = items.slice(0, maxItems);
+  const suffix = items.length > maxItems ? ` (+${items.length - maxItems} more)` : '';
+  return `${visible.join(', ')}${suffix}`;
+}
+
+function fitContextSections(sections: string[], maxChars: number): string[] {
+  const fitted: string[] = [];
+  let remaining = maxChars;
+  for (const section of sections) {
+    if (remaining < 120) break;
+    if (section.length <= remaining) {
+      fitted.push(section);
+      remaining -= section.length + 2;
+      continue;
+    }
+    fitted.push(truncateInline(section, remaining));
+    break;
+  }
+  return fitted;
+}
+
 function formatDesignSystem(designSystem: StoredDesignSystem): string {
   const lines = [
     '## Design system to follow',
     `Root path: ${designSystem.rootPath}`,
     `Summary: ${designSystem.summary}`,
   ];
-  if (designSystem.colors.length > 0) lines.push(`Colors: ${designSystem.colors.join(', ')}`);
-  if (designSystem.fonts.length > 0) lines.push(`Fonts: ${designSystem.fonts.join(', ')}`);
-  if (designSystem.spacing.length > 0) lines.push(`Spacing: ${designSystem.spacing.join(', ')}`);
-  if (designSystem.radius.length > 0) lines.push(`Radius: ${designSystem.radius.join(', ')}`);
-  if (designSystem.shadows.length > 0) lines.push(`Shadows: ${designSystem.shadows.join(', ')}`);
-  if (designSystem.sourceFiles.length > 0) {
-    lines.push(`Source files: ${designSystem.sourceFiles.join(', ')}`);
-  }
+  lines.push(
+    `Token counts: ${designSystem.colors.length} colors, ${designSystem.fonts.length} fonts, ${designSystem.spacing.length} spacing values, ${designSystem.radius.length} radii, ${designSystem.shadows.length} shadows.`,
+  );
+  const colors = formatList(designSystem.colors, 2);
+  if (colors) lines.push(`Key colors: ${colors}`);
+  const fonts = formatList(designSystem.fonts, 2);
+  if (fonts) lines.push(`Key fonts: ${fonts}`);
+  const sourceFiles = formatList(designSystem.sourceFiles, 4);
+  if (sourceFiles) lines.push(`Source files: ${sourceFiles}`);
   // Wrap in untrusted tag — codebase content may contain adversarial text.
   // The system prompt instructs the model to treat this as data only.
   // Escape XML special chars so malicious content cannot break out of the wrapper tag.
@@ -325,15 +354,7 @@ function formatWorkspaceContext(workspaceContext: WorkspaceContext): string {
     `Summary: ${workspaceContext.summary}`,
   ];
   if (workspaceContext.files.length > 0) {
-    lines.push(
-      '',
-      ...workspaceContext.files.map((file, index) => {
-        const parts = [`${index + 1}. ${file.path}`];
-        if (file.note) parts.push(`Note: ${file.note}`);
-        parts.push(`Excerpt:\n${file.excerpt}`);
-        return parts.join('\n');
-      }),
-    );
+    lines.push('', `Sampled files: ${workspaceContext.files.slice(0, 6).map((file) => file.path).join(', ')}`);
   }
   const payload = escapeUntrustedXml(lines.join('\n'));
   return `<untrusted_scanned_content type="workspace_context">
@@ -348,21 +369,22 @@ function formatProjectInstructions(
 ): string | null {
   const instructions = projectInstructions?.instructions?.trim();
   if (!instructions) return null;
+  const compact = truncateInline(instructions, 600);
   return `## Project instructions
-${instructions}`;
+${compact}`;
 }
 
 function formatAttachments(attachments: AttachmentContext[]): string | null {
   if (attachments.length === 0) return null;
   const body = attachments
+    .slice(0, 4)
     .map((file, index) => {
-      const lines = [`${index + 1}. ${file.name} (${file.path})`];
-      if (file.note) lines.push(`Note: ${file.note}`);
-      if (file.excerpt) lines.push(`Excerpt:\n${file.excerpt}`);
-      return lines.join('\n');
+      const kind = file.mediaType ? file.mediaType : file.excerpt ? 'text excerpt available' : 'filename only';
+      return `${index + 1}. ${file.name} (${kind})`;
     })
     .join('\n\n');
-  return `## Attached local references\n${body}`;
+  const more = attachments.length > 4 ? `\n${attachments.length - 4} more attachment(s) linked.` : '';
+  return `## Attached local references\n${body}${more}`;
 }
 
 function formatReferenceUrl(referenceUrl: ReferenceUrlContext | null | undefined): string | null {
@@ -370,7 +392,7 @@ function formatReferenceUrl(referenceUrl: ReferenceUrlContext | null | undefined
   const lines = ['## Reference URL', `URL: ${referenceUrl.url}`];
   if (referenceUrl.title) lines.push(`Title: ${referenceUrl.title}`);
   if (referenceUrl.description) lines.push(`Description: ${referenceUrl.description}`);
-  if (referenceUrl.excerpt) lines.push(`Excerpt:\n${referenceUrl.excerpt}`);
+  if (referenceUrl.excerpt) lines.push(`Excerpt:\n${truncateInline(referenceUrl.excerpt, 400)}`);
   return lines.join('\n');
 }
 
@@ -395,14 +417,16 @@ function buildContextSections(input: {
 
 function buildPrompt(prompt: string, contextSections: string[]): string {
   if (contextSections.length === 0) return prompt.trim();
+  const packedSections = fitContextSections(contextSections, 2_600);
   return [
     prompt.trim(),
     'Use the following local context and references when making design decisions. Follow the design system closely when one is provided.',
-    contextSections.join('\n\n'),
+    packedSections.join('\n\n'),
   ].join('\n\n');
 }
 
 function buildRevisionPrompt(input: ApplyCommentInput, contextSections: string[]): string {
+  const packedSections = fitContextSections(contextSections, 2_600);
   const parts = [
     'Revise the existing HTML artifact below.',
     'Keep the overall structure, copy, and layout intact unless the user request requires a broader change.',
@@ -414,11 +438,11 @@ function buildRevisionPrompt(input: ApplyCommentInput, contextSections: string[]
     `Selected element snippet:\n${input.selection.outerHTML || '(empty)'}`,
     `Current full HTML:\n${input.html}`,
   ];
-  if (contextSections.length > 0) {
+  if (packedSections.length > 0) {
     parts.push(
       'You also have the following supporting context. Use it to preserve brand consistency while applying the requested change.',
     );
-    parts.push(contextSections.join('\n\n'));
+    parts.push(packedSections.join('\n\n'));
   }
   parts.push(
     'Return exactly one full updated HTML artifact wrapped in the required <artifact> tag. Do not use Markdown code fences. A short summary outside the artifact is enough.',

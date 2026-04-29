@@ -1257,9 +1257,9 @@ app.post('/api/generate', async (req: Request, res: Response) => {
     logger: coreLogger,
   });
 
-  const resolvedDesignSystem = await resolveDesignSystemForRequest(
-    (payload as { designSystemId?: string }).designSystemId,
-  );
+  const resolvedDesignSystem =
+    (await resolveDesignSystemForRequest((payload as { designSystemId?: string }).designSystemId)) ??
+    figmaPrefetch.designSystem;
   const workspaceContext = buildHostedWorkspaceContext(db, designId);
   const projectInstructions =
     designId !== null ? getDesign(db, designId)?.projectInstructions ?? null : null;
@@ -2761,19 +2761,29 @@ async function buildPrefetchedFigmaPromptContext(prompt: string, referenceUrl?: 
   prompt: string;
   toolServers: McpServerConfig[] | null;
   figmaImages: Array<{ data: string; mimeType: string }>;
+  designSystem: import('@open-codesign/shared').StoredDesignSystem | null;
 }> {
   const allText = referenceUrl ? `${prompt}\n${referenceUrl}` : prompt;
   const figmaUrls = extractFigmaFileUrls(allText);
   if (figmaUrls.length === 0) {
-    return { prompt, toolServers: null, figmaImages: [] };
+    return { prompt, toolServers: null, figmaImages: [], designSystem: null };
   }
 
   const blocks: string[] = [];
   const figmaImages: Array<{ data: string; mimeType: string }> = [];
+  let designSystem: import('@open-codesign/shared').StoredDesignSystem | null = null;
 
   for (const url of figmaUrls) {
     const parsed = parseFigmaUrl(url);
     if (!parsed) continue;
+
+    if (designSystem === null) {
+      try {
+        designSystem = await importDesignSystemFromFigma(url);
+      } catch {
+        designSystem = null;
+      }
+    }
 
     const context = await fetchFigmaFileContext(parsed.fileKey, parsed.nodeId);
     if (context) {
@@ -2785,7 +2795,7 @@ async function buildPrefetchedFigmaPromptContext(prompt: string, referenceUrl?: 
   }
 
   if (blocks.length === 0) {
-    return { prompt, toolServers: null, figmaImages: [] };
+    return { prompt, toolServers: null, figmaImages: [], designSystem };
   }
 
   const screenshotNote = figmaImages.length > 0
@@ -2804,7 +2814,7 @@ async function buildPrefetchedFigmaPromptContext(prompt: string, referenceUrl?: 
     (server) => server.name === 'playwright' || server.name === 'bcgpt-basecamp',
   );
 
-  return { prompt: nextPrompt, toolServers, figmaImages };
+  return { prompt: nextPrompt, toolServers, figmaImages, designSystem };
 }
 
 function applyPlaywrightPromptSteering(prompt: string): string {

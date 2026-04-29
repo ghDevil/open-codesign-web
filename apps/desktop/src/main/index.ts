@@ -206,6 +206,15 @@ function createWindow(): void {
 
 type Database = BetterSqlite3.Database;
 
+function applyReferencePromptPrefix(
+  prompt: string,
+  prefix: string | undefined,
+): string {
+  const trimmedPrefix = prefix?.trim();
+  if (!trimmedPrefix) return prompt;
+  return `${trimmedPrefix}\n\n${prompt}`;
+}
+
 /**
  * Pull an HTTP status code out of a caught provider error. Mirrors
  * `packages/providers/src/retry.ts::extractStatus` intentionally — we don't
@@ -559,6 +568,7 @@ function registerIpcHandlers(db: Database | null): void {
     id: string,
     designId: string | null,
     previousHtml: string | null,
+    promptImages?: Array<{ data: string; mimeType: 'image/png' | 'image/jpeg' }>,
   ): ReturnType<typeof generate> => {
     if (!USE_AGENT_RUNTIME) return generate(input);
     const sendEvent = (event: AgentStreamEvent) => {
@@ -642,6 +652,7 @@ function registerIpcHandlers(db: Database | null): void {
       fs,
       runtimeVerify,
       ...(generateImageAsset !== undefined ? { generateImageAsset } : {}),
+      ...(promptImages && promptImages.length > 0 ? { promptImages } : {}),
       onEvent: (event: AgentEvent) => {
         // High-signal only. Skip per-token deltas and inner message_*
         // markers. Emit a concise summary at turn_end.
@@ -1024,7 +1035,10 @@ function registerIpcHandlers(db: Database | null): void {
         const isCodex = active.model.provider === CHATGPT_CODEX_PROVIDER_ID;
         const result = await runGenerate(
           {
-            prompt: payload.prompt,
+            prompt: applyReferencePromptPrefix(
+              payload.prompt,
+              promptContext.referencePromptPrefix,
+            ),
             history: payload.history,
             model: active.model,
             apiKey,
@@ -1050,6 +1064,7 @@ function registerIpcHandlers(db: Database | null): void {
           id,
           payload.designId ?? null,
           payload.previousHtml ?? null,
+          promptContext.promptImages,
         );
         logIpc.info('generate.ok', {
           generationId: id,
@@ -1174,7 +1189,10 @@ function registerIpcHandlers(db: Database | null): void {
         const isCodex = active.model.provider === CHATGPT_CODEX_PROVIDER_ID;
         const result = await runGenerate(
           {
-            prompt: payload.prompt,
+            prompt: applyReferencePromptPrefix(
+              payload.prompt,
+              promptContext.referencePromptPrefix,
+            ),
             history: payload.history,
             model: active.model,
             apiKey,
@@ -1199,6 +1217,7 @@ function registerIpcHandlers(db: Database | null): void {
           id,
           null,
           null,
+          promptContext.promptImages,
         );
         logIpc.info('generate.ok', {
           generationId: id,
@@ -1428,7 +1447,10 @@ function registerIpcHandlers(db: Database | null): void {
         };
         try {
           return await clarifyPrompt({
-            prompt: payload.prompt,
+            prompt: applyReferencePromptPrefix(
+              payload.prompt,
+              promptContext.referencePromptPrefix,
+            ),
             model: active.model,
             apiKey,
             ...(baseUrl !== undefined ? { baseUrl } : {}),

@@ -1,5 +1,5 @@
 import { useT } from '@open-codesign/i18n';
-import { Layout, Monitor, Presentation, Smartphone, Sparkles, X } from 'lucide-react';
+import { Layout, Link2, Monitor, Presentation, Smartphone, Sparkles, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useCodesignStore } from '../store';
 
@@ -60,6 +60,8 @@ export function NewDesignDialog() {
   const [kind, setKind] = useState<ProjectKind>('prototype');
   const [fidelity, setFidelity] = useState<Fidelity>('high');
   const [speakerNotes, setSpeakerNotes] = useState(false);
+  const [figmaUrl, setFigmaUrl] = useState('');
+  const [projectBrief, setProjectBrief] = useState('');
   const [creating, setCreating] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -69,6 +71,8 @@ export function NewDesignDialog() {
       setKind('prototype');
       setFidelity('high');
       setSpeakerNotes(false);
+      setFigmaUrl('');
+      setProjectBrief('');
     } else {
       // Focus name field after mount
       setTimeout(() => nameRef.current?.focus(), 60);
@@ -81,7 +85,12 @@ export function NewDesignDialog() {
     if (creating) return;
     setCreating(true);
     try {
-      const design = await createNewDesign(null);
+      const normalizedFigmaUrl = figmaUrl.trim();
+      const normalizedProjectBrief = projectBrief.trim();
+      const design = await createNewDesign({
+        referenceUrl: normalizedFigmaUrl.length > 0 ? normalizedFigmaUrl : undefined,
+        projectInstructions: normalizedProjectBrief.length > 0 ? normalizedProjectBrief : null,
+      });
       if (design) {
         const intent: ProjectIntent = {
           kind,
@@ -116,7 +125,7 @@ export function NewDesignDialog() {
     >
       <div
         role="document"
-        className="w-full max-w-[420px] rounded-[var(--radius-2xl)] bg-[var(--color-background)] border border-[var(--color-border)] shadow-[var(--shadow-elevated)] animate-[panel-in_160ms_ease-out] overflow-hidden"
+        className="w-full max-w-[560px] rounded-[var(--radius-2xl)] bg-[var(--color-background)] border border-[var(--color-border)] shadow-[var(--shadow-elevated)] animate-[panel-in_160ms_ease-out] overflow-hidden"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-4">
@@ -137,6 +146,15 @@ export function NewDesignDialog() {
         </div>
 
         <div className="px-5 pb-5 space-y-4">
+          <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
+            <p className="m-0 text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--color-text-muted)]">
+              Start with context
+            </p>
+            <p className="mt-1 mb-0 text-[12px] leading-[1.5] text-[var(--color-text-secondary)]">
+              Seed the project with a Figma frame and a brief now so the first generation starts from real structure instead of a loose prompt.
+            </p>
+          </div>
+
           {/* Name input — first, most important */}
           <input
             ref={nameRef}
@@ -147,6 +165,52 @@ export function NewDesignDialog() {
             disabled={creating}
             className="w-full h-10 px-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--text-sm)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none transition-colors"
           />
+
+          <div className="space-y-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+            <div className="space-y-1">
+              <div className="text-[12px] font-medium text-[var(--color-text-primary)]">
+                Figma frame or file URL
+              </div>
+              <div className="text-[11px] leading-[1.45] text-[var(--color-text-muted)]">
+                Paste a Figma link to extract frame structure, copy, screenshot, and design-system cues before the first run.
+              </div>
+            </div>
+            <div className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-3">
+              <Link2 className="h-4 w-4 shrink-0 text-[var(--color-text-muted)]" aria-hidden />
+              <input
+                type="url"
+                value={figmaUrl}
+                onChange={(e) => setFigmaUrl(e.target.value)}
+                placeholder="https://www.figma.com/design/..."
+                disabled={creating}
+                className="h-10 flex-1 bg-transparent text-[var(--text-sm)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
+              />
+            </div>
+            {figmaUrl.trim().length > 0 ? (
+              <div className="rounded-[var(--radius-md)] bg-[var(--color-background)] px-3 py-2 text-[11px] leading-[1.5] text-[var(--color-text-secondary)]">
+                Figma mode will bias generation toward exact frame replication first, then responsive adaptation.
+              </div>
+            ) : null}
+          </div>
+
+          <div className="space-y-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+            <div className="space-y-1">
+              <div className="text-[12px] font-medium text-[var(--color-text-primary)]">
+                Project brief
+              </div>
+              <div className="text-[11px] leading-[1.45] text-[var(--color-text-muted)]">
+                Persistent goals, product constraints, or notes the model should keep across iterations.
+              </div>
+            </div>
+            <textarea
+              value={projectBrief}
+              onChange={(e) => setProjectBrief(e.target.value)}
+              placeholder="Audience, product goals, requirements, or anything the model should keep in mind for every turn."
+              disabled={creating}
+              rows={4}
+              className="w-full resize-y rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-[var(--text-sm)] leading-[1.5] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
+            />
+          </div>
 
           {/* Type selector */}
           <div className="grid grid-cols-4 gap-2">

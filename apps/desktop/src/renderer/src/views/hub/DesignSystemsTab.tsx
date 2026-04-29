@@ -21,7 +21,7 @@ const MODE_HINT: Record<Mode, string> = {
   github:
     'Paste a public GitHub URL, "owner/repo", "owner/repo@branch", or "owner/repo@branch:path/to/subdir". We shallow-clone, scan likely design-system files, then discard the clone.',
   figma:
-    'Paste a figma.com/file or /design URL. We pull color & text styles, components, and frame styles via the Figma REST API.',
+    'Paste a figma.com/file or /design URL. We pull reusable color, type, component, and frame-style cues into the design-system library. For one specific project frame, paste the Figma URL in that project context instead.',
   manual: 'Paste your tokens directly. One value per line.',
 };
 
@@ -476,6 +476,9 @@ export function DesignSystemsTab() {
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
               {busy ? 'Importing...' : 'Import and activate'}
             </button>
+            <p className="m-0 text-[11px] leading-[1.45] text-[var(--color-text-muted)]">
+              Use this when you want a reusable library entry. If you want one design to replicate one frame closely, keep the Figma URL on that design's context panel instead.
+            </p>
           </div>
         ) : null}
 

@@ -39,9 +39,10 @@ export function buildComposerContextItems(input: {
 
   const referenceUrl = input.referenceUrl.trim();
   if (referenceUrl.length > 0) {
+    const isFigmaReference = /https?:\/\/(?:www\.)?figma\.com\/(?:file|design)\//i.test(referenceUrl);
     items.push({
       key: 'reference-url',
-      label: referenceUrl,
+      label: isFigmaReference ? 'Figma frame reference' : referenceUrl,
       icon: 'url',
       actionLabel: referenceUrl,
     });

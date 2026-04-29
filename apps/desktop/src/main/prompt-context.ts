@@ -12,6 +12,7 @@ import {
   type LocalInputFile,
   type StoredDesignSystem,
 } from '@open-codesign/shared';
+import { importDesignSystemFromFigma } from './design-system-import';
 
 const TEXT_EXTS = new Set([
   '.css',
@@ -43,17 +44,18 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
   '.webp': 'image/webp',
 };
 
-const MAX_ATTACHMENT_CHARS = 6_000;
+const MAX_ATTACHMENT_CHARS = 1_200;
 const MAX_TEXT_ATTACHMENT_BYTES = 256_000;
 const MAX_BINARY_ATTACHMENT_BYTES = 10_000_000; // 10MB - images get full read for data URL, non-image binary only needs filename
-const MAX_URL_EXCERPT_CHARS = 1_200;
+const MAX_URL_EXCERPT_CHARS = 500;
 const MAX_URL_RESPONSE_BYTES = 256_000;
 const REFERENCE_CONTENT_TYPES = ['text/html', 'application/xhtml+xml'];
+const FIGMA_CONTEXT_MAX_CHARS = 1_600;
 const MAX_WORKSPACE_SCAN_ENTRIES = 800;
-const MAX_WORKSPACE_FILES = 12;
+const MAX_WORKSPACE_FILES = 6;
 const MAX_WORKSPACE_FILE_BYTES = 128_000;
-const MAX_WORKSPACE_FILE_CHARS = 1_800;
-const MAX_WORKSPACE_TOTAL_CHARS = 12_000;
+const MAX_WORKSPACE_FILE_CHARS = 500;
+const MAX_WORKSPACE_TOTAL_CHARS = 2_400;
 
 const WORKSPACE_TEXT_EXTS = new Set([
   '.css',
@@ -100,6 +102,289 @@ const WORKSPACE_SKIP_DIRS = new Set([
   'temp',
   'tmp',
 ]);
+
+const FIGMA_REPLICA_PROMPT_PREFIX = [
+  'Figma frame context is attached for this request. Treat that frame as the source of truth.',
+  'Required workflow:',
+  '1. Use the extracted Figma layout, copy, assets, and design-system cues before writing code.',
+  '2. Recreate the same hierarchy, spacing, typography, colors, and imagery in responsive HTML/CSS.',
+  '3. Keep copy and component relationships faithful to the frame unless the user explicitly asks for a change.',
+  '4. Make the result responsive after the frame match is correct; do not invent a different concept or random style direction.',
+].join('\n');
+
+type PromptImageContext = {
+  data: string;
+  mimeType: 'image/png' | 'image/jpeg';
+};
+
+interface FigmaColor {
+  r: number;
+  g: number;
+  b: number;
+  a?: number;
+}
+
+interface FigmaFill {
+  type?: string;
+  color?: FigmaColor;
+  imageRef?: string;
+  gradientStops?: Array<{ color?: FigmaColor; position?: number }>;
+}
+
+interface FigmaTypeStyle {
+  fontFamily?: string;
+  fontWeight?: number;
+  fontSize?: number;
+  lineHeightPx?: number;
+  letterSpacing?: number;
+}
+
+interface FigmaNode {
+  id?: string;
+  name?: string;
+  type?: string;
+  characters?: string;
+  fills?: FigmaFill[];
+  strokes?: FigmaFill[];
+  backgroundColor?: FigmaColor;
+  style?: FigmaTypeStyle;
+  cornerRadius?: number;
+  itemSpacing?: number;
+  layoutMode?: string;
+  absoluteBoundingBox?: { x: number; y: number; width: number; height: number };
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  visible?: boolean;
+  children?: FigmaNode[];
+}
+
+interface FigmaReferenceInspection {
+  referenceUrl: ReferenceUrlContext;
+  promptImages: PromptImageContext[];
+  designSystem: StoredDesignSystem | null;
+  referencePromptPrefix: string;
+}
+
+function isFigmaUrl(url: string): boolean {
+  return /https?:\/\/(?:www\.)?figma\.com\/(?:file|design)\//i.test(url);
+}
+
+function parseFigmaUrl(url: string): { fileKey: string; nodeId: string | null } | null {
+  const match = url.match(/figma\.com\/(?:file|design)\/([A-Za-z0-9]+)/i);
+  if (!match?.[1]) return null;
+  const nodeId = new URL(url).searchParams.get('node-id');
+  return { fileKey: match[1], nodeId };
+}
+
+function figmaColorToHex(color: FigmaColor): string {
+  const r = Math.round(color.r * 255).toString(16).padStart(2, '0');
+  const g = Math.round(color.g * 255).toString(16).padStart(2, '0');
+  const b = Math.round(color.b * 255).toString(16).padStart(2, '0');
+  return `#${r}${g}${b}`;
+}
+
+function figmaColorToRgba(color: FigmaColor): string {
+  const alpha = color.a ?? 1;
+  if (alpha === 1) return figmaColorToHex(color);
+  return `rgba(${Math.round(color.r * 255)}, ${Math.round(color.g * 255)}, ${Math.round(color.b * 255)}, ${alpha.toFixed(2)})`;
+}
+
+function pushUnique(target: string[], value: string, max: number): void {
+  if (!value || target.includes(value) || target.length >= max) return;
+  target.push(value);
+}
+
+function truncateForPrompt(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n\n[truncated ${value.length - maxChars} chars]`;
+}
+
+async function fetchFigmaReferenceInspection(url: string): Promise<FigmaReferenceInspection> {
+  const parsed = parseFigmaUrl(url);
+  if (!parsed) {
+    return {
+      referenceUrl: {
+        url,
+        title: 'Figma reference',
+        description: 'A Figma frame was provided. Match it closely instead of inventing a new direction.',
+      },
+      promptImages: [],
+      designSystem: null,
+      referencePromptPrefix: FIGMA_REPLICA_PROMPT_PREFIX,
+    };
+  }
+
+  const apiKey = process.env['MCP_FIGMA_API_KEY'];
+  if (!apiKey) {
+    return {
+      referenceUrl: {
+        url,
+        title: 'Figma reference',
+        description:
+          'A Figma frame was provided, but live Figma extraction is unavailable because MCP_FIGMA_API_KEY is not configured.',
+        excerpt:
+          'Do not invent a new visual direction. Treat the linked Figma frame as the source of truth and stay as close as possible to its structure and styling.',
+      },
+      promptImages: [],
+      designSystem: null,
+      referencePromptPrefix: FIGMA_REPLICA_PROMPT_PREFIX,
+    };
+  }
+
+  let designSystem: StoredDesignSystem | null = null;
+  try {
+    designSystem = await importDesignSystemFromFigma(url);
+  } catch {
+    designSystem = null;
+  }
+
+  try {
+    const depth = parsed.nodeId ? 6 : 4;
+    const fileUrl = parsed.nodeId
+      ? `https://api.figma.com/v1/files/${parsed.fileKey}/nodes?ids=${encodeURIComponent(parsed.nodeId)}&depth=${depth}`
+      : `https://api.figma.com/v1/files/${parsed.fileKey}?depth=${depth}`;
+
+    const response = await fetch(fileUrl, {
+      headers: { 'X-Figma-Token': apiKey },
+    });
+    if (!response.ok) throw new Error(`Figma API ${response.status}`);
+
+    const fileData = (await response.json()) as Record<string, unknown>;
+    const fileName = (fileData['name'] as string | undefined) ?? parsed.fileKey;
+    const nodeKey = parsed.nodeId ? parsed.nodeId.replace(/-/g, ':') : null;
+    const nodesMap = fileData['nodes'] as Record<string, { document?: FigmaNode }> | undefined;
+    const rootDoc = nodeKey
+      ? nodesMap?.[nodeKey]?.document
+      : (fileData['document'] as FigmaNode | undefined);
+
+    const layerLines: string[] = [];
+    const texts: string[] = [];
+    const colors: string[] = [];
+    const typography: string[] = [];
+
+    function collectFills(fills: FigmaFill[] | undefined): void {
+      if (!fills) return;
+      for (const fill of fills) {
+        if (fill.color) pushUnique(colors, figmaColorToRgba(fill.color), 24);
+        for (const stop of fill.gradientStops ?? []) {
+          if (stop.color) pushUnique(colors, figmaColorToRgba(stop.color), 24);
+        }
+      }
+    }
+
+    function walk(node: FigmaNode, depthLevel: number): void {
+      if (!node || node.visible === false) return;
+      const indent = '  '.repeat(Math.min(depthLevel, 5));
+      const bounds = node.absoluteBoundingBox;
+      const size = bounds ? ` (${Math.round(bounds.width)}x${Math.round(bounds.height)})` : '';
+      const radius = typeof node.cornerRadius === 'number' ? ` radius=${node.cornerRadius}` : '';
+      const spacing = typeof node.itemSpacing === 'number' ? ` gap=${node.itemSpacing}` : '';
+      const padding =
+        node.paddingTop !== undefined
+          ? ` pad=${node.paddingTop}/${node.paddingRight ?? 0}/${node.paddingBottom ?? 0}/${node.paddingLeft ?? 0}`
+          : '';
+
+      if (node.type === 'TEXT' && node.characters) {
+        layerLines.push(`${indent}TEXT: "${node.characters.slice(0, 72)}"${size}`);
+        pushUnique(texts, node.characters.trim(), 12);
+        if (node.style?.fontFamily) {
+          const styleLine = `${node.style.fontFamily} ${node.style.fontWeight ?? '?'} - ${node.style.fontSize ?? '?'}px`;
+          pushUnique(typography, styleLine, 8);
+        }
+      } else if (node.type) {
+        const layout = node.layoutMode ? ` layout=${node.layoutMode}` : '';
+        layerLines.push(`${indent}${node.type}: ${node.name ?? ''}${layout}${spacing}${padding}${size}${radius}`.trim());
+      }
+
+      collectFills(node.fills);
+      if (node.backgroundColor) pushUnique(colors, figmaColorToRgba(node.backgroundColor), 24);
+
+      for (const child of node.children ?? []) {
+        walk(child, depthLevel + 1);
+      }
+    }
+
+    if (rootDoc) walk(rootDoc, 0);
+
+    let screenshot: PromptImageContext[] = [];
+    const screenshotNodeId = parsed.nodeId ?? rootDoc?.id ?? null;
+    if (screenshotNodeId) {
+      const screenshotId = screenshotNodeId.replace(/-/g, ':');
+      const imageRes = await fetch(
+        `https://api.figma.com/v1/images/${parsed.fileKey}?ids=${encodeURIComponent(screenshotId)}&format=jpg&scale=0.5`,
+        { headers: { 'X-Figma-Token': apiKey } },
+      );
+      if (imageRes.ok) {
+        const imageData = (await imageRes.json()) as { images?: Record<string, string> };
+        const screenshotUrl = imageData.images?.[screenshotId];
+        if (typeof screenshotUrl === 'string' && screenshotUrl.length > 0) {
+          const binaryRes = await fetch(screenshotUrl);
+          if (binaryRes.ok) {
+            const buffer = await binaryRes.arrayBuffer();
+            if (buffer.byteLength < 600_000) {
+              screenshot = [{
+                data: Buffer.from(buffer).toString('base64'),
+                mimeType: 'image/jpeg',
+              }];
+            }
+          }
+        }
+      }
+    }
+
+    const excerptLines = [
+      `File: ${fileName}`,
+      ...(parsed.nodeId ? [`Frame node: ${parsed.nodeId}`] : []),
+      '',
+      'Required interpretation order: screenshot -> layout structure -> copy -> design system cues.',
+      '',
+      '=== Layout Structure ===',
+      ...layerLines.slice(0, 28),
+    ];
+
+    if (texts.length > 0) {
+      excerptLines.push('', '=== Copy ===', ...texts.slice(0, 8).map((text) => `- ${text.slice(0, 120)}`));
+    }
+    if (typography.length > 0) {
+      excerptLines.push('', '=== Typography ===', ...typography.map((item) => `- ${item}`));
+    }
+    if (colors.length > 0) {
+      excerptLines.push('', '=== Colors ===', ...colors.slice(0, 8).map((item) => `- ${item}`));
+    }
+    if (designSystem) {
+      excerptLines.push('', '=== Auto-extracted Design System ===', designSystem.summary);
+    }
+
+    return {
+      referenceUrl: {
+        url,
+        title: fileName,
+        description:
+          'Figma frame reference. Match the linked frame faithfully before making responsive adaptations.',
+        excerpt: truncateForPrompt(excerptLines.join('\n'), FIGMA_CONTEXT_MAX_CHARS),
+      },
+      promptImages: screenshot,
+      designSystem,
+      referencePromptPrefix: FIGMA_REPLICA_PROMPT_PREFIX,
+    };
+  } catch {
+    return {
+      referenceUrl: {
+        url,
+        title: 'Figma reference',
+        description:
+          'A Figma frame was provided. Use it as the source of truth even though live extraction failed for this run.',
+        excerpt:
+          'Stay as close as possible to the linked frame. Preserve structure, copy hierarchy, spacing rhythm, and visual language instead of inventing a fresh design direction.',
+      },
+      promptImages: [],
+      designSystem,
+      referencePromptPrefix: FIGMA_REPLICA_PROMPT_PREFIX,
+    };
+  }
+}
 
 interface WorkspaceCandidate {
   absolutePath: string;
@@ -532,6 +817,8 @@ export interface PreparedPromptContext {
   workspaceContext: WorkspaceContext | null;
   attachments: AttachmentContext[];
   referenceUrl: ReferenceUrlContext | null;
+  referencePromptPrefix?: string | undefined;
+  promptImages: PromptImageContext[];
 }
 
 export async function preparePromptContext(input: {
@@ -543,16 +830,31 @@ export async function preparePromptContext(input: {
   const attachments = await Promise.all(
     (input.attachments ?? []).map((file) => readAttachment(file)),
   );
-  const referenceUrl =
-    typeof input.referenceUrl === 'string' && input.referenceUrl.trim().length > 0
-      ? await inspectReferenceUrl(input.referenceUrl.trim())
-      : null;
+  let referenceUrl: ReferenceUrlContext | null = null;
+  let promptImages: PromptImageContext[] = [];
+  let referencePromptPrefix: string | undefined;
+  let designSystem = input.designSystem ?? null;
+
+  if (typeof input.referenceUrl === 'string' && input.referenceUrl.trim().length > 0) {
+    const trimmedReferenceUrl = input.referenceUrl.trim();
+    if (isFigmaUrl(trimmedReferenceUrl)) {
+      const figmaInspection = await fetchFigmaReferenceInspection(trimmedReferenceUrl);
+      referenceUrl = figmaInspection.referenceUrl;
+      promptImages = figmaInspection.promptImages;
+      referencePromptPrefix = figmaInspection.referencePromptPrefix;
+      if (!designSystem) designSystem = figmaInspection.designSystem;
+    } else {
+      referenceUrl = await inspectReferenceUrl(trimmedReferenceUrl);
+    }
+  }
   const workspaceContext = await readWorkspaceContext(input.workspacePath);
 
   return {
-    designSystem: input.designSystem ?? null,
+    designSystem,
     workspaceContext,
     attachments,
     referenceUrl,
+    ...(referencePromptPrefix ? { referencePromptPrefix } : {}),
+    promptImages,
   };
 }

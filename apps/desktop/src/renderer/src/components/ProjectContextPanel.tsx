@@ -64,6 +64,10 @@ export function ProjectContextPanel() {
   const selectedDesignSystemId = currentDesignId
     ? readSelectedDesignSystemId(currentDesignId)
     : null;
+  const normalizedReferenceUrl = referenceUrl.trim();
+  const isFigmaReference = /https?:\/\/(?:www\.)?figma\.com\/(?:file|design)\//i.test(
+    normalizedReferenceUrl,
+  );
 
   const effectiveDesignSystem = useMemo(() => {
     const selected = designSystems.find((item) => item.id === selectedDesignSystemId);
@@ -344,6 +348,11 @@ export function ProjectContextPanel() {
             </button>
           ) : null}
         </div>
+        {isFigmaReference ? (
+          <div className="mt-2 rounded-[var(--radius-sm)] border border-[var(--color-border-subtle)] bg-[var(--color-background)] px-[var(--space-3)] py-[var(--space-2_5)] text-[11px] leading-[1.5] text-[var(--color-text-secondary)]">
+            Figma mode is active for this design. On the next run, the app will extract the frame structure, visible copy, screenshot, and design-system cues before generating.
+          </div>
+        ) : null}
       </ContextSection>
 
       <ContextSection

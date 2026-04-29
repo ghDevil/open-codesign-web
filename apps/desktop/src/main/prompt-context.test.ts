@@ -155,4 +155,84 @@ describe('preparePromptContext', () => {
 
     expect(result.workspaceContext).toBeNull();
   });
+
+  it('enriches Figma URLs with structured context, screenshot, and design-system cues', async () => {
+    vi.stubEnv('MCP_FIGMA_API_KEY', 'figma-test-key');
+
+    const figmaFileResponse = {
+      name: 'Marketing Landing',
+      document: {
+        id: '1:2',
+        type: 'FRAME',
+        name: 'Hero Frame',
+        layoutMode: 'VERTICAL',
+        fills: [{ type: 'SOLID', color: { r: 0.12, g: 0.16, b: 0.24, a: 1 } }],
+        children: [
+          {
+            id: '1:3',
+            type: 'TEXT',
+            name: 'Headline',
+            characters: 'Design systems for modern teams',
+            style: { fontFamily: 'Inter', fontWeight: 700, fontSize: 48 },
+          },
+        ],
+      },
+    };
+    const figmaNodesResponse = {
+      name: 'Marketing Landing',
+      nodes: {
+        '1:2': {
+          document: figmaFileResponse.document,
+        },
+      },
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(figmaNodesResponse), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(figmaFileResponse), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ images: { '1:2': 'https://cdn.example.com/figma-frame.jpg' } }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(Buffer.from([0xff, 0xd8, 0xff, 0xd9]), {
+          status: 200,
+          headers: { 'content-type': 'image/jpeg' },
+        }),
+      );
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await preparePromptContext({
+      referenceUrl: 'https://www.figma.com/design/AbCdEf123456/Hero?node-id=1-2',
+    });
+
+    expect(result.referenceUrl).toMatchObject({
+      url: 'https://www.figma.com/design/AbCdEf123456/Hero?node-id=1-2',
+      title: 'Marketing Landing',
+    });
+    expect(result.referenceUrl?.excerpt).toContain('Layout Structure');
+    expect(result.referenceUrl?.excerpt).toContain('Auto-extracted Design System');
+    expect(result.referenceUrl?.excerpt).toContain('Required interpretation order');
+    expect(result.designSystem?.rootPath).toBe('figma:AbCdEf123456');
+    expect(result.referencePromptPrefix).toContain('Treat that frame as the source of truth');
+    expect(result.promptImages).toHaveLength(1);
+    expect(result.promptImages[0]?.mimeType).toBe('image/jpeg');
+  });
 });
