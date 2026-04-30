@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmptyState } from '../preview/EmptyState';
 import { ErrorState } from '../preview/ErrorState';
 import { useCodesignStore } from '../store';
+import { readDesignIntent } from '../lib/design-intent';
 import { CanvasErrorBar } from './CanvasErrorBar';
 import { CanvasTabBar } from './CanvasTabBar';
 import { FilesTabView } from './FilesTabView';
@@ -445,6 +446,11 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   }, [currentDesignId, previewHtml, previewHtmlByDesign, recentDesignIds]);
 
   const activeTab = canvasTabs[activeCanvasTab];
+  const currentDesignIntent = useMemo(
+    () => (currentDesignId ? readDesignIntent(currentDesignId) : null),
+    [currentDesignId],
+  );
+  const isAnimationDesign = currentDesignIntent?.kind === 'animation';
   const animationCode = useMemo(
     () => (previewHtml ? extractAnimationCodeFromHtml(previewHtml) : null),
     [previewHtml],
@@ -507,8 +513,8 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
     );
   } else if (activeTab?.kind === 'files' && previewHtml) {
     body = <FilesTabView />;
-  } else if (animationCode && previewHtml) {
-    body = <AnimationStudioPanel html={previewHtml} />;
+  } else if (isAnimationDesign && (!previewHtml || animationCode)) {
+    body = <AnimationStudioPanel html={previewHtml ?? ''} />;
   } else if (animationSpec && previewHtml) {
     body = <AnimationPreviewPanel html={previewHtml} />;
   } else {
