@@ -18,6 +18,8 @@ set -euo pipefail
 BRANCH="${1:-$(git rev-parse --abbrev-ref HEAD)}"
 APP_CONTAINER="app-bokgcsgk0so8ws0wos0cgcc8"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+HOST_UID="$(id -u)"
+HOST_GID="$(id -g)"
 
 echo "==> Branch: $BRANCH"
 echo "==> Repo:   $REPO_DIR"
@@ -58,8 +60,11 @@ docker exec "$APP_CONTAINER" rm -rf /app/apps/desktop/out/renderer
 docker cp apps/desktop/out/renderer "$APP_CONTAINER":/app/apps/desktop/out/renderer
 
 echo "==> Materializing Remotion runtime deps"
-rm -rf .runtime-package
-mkdir -p .runtime-package
+docker run --rm \
+  -v "$REPO_DIR:/app" \
+  -w /app \
+  node:22-slim \
+  bash -c "rm -rf /app/.runtime-package && mkdir -p /app/.runtime-package && chown -R $HOST_UID:$HOST_GID /app/.runtime-package"
 cat > .runtime-package/package.json <<'EOF'
 {
   "private": true,
@@ -77,6 +82,7 @@ EOF
 docker run --rm \
   -v "$REPO_DIR:/app" \
   -w /app/.runtime-package \
+  -u "$HOST_UID:$HOST_GID" \
   node:22-slim \
   bash -c "npm install --omit=dev --no-package-lock --silent"
 mkdir -p .runtime-package/node_modules/@open-codesign/animation
