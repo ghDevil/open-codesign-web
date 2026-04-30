@@ -2805,7 +2805,7 @@ async function fetchFigmaFileContext(
         try {
           const screenshotId = screenshotNodeId.replace(/-/g, ':');
           const sRes = await fetch(
-            `https://api.figma.com/v1/images/${fileKey}?ids=${encodeURIComponent(screenshotId)}&format=jpg&scale=0.15`,
+            `https://api.figma.com/v1/images/${fileKey}?ids=${encodeURIComponent(screenshotId)}&format=jpg&scale=0.2`,
             { headers: { 'X-Figma-Token': apiKey }, signal: sController.signal },
           );
           if (sRes.ok) {
