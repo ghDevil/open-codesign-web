@@ -204,7 +204,7 @@ export const BRAND = {
 
 export const PROJECT_SCHEMA_VERSION = 1 as const;
 
-export const ProjectType = z.enum(['prototype', 'slideDeck', 'template', 'other']);
+export const ProjectType = z.enum(['prototype', 'slideDeck', 'animation', 'template', 'other']);
 export type ProjectType = z.infer<typeof ProjectType>;
 
 export const ProjectFidelity = z.enum(['wireframe', 'highFidelity']);
@@ -324,6 +324,7 @@ export type { CanonicalWire } from './base-url';
 
 export { DesignTokenV1, DesignTokenSet } from './design-token';
 export type { DesignToken } from './design-token';
+export * from './animation';
 
 export {
   ChatMessageKind,

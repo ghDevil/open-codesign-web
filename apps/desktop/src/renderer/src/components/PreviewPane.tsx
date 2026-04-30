@@ -18,8 +18,10 @@ import { FilesTabView } from './FilesTabView';
 import { PhoneFrame } from './PhoneFrame';
 import { PreviewToolbar } from './PreviewToolbar';
 import { TweakPanel } from './TweakPanel';
+import { AnimationPreviewPanel } from './AnimationPreviewPanel';
 import { CommentBubble } from './comment/CommentBubble';
 import { PinOverlay } from './comment/PinOverlay';
+import { extractAnimationSpecFromHtml } from '@open-codesign/shared';
 
 export interface PreviewPaneProps {
   onPickStarter: (prompt: string) => void;
@@ -442,6 +444,10 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   }, [currentDesignId, previewHtml, previewHtmlByDesign, recentDesignIds]);
 
   const activeTab = canvasTabs[activeCanvasTab];
+  const animationSpec = useMemo(
+    () => (previewHtml ? extractAnimationSpecFromHtml(previewHtml) : null),
+    [previewHtml],
+  );
   const showCommentUi = interactionMode === 'comment';
   const snapshotComments = currentSnapshotId
     ? comments.filter((c) => c.snapshotId === currentSnapshotId)
@@ -496,6 +502,8 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
     );
   } else if (activeTab?.kind === 'files' && previewHtml) {
     body = <FilesTabView />;
+  } else if (animationSpec && previewHtml) {
+    body = <AnimationPreviewPanel html={previewHtml} />;
   } else {
     // Pool slots stay mounted even when the current design has no preview —
     // background iframes for recently-visited designs keep their documents
@@ -548,7 +556,7 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
         <CanvasErrorBar />
         <div className="relative flex-1 overflow-hidden">
           {body}
-          {previewHtml ? <TweakPanel iframeRef={iframeRef} /> : null}
+          {previewHtml && !animationSpec ? <TweakPanel iframeRef={iframeRef} /> : null}
         </div>
         {commentBubble && interactionMode === 'comment'
           ? (() => {

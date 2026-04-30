@@ -1,4 +1,5 @@
 import { useT } from '@open-codesign/i18n';
+import { extractAnimationSpecFromHtml } from '@open-codesign/shared';
 import { Download, MessageSquare } from 'lucide-react';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
 import type { ExportFormat } from '../../../preload/index';
@@ -55,8 +56,19 @@ export function PreviewToolbar(): ReactElement {
   }, [toastMessage, dismissToast]);
 
   const disabled = !previewHtml;
+  const isAnimation = previewHtml ? extractAnimationSpecFromHtml(previewHtml) !== null : false;
   const commentActive = interactionMode === 'comment';
   const exportItems: ExportItem[] = [
+    ...(isAnimation
+      ? [
+          {
+            format: 'mp4' as const,
+            label: 'MP4 video',
+            ready: true,
+            hint: 'Rendered through Remotion',
+          },
+        ]
+      : []),
     {
       format: 'html',
       label: t('export.items.html.label'),
@@ -97,22 +109,25 @@ export function PreviewToolbar(): ReactElement {
         </output>
       )}
 
-      <button
-        type="button"
-        disabled={disabled}
-        aria-pressed={commentActive}
-        onClick={() => setInteractionMode(commentActive ? 'default' : 'comment')}
-        className={`inline-flex items-center gap-[6px] h-[26px] px-[10px] text-[12px] transition-[background-color,color,transform] duration-[var(--duration-faster)] active:scale-[var(--scale-press-down)] disabled:opacity-40 disabled:pointer-events-none ${
-          commentActive
-            ? 'text-[var(--color-accent)]'
-            : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]'
-        }`}
-      >
-        <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
-        {t('preview.commentMode')}
-      </button>
+      {!isAnimation ? (
+        <button
+          type="button"
+          disabled={disabled}
+          aria-pressed={commentActive}
+          onClick={() => setInteractionMode(commentActive ? 'default' : 'comment')}
+          className={`inline-flex items-center gap-[6px] h-[26px] px-[10px] text-[12px] transition-[background-color,color,transform] duration-[var(--duration-faster)] active:scale-[var(--scale-press-down)] disabled:opacity-40 disabled:pointer-events-none ${
+            commentActive
+              ? 'text-[var(--color-accent)]'
+              : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]'
+          }`}
+        >
+          <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
+          {t('preview.commentMode')}
+        </button>
+      ) : null}
 
-      <div className="relative" ref={zoomRef}>
+      {!isAnimation ? (
+        <div className="relative" ref={zoomRef}>
         <button
           type="button"
           disabled={disabled}
@@ -149,7 +164,8 @@ export function PreviewToolbar(): ReactElement {
             ))}
           </div>
         )}
-      </div>
+        </div>
+      ) : null}
 
       <div className="relative" ref={ref}>
         <button

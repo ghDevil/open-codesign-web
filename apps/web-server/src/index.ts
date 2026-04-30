@@ -575,6 +575,7 @@ interface WebExportRequest {
 
 const EXPORT_CONTENT_TYPES: Record<ExporterFormat, string> = {
   html: 'text/html; charset=utf-8',
+  mp4: 'video/mp4',
   markdown: 'text/markdown; charset=utf-8',
   pdf: 'application/pdf',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -591,6 +592,7 @@ function parseWebExportRequest(raw: unknown): WebExportRequest {
   const defaultFilename = record['defaultFilename'];
   if (
     format !== 'html' &&
+    format !== 'mp4' &&
     format !== 'pdf' &&
     format !== 'pptx' &&
     format !== 'zip' &&

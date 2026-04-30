@@ -9,7 +9,7 @@
 
 import { CodesignError, ERROR_CODES } from '@open-codesign/shared';
 
-export const EXPORTER_FORMATS = ['html', 'pdf', 'pptx', 'zip', 'markdown'] as const;
+export const EXPORTER_FORMATS = ['html', 'mp4', 'pdf', 'pptx', 'zip', 'markdown'] as const;
 export type ExporterFormat = (typeof EXPORTER_FORMATS)[number];
 
 export interface ExportOptions {
@@ -27,6 +27,7 @@ export function isExporterReady(_format: ExporterFormat): boolean {
 }
 
 export type { ExportHtmlOptions } from './html';
+export { exportMp4 } from './mp4';
 export type { ExportPdfOptions } from './pdf';
 export type { ExportPptxOptions } from './pptx';
 export type { ExportZipOptions, ZipAsset } from './zip';
@@ -49,6 +50,10 @@ export async function exportArtifact(
 ): Promise<ExportResult> {
   if (format === 'html') {
     return exportHtml(htmlContent, destinationPath);
+  }
+  if (format === 'mp4') {
+    const mod = await import('./mp4');
+    return mod.exportMp4(htmlContent, destinationPath);
   }
   if (format === 'pdf') {
     const mod = await import('./pdf');

@@ -5,6 +5,7 @@ import { dialog, ipcMain } from './electron-runtime';
 
 const FORMAT_FILTERS: Record<ExporterFormat, Electron.FileFilter[]> = {
   html: [{ name: 'HTML', extensions: ['html'] }],
+  mp4: [{ name: 'MP4 video', extensions: ['mp4'] }],
   pdf: [{ name: 'PDF', extensions: ['pdf'] }],
   pptx: [{ name: 'PowerPoint', extensions: ['pptx'] }],
   zip: [{ name: 'ZIP archive', extensions: ['zip'] }],
@@ -33,6 +34,7 @@ export function parseRequest(raw: unknown): ExportRequest {
   const defaultFilename = r['defaultFilename'];
   if (
     format !== 'html' &&
+    format !== 'mp4' &&
     format !== 'pdf' &&
     format !== 'pptx' &&
     format !== 'zip' &&

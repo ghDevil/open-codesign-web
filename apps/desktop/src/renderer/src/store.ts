@@ -24,7 +24,7 @@ import { diagnoseGenerateFailure } from '@open-codesign/shared';
 import { computeFingerprint } from '@open-codesign/shared/fingerprint';
 import { create } from 'zustand';
 import type { StoreApi } from 'zustand';
-import { clearDesignIntent, readDesignIntent } from './components/NewDesignDialog';
+import { clearDesignIntent, copyDesignIntent, readDesignIntent } from './lib/design-intent';
 import type { ClarifyPromptQuestion, CodesignApi, ExportFormat } from '../../preload/index';
 import { recordAction, snapshotTimeline } from './lib/action-timeline';
 import {
@@ -1424,7 +1424,18 @@ const HUMAN_TWEAK_AUTHORITY_LINES = [
 
 export interface PromptContextExtras {
   /** Project intent captured at design creation: prototype kind + fidelity. */
-  intent?: { kind: string; fidelity?: string; speakerNotes?: boolean } | null;
+  intent?: {
+    kind: string;
+    fidelity?: string;
+    speakerNotes?: boolean;
+    animation?: {
+      aspectRatio: string;
+      fps: number;
+      durationInFrames: number;
+      motionStyle: string;
+      narration?: string | undefined;
+    };
+  } | null;
   /** Plain-text content extracted from any DOCX/PPTX/XLSX uploads. */
   extractedDocs?: Array<{ name: string; kind: string; text: string }>;
 }
@@ -1441,6 +1452,8 @@ const KIND_GUIDANCE: Record<string, string> = {
     'Output a clickable prototype: phone or browser-frame app screen with realistic interactions.',
   slideDeck:
     'Output a multi-slide deck (each slide is a section with id="slide-1", "slide-2", …). Use scroll-snap for navigation. Cover, agenda, content slides, then closing.',
+  animation:
+    'Output a Remotion-ready animation. Return a normal HTML artifact, but include an embedded JSON animation spec in <script id="open-codesign-animation" type="application/json">...</script> so the app can preview and export it.',
   template:
     'Honor the chosen template starter — extend rather than override its structure unless asked.',
   other:
@@ -1458,6 +1471,24 @@ function intentToPromptHeader(intent: PromptContextExtras['intent']): string | n
   if (intent.speakerNotes && intent.kind === 'slideDeck') {
     lines.push(
       '- Speaker notes: include a `<aside class="speaker-notes">…</aside>` block under each slide with delivery cues; hide it from default view but show with a "Notes" toggle.',
+    );
+  }
+  if (intent.kind === 'animation' && intent.animation) {
+    lines.push(`- Animation format: ${intent.animation.aspectRatio} at ${intent.animation.fps} fps.`);
+    lines.push(`- Animation duration: ${intent.animation.durationInFrames} frames total.`);
+    lines.push(`- Motion style: ${intent.animation.motionStyle}.`);
+    if (intent.animation.narration?.trim()) {
+      lines.push(`- Narration or pacing notes: ${intent.animation.narration.trim()}`);
+    }
+    lines.push(
+      '- The HTML artifact must contain `<script id="open-codesign-animation" type="application/json">...</script>` with valid JSON.',
+    );
+    lines.push(
+      '- Top-level JSON fields: `version`, `title`, `aspectRatio`, `fps`, `durationInFrames`, `motionStyle`, `palette`, and `scenes`.',
+    );
+    lines.push('- Supported scene layouts: `hero`, `split`, `cards`, `quote`, `metrics`, `cta`.');
+    lines.push(
+      '- Each scene should include `id`, `layout`, `durationInFrames`, `title`, plus any relevant `body`, `bullets`, `cards`, `stats`, `quote`, or `ctaLabel` fields.',
     );
   }
   return lines.join('\n');
@@ -2624,6 +2655,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     try {
       const cloned = await window.codesign.snapshots.duplicateDesign(id, name);
       copyDesignContext(id, cloned.id);
+      copyDesignIntent(id, cloned.id);
       copySelectedDesignSystemId(id, cloned.id);
       await get().loadDesigns();
       get().pushToast({
@@ -2654,6 +2686,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     try {
       await window.codesign.snapshots.softDeleteDesign(id);
       clearDesignContext(id);
+      clearDesignIntent(id);
       clearSelectedDesignSystemId(id);
       if (get().autoPolishFired.has(id)) {
         const nextFired = new Set(get().autoPolishFired);

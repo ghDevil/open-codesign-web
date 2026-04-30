@@ -7,6 +7,7 @@ import {
   readSelectedDesignSystemId,
   writeSelectedDesignSystemId,
 } from '../lib/design-system-selection';
+import { ensureAnimationContext, readDesignIntent, writeDesignIntent } from '../lib/design-intent';
 import { workspacePathComparisonKey } from '../lib/workspace-path';
 import { useCodesignStore } from '../store';
 
@@ -51,6 +52,8 @@ export function ProjectContextPanel() {
   const setView = useCodesignStore((s) => s.setView);
   const setHubTab = useCodesignStore((s) => s.setHubTab);
   const currentDesign = designs.find((d) => d.id === currentDesignId) ?? null;
+  const designIntent = currentDesignId ? readDesignIntent(currentDesignId) : null;
+  const animationContext = ensureAnimationContext(designIntent?.animation);
 
   const [folderExists, setFolderExists] = useState<boolean | null>(null);
   const [instructionsDraft, setInstructionsDraft] = useState(currentDesign?.projectInstructions ?? '');
@@ -204,6 +207,22 @@ export function ProjectContextPanel() {
 
   const instructionsDirty =
     instructionsDraft.trim() !== (currentDesign?.projectInstructions ?? '').trim();
+
+  function updateAnimationIntent(
+    patch: Partial<ReturnType<typeof ensureAnimationContext>>,
+  ): void {
+    if (!currentDesignId) return;
+    const nextIntent = {
+      ...(designIntent ?? { kind: 'animation' as const }),
+      kind: 'animation' as const,
+      animation: ensureAnimationContext({
+        ...animationContext,
+        ...patch,
+      }),
+    };
+    writeDesignIntent(currentDesignId, nextIntent);
+    useCodesignStore.setState((state) => ({ ...state }));
+  }
 
   return (
     <div className="flex flex-col gap-[var(--space-3)] px-[var(--space-4)] py-[var(--space-4)]">
@@ -412,6 +431,111 @@ export function ProjectContextPanel() {
           </label>
         </div>
       </ContextSection>
+
+      {designIntent?.kind === 'animation' ? (
+        <ContextSection
+          title="Animation settings"
+          hint="Keep timing, framing, and motion direction in one place so the AI and Remotion preview stay aligned."
+        >
+          <div className="grid gap-3">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-1 text-[11px] text-[var(--color-text-muted)]">
+                Aspect ratio
+                <select
+                  value={animationContext.aspectRatio}
+                  onChange={(event) =>
+                    updateAnimationIntent({
+                      aspectRatio: event.target.value as typeof animationContext.aspectRatio,
+                    })
+                  }
+                  className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-[var(--space-3)] text-[12px] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+                >
+                  {['16:9', '9:16', '1:1', '4:5', '21:9'].map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1 text-[11px] text-[var(--color-text-muted)]">
+                Motion style
+                <select
+                  value={animationContext.motionStyle}
+                  onChange={(event) =>
+                    updateAnimationIntent({
+                      motionStyle: event.target.value as typeof animationContext.motionStyle,
+                    })
+                  }
+                  className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-[var(--space-3)] text-[12px] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+                >
+                  <option value="cinematic">Cinematic</option>
+                  <option value="snappy">Snappy</option>
+                  <option value="calm">Calm</option>
+                  <option value="playful">Playful</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-1 text-[11px] text-[var(--color-text-muted)]">
+                Duration (seconds)
+                <input
+                  type="number"
+                  min={2}
+                  max={120}
+                  value={Math.max(1, Math.round(animationContext.durationInFrames / animationContext.fps))}
+                  onChange={(event) => {
+                    const seconds = Math.max(2, Math.min(120, Number(event.target.value) || 6));
+                    updateAnimationIntent({
+                      durationInFrames: seconds * animationContext.fps,
+                    });
+                  }}
+                  className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-[var(--space-3)] text-[12px] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+                />
+              </label>
+              <label className="grid gap-1 text-[11px] text-[var(--color-text-muted)]">
+                FPS
+                <select
+                  value={animationContext.fps}
+                  onChange={(event) => {
+                    const fps = Number(event.target.value);
+                    const seconds = Math.max(
+                      2,
+                      Math.round(animationContext.durationInFrames / animationContext.fps),
+                    );
+                    updateAnimationIntent({
+                      fps,
+                      durationInFrames: seconds * fps,
+                    });
+                  }}
+                  className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-[var(--space-3)] text-[12px] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+                >
+                  {[24, 30, 60].map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <label className="grid gap-1 text-[11px] text-[var(--color-text-muted)]">
+              Narration or pacing notes
+              <textarea
+                value={animationContext.narration ?? ''}
+                onChange={(event) =>
+                  updateAnimationIntent({
+                    narration: event.target.value.trim().length > 0 ? event.target.value : undefined,
+                  })
+                }
+                rows={4}
+                placeholder="What should the animation build toward? Mention voiceover beats, reveals, or emotional pacing."
+                className="min-h-[96px] w-full resize-y rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-[var(--space-3)] py-[var(--space-3)] text-[12px] leading-[1.55] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
+              />
+            </label>
+          </div>
+        </ContextSection>
+      ) : null}
     </div>
   );
 }

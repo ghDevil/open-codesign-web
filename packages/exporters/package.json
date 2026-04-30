@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./html": "./src/html.ts",
+    "./mp4": "./src/mp4.ts",
     "./pdf": "./src/pdf.ts",
     "./pptx": "./src/pptx.ts",
     "./zip": "./src/zip.ts",
@@ -18,7 +19,10 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@open-codesign/animation": "workspace:*",
     "@open-codesign/shared": "workspace:*",
+    "@remotion/bundler": "^4.0.454",
+    "@remotion/renderer": "^4.0.454",
     "pptxgenjs": "^4.0.1",
     "puppeteer-core": "^24.42.0",
     "zip-lib": "^1.0.4"

@@ -1165,6 +1165,7 @@
       "prototype": "Web",
       "mobile": "Mobile",
       "slideDeck": "Deck",
+      "animation": "Animation",
       "template": "From template",
       "other": "Other"
     },
@@ -1242,6 +1243,7 @@
     "PREFERENCES_INVALID_TIMEOUT": "The generation timeout value is invalid.",
     "SKILL_LOAD_FAILED": "One or more skills failed to load. Check your skill files for errors.",
     "EXPORTER_UNKNOWN": "Unknown export format requested.",
+    "EXPORTER_MP4_FAILED": "MP4 export failed. Ensure the animation spec is valid and try again.",
     "EXPORTER_NO_CHROME": "Chrome or Chromium was not found. Install it to enable PDF export.",
     "EXPORTER_PDF_FAILED": "PDF export failed. Ensure Chrome is installed and try again.",
     "EXPORTER_PPTX_FAILED": "PowerPoint export failed.",

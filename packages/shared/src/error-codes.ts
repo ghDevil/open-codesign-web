@@ -77,6 +77,7 @@ export const ERROR_CODES = {
 
   // Exporters
   EXPORTER_UNKNOWN: 'EXPORTER_UNKNOWN',
+  EXPORTER_MP4_FAILED: 'EXPORTER_MP4_FAILED',
   EXPORTER_NO_CHROME: 'EXPORTER_NO_CHROME',
   EXPORTER_PDF_FAILED: 'EXPORTER_PDF_FAILED',
   EXPORTER_PPTX_FAILED: 'EXPORTER_PPTX_FAILED',
@@ -348,6 +349,11 @@ export const ERROR_CODE_DESCRIPTIONS: Record<CodesignErrorCode, ErrorCodeDescrip
   EXPORTER_UNKNOWN: {
     userFacing: 'Unknown export format requested.',
     userFacingKey: 'err.EXPORTER_UNKNOWN',
+    category: 'other',
+  },
+  EXPORTER_MP4_FAILED: {
+    userFacing: 'MP4 export failed. Ensure the animation spec is valid and try again.',
+    userFacingKey: 'err.EXPORTER_MP4_FAILED',
     category: 'other',
   },
   EXPORTER_NO_CHROME: {

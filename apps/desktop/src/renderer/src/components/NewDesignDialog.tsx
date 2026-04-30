@@ -1,53 +1,18 @@
 import { useT } from '@open-codesign/i18n';
-import { Layout, Link2, Monitor, Presentation, Smartphone, Sparkles, X } from 'lucide-react';
+import { Clapperboard, Layout, Link2, Monitor, Presentation, Smartphone, Sparkles, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { ensureAnimationContext, type Fidelity, type ProjectIntent, type ProjectKind, writeDesignIntent } from '../lib/design-intent';
 import { useCodesignStore } from '../store';
 
-type ProjectKind = 'prototype' | 'slideDeck' | 'mobile' | 'other';
-type Fidelity = 'wireframe' | 'high';
-
-const KIND_ORDER: ProjectKind[] = ['prototype', 'mobile', 'slideDeck', 'other'];
+const KIND_ORDER: ProjectKind[] = ['prototype', 'mobile', 'slideDeck', 'animation', 'other'];
 
 const KIND_META: Record<ProjectKind, { icon: typeof Layout; color: string }> = {
   prototype: { icon: Monitor, color: 'var(--color-accent)' },
   mobile: { icon: Smartphone, color: '#10b981' },
   slideDeck: { icon: Presentation, color: '#f59e0b' },
+  animation: { icon: Clapperboard, color: '#f472b6' },
   other: { icon: Sparkles, color: '#8b5cf6' },
 };
-
-interface ProjectIntent {
-  kind: ProjectKind;
-  fidelity?: Fidelity;
-  speakerNotes?: boolean;
-}
-
-const INTENT_STORAGE_KEY = 'open-codesign:new-design-intent';
-
-export function readDesignIntent(designId: string): ProjectIntent | null {
-  try {
-    const raw = window.localStorage.getItem(`${INTENT_STORAGE_KEY}:${designId}`);
-    if (!raw) return null;
-    return JSON.parse(raw) as ProjectIntent;
-  } catch {
-    return null;
-  }
-}
-
-export function clearDesignIntent(designId: string): void {
-  try {
-    window.localStorage.removeItem(`${INTENT_STORAGE_KEY}:${designId}`);
-  } catch {
-    /* localStorage unavailable */
-  }
-}
-
-function writeDesignIntent(designId: string, intent: ProjectIntent): void {
-  try {
-    window.localStorage.setItem(`${INTENT_STORAGE_KEY}:${designId}`, JSON.stringify(intent));
-  } catch {
-    /* localStorage unavailable */
-  }
-}
 
 export function NewDesignDialog() {
   const t = useT();
@@ -60,6 +25,11 @@ export function NewDesignDialog() {
   const [kind, setKind] = useState<ProjectKind>('prototype');
   const [fidelity, setFidelity] = useState<Fidelity>('high');
   const [speakerNotes, setSpeakerNotes] = useState(false);
+  const [animationAspectRatio, setAnimationAspectRatio] = useState<'16:9' | '9:16' | '1:1' | '4:5' | '21:9'>('16:9');
+  const [animationFps, setAnimationFps] = useState(30);
+  const [animationDurationSec, setAnimationDurationSec] = useState(6);
+  const [animationMotionStyle, setAnimationMotionStyle] = useState<'cinematic' | 'snappy' | 'calm' | 'playful'>('cinematic');
+  const [animationNarration, setAnimationNarration] = useState('');
   const [figmaUrl, setFigmaUrl] = useState('');
   const [projectBrief, setProjectBrief] = useState('');
   const [creating, setCreating] = useState(false);
@@ -71,6 +41,11 @@ export function NewDesignDialog() {
       setKind('prototype');
       setFidelity('high');
       setSpeakerNotes(false);
+      setAnimationAspectRatio('16:9');
+      setAnimationFps(30);
+      setAnimationDurationSec(6);
+      setAnimationMotionStyle('cinematic');
+      setAnimationNarration('');
       setFigmaUrl('');
       setProjectBrief('');
     } else {
@@ -96,6 +71,19 @@ export function NewDesignDialog() {
           kind,
           ...(kind === 'prototype' ? { fidelity } : {}),
           ...(kind === 'slideDeck' ? { speakerNotes } : {}),
+          ...(kind === 'animation'
+            ? {
+                animation: ensureAnimationContext({
+                  aspectRatio: animationAspectRatio,
+                  fps: animationFps,
+                  durationInFrames: animationFps * animationDurationSec,
+                  motionStyle: animationMotionStyle,
+                  ...(animationNarration.trim().length > 0
+                    ? { narration: animationNarration.trim() }
+                    : {}),
+                }),
+              }
+            : {}),
         };
         writeDesignIntent(design.id, intent);
         if (name.trim().length > 0) {
@@ -213,7 +201,7 @@ export function NewDesignDialog() {
           </div>
 
           {/* Type selector */}
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-5 gap-2">
             {KIND_ORDER.map((k) => {
               const { icon: Icon, color } = KIND_META[k];
               const active = k === kind;
@@ -286,6 +274,86 @@ export function NewDesignDialog() {
                 {t('create.fields.speakerNotes')}
               </span>
             </label>
+          ) : null}
+
+          {kind === 'animation' ? (
+            <div className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="grid gap-1 text-[11px] text-[var(--color-text-muted)]">
+                  Aspect ratio
+                  <select
+                    value={animationAspectRatio}
+                    onChange={(event) =>
+                      setAnimationAspectRatio(
+                        event.target.value as '16:9' | '9:16' | '1:1' | '4:5' | '21:9',
+                      )
+                    }
+                    className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-[var(--text-sm)] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+                  >
+                    {['16:9', '9:16', '1:1', '4:5', '21:9'].map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-[11px] text-[var(--color-text-muted)]">
+                  Motion style
+                  <select
+                    value={animationMotionStyle}
+                    onChange={(event) =>
+                      setAnimationMotionStyle(
+                        event.target.value as 'cinematic' | 'snappy' | 'calm' | 'playful',
+                      )
+                    }
+                    className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-[var(--text-sm)] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+                  >
+                    <option value="cinematic">Cinematic</option>
+                    <option value="snappy">Snappy</option>
+                    <option value="calm">Calm</option>
+                    <option value="playful">Playful</option>
+                  </select>
+                </label>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="grid gap-1 text-[11px] text-[var(--color-text-muted)]">
+                  Duration (seconds)
+                  <input
+                    type="number"
+                    min={2}
+                    max={60}
+                    value={animationDurationSec}
+                    onChange={(event) =>
+                      setAnimationDurationSec(
+                        Math.max(2, Math.min(60, Number(event.target.value) || 6)),
+                      )
+                    }
+                    className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-[var(--text-sm)] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+                  />
+                </label>
+                <label className="grid gap-1 text-[11px] text-[var(--color-text-muted)]">
+                  FPS
+                  <select
+                    value={animationFps}
+                    onChange={(event) => setAnimationFps(Number(event.target.value))}
+                    className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-[var(--text-sm)] text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+                  >
+                    {[24, 30, 60].map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <textarea
+                value={animationNarration}
+                onChange={(event) => setAnimationNarration(event.target.value)}
+                rows={3}
+                placeholder="Narration, pacing notes, or the emotional arc for the animation."
+                className="w-full resize-y rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2 text-[var(--text-sm)] leading-[1.5] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
+              />
+            </div>
           ) : null}
 
           {/* CTA */}

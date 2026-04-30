@@ -652,7 +652,14 @@ function registerIpcHandlers(db: Database | null): void {
       fs,
       runtimeVerify,
       ...(generateImageAsset !== undefined ? { generateImageAsset } : {}),
-      ...(promptImages && promptImages.length > 0 ? { promptImages } : {}),
+      ...(promptImages && promptImages.length > 0
+        ? {
+            promptImages: promptImages.map((image) => ({
+              type: 'image' as const,
+              ...image,
+            })),
+          }
+        : {}),
       onEvent: (event: AgentEvent) => {
         // High-signal only. Skip per-token deltas and inner message_*
         // markers. Emit a concise summary at turn_end.

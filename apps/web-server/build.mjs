@@ -26,6 +26,9 @@ const rawPlugin = {
 
 // Mark all non-bundleable packages as external (native modules + unresolvable dynamic imports)
 const EXTERNAL = [
+  '@open-codesign/animation',
+  '@remotion/bundler',
+  '@remotion/renderer',
   'better-sqlite3',
   '@mariozechner/pi-ai',
   '@mariozechner/pi-agent-core',
@@ -33,6 +36,7 @@ const EXTERNAL = [
   'electron',
   'express',
   'multer',
+  'remotion',
   'smol-toml',
 ];
 
