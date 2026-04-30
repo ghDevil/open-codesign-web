@@ -2383,6 +2383,8 @@ const FIGMA_PROMPT_PREFIX = [
   'Figma design context is preloaded below from the official Figma source.',
   'Use that structured Figma data and attached frame image as the source of truth for layout, copy, and styling.',
   'Do not open the Figma URL with browser tools or generic URL-reading tools.',
+  'Recreate the same section order, headline hierarchy, CTA placement, logo treatment, trust band, and visual composition before making responsive adjustments.',
+  'Do not replace concrete frame imagery or layout with a generic hero scene, abstract gradient, or a new marketing concept.',
 ].join(' ');
 const FIGMA_PREFETCH_CHAR_LIMIT = 1_600;
 const HTTP_URL_RE = /https?:\/\/[^\s)\]"']+/gi;
@@ -2725,7 +2727,7 @@ async function fetchFigmaFileContext(
         try {
           const screenshotId = screenshotNodeId.replace(/-/g, ':');
           const sRes = await fetch(
-            `https://api.figma.com/v1/images/${fileKey}?ids=${encodeURIComponent(screenshotId)}&format=jpg&scale=0.2`,
+            `https://api.figma.com/v1/images/${fileKey}?ids=${encodeURIComponent(screenshotId)}&format=jpg&scale=0.15`,
             { headers: { 'X-Figma-Token': apiKey }, signal: sController.signal },
           );
           if (sRes.ok) {
@@ -2735,7 +2737,7 @@ async function fetchFigmaFileContext(
               const imgRes = await fetch(screenshotUrl, { signal: sController.signal });
               if (imgRes.ok) {
                 const buffer = await imgRes.arrayBuffer();
-                if (buffer.byteLength < 220_000) {
+                if (buffer.byteLength < 500_000) {
                   const base64 = Buffer.from(buffer).toString('base64');
                   screenshot = { data: base64, mimeType: 'image/jpeg' };
                 } else {
