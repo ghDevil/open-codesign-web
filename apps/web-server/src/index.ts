@@ -1171,6 +1171,23 @@ async function runSetProviderAndModels(input: {
 
 // ── Generate ──────────────────────────────────────────────────────────────────
 
+const GITHUB_COPILOT_GENERATE_FALLBACK_MODELS = ['gpt-4o', 'gpt-4.1'] as const;
+
+function shouldRetryHostedGenerationWithFallback(
+  model: { provider: string; modelId: string },
+  message: string,
+): boolean {
+  if (model.provider !== GITHUB_COPILOT_PROVIDER_ID) return false;
+  return /no quota|not accessible via the \/chat\/completions endpoint|image media type not supported/i.test(
+    message,
+  );
+}
+
+function getHostedGenerationFallbackModelIds(model: { provider: string; modelId: string }): string[] {
+  if (model.provider !== GITHUB_COPILOT_PROVIDER_ID) return [];
+  return GITHUB_COPILOT_GENERATE_FALLBACK_MODELS.filter((candidate) => candidate !== model.modelId);
+}
+
 app.post('/api/generate', async (req: Request, res: Response) => {
   const payload = req.body as {
     generationId?: string;
@@ -1265,32 +1282,123 @@ app.post('/api/generate', async (req: Request, res: Response) => {
   const projectInstructions =
     designId !== null ? getDesign(db, designId)?.projectInstructions ?? null : null;
 
-  const generateInput = {
+  const generateInputBase = {
     prompt: steeredPrompt,
     history: payload.history as never,
-    model: active.model,
-    apiKey,
-    ...(isCodex
-      ? {
-          getApiKey: () =>
-            resolveApiKeyWithKeylessFallback(active.model.provider, allowKeyless, {
-              ...buildResolveActiveApiKeyDeps(),
-            }),
-        }
-      : {}),
     attachments: payload.attachments as never,
     referenceUrl: payload.referenceUrl ? { url: payload.referenceUrl } : undefined,
     designSystem: resolvedDesignSystem,
     ...(projectInstructions ? { projectInstructions: { instructions: projectInstructions } } : {}),
     workspaceContext,
-    ...(baseUrl !== undefined ? { baseUrl } : {}),
-    wire: active.wire,
-    ...(active.httpHeaders !== undefined ? { httpHeaders: active.httpHeaders } : {}),
-    explicitCapabilities: active.explicitCapabilities,
-    ...(allowKeyless ? { allowKeyless: true as const } : {}),
     signal: controller.signal,
     logger: coreLogger,
-    capabilities: active.capabilities,
+  };
+  const promptImages =
+    figmaPrefetch.figmaImages.length > 0
+      ? (figmaPrefetch.figmaImages as import('@mariozechner/pi-ai').ImageContent[])
+      : undefined;
+
+  const buildGenerateInput = (
+    resolved: ReturnType<typeof resolveActiveModel>,
+    currentApiKey: string,
+  ) => {
+    const currentAllowKeyless = resolved.allowKeyless;
+    const currentIsCodex = resolved.model.provider === CHATGPT_CODEX_PROVIDER_ID;
+    const currentBaseUrl = resolved.baseUrl ?? undefined;
+    return {
+      ...generateInputBase,
+      model: resolved.model,
+      apiKey: currentApiKey,
+      ...(currentIsCodex
+        ? {
+            getApiKey: () =>
+              resolveApiKeyWithKeylessFallback(resolved.model.provider, currentAllowKeyless, {
+                ...buildResolveActiveApiKeyDeps(),
+              }),
+          }
+        : {}),
+      ...(currentBaseUrl !== undefined ? { baseUrl: currentBaseUrl } : {}),
+      wire: resolved.wire,
+      ...(resolved.httpHeaders !== undefined ? { httpHeaders: resolved.httpHeaders } : {}),
+      explicitCapabilities: resolved.explicitCapabilities,
+      ...(currentAllowKeyless ? { allowKeyless: true as const } : {}),
+      capabilities: resolved.capabilities,
+    };
+  };
+
+  const runHostedGeneration = async (
+    resolved: ReturnType<typeof resolveActiveModel>,
+    currentApiKey: string,
+  ) => {
+    const input = buildGenerateInput(resolved, currentApiKey);
+    if (!USE_AGENT_RUNTIME) {
+      return generate(input);
+    }
+
+    const runtimeVerify = makeRuntimeVerifier();
+    const loadedMcpTools = await loadMcpTools(selectedMcpServers);
+    const mcpTools = filterMcpToolsForPrompt(steeredPrompt, loadedMcpTools);
+    return generateViaAgent(input, {
+      fs,
+      runtimeVerify,
+      extraTools: mcpTools,
+      ...(promptImages !== undefined ? { promptImages } : {}),
+      onEvent: (event: AgentEvent) => {
+        if (designId === null) return;
+        const baseCtx = { designId, generationId: id };
+        if (event.type === 'turn_start') {
+          sendEvent({ ...baseCtx, type: 'turn_start' });
+        } else if (event.type === 'message_update') {
+          const ame = event.assistantMessageEvent;
+          if (
+            ame.type === 'text_delta' &&
+            typeof (ame as { delta?: unknown }).delta === 'string'
+          ) {
+            sendEvent({
+              ...baseCtx,
+              type: 'text_delta',
+              delta: (ame as { delta: string }).delta,
+            });
+          }
+        } else if (event.type === 'tool_execution_start') {
+          sendEvent({
+            ...baseCtx,
+            type: 'tool_call_start',
+            toolName: event.toolName,
+            toolCallId: event.toolCallId,
+            args: event.args as Record<string, unknown>,
+          });
+        } else if (event.type === 'tool_execution_end') {
+          sendEvent({
+            ...baseCtx,
+            type: 'tool_call_result',
+            toolName: event.toolName,
+            toolCallId: event.toolCallId,
+            result: event.result,
+            durationMs: 0,
+          });
+        } else if (event.type === 'turn_end') {
+          const msg = event.message as { content?: Array<{ type: string; text?: string }> };
+          const rawText = (msg.content ?? [])
+            .filter(
+              (c): c is { type: 'text'; text: string } =>
+                c.type === 'text' && typeof c.text === 'string',
+            )
+            .map((c) => c.text)
+            .join('');
+          const finalText = rawText.replace(/<artifact[\s\S]*?<\/artifact>/g, '').trim();
+          sendEvent({ ...baseCtx, type: 'turn_end', finalText });
+        } else if (event.type === 'agent_end') {
+          sendEvent({ ...baseCtx, type: 'agent_end' });
+        }
+      },
+    }).then((r) => ({
+      ...r,
+      artifacts: r.artifacts.map((a) => ({
+        ...a,
+        content: resolveLocalAssetRefs(a.content, fsMap),
+      })),
+    }));
   };
 
   const prefs = await readPreferences(DATA_DIR);
@@ -1304,75 +1412,45 @@ app.post('/api/generate', async (req: Request, res: Response) => {
   try {
     let result: Awaited<ReturnType<typeof generate>>;
 
-    if (!USE_AGENT_RUNTIME) {
-      result = await generate(generateInput);
-    } else {
-      const runtimeVerify = makeRuntimeVerifier();
-      const loadedMcpTools = await loadMcpTools(selectedMcpServers);
-      const mcpTools = filterMcpToolsForPrompt(steeredPrompt, loadedMcpTools);
-      result = await generateViaAgent(generateInput, {
-        fs,
-        runtimeVerify,
-        extraTools: mcpTools,
-        promptImages: figmaPrefetch.figmaImages.length > 0
-          ? figmaPrefetch.figmaImages as import('@mariozechner/pi-ai').ImageContent[]
-          : undefined,
-        onEvent: (event: AgentEvent) => {
-          if (designId === null) return;
-          const baseCtx = { designId, generationId: id };
-          if (event.type === 'turn_start') {
-            sendEvent({ ...baseCtx, type: 'turn_start' });
-          } else if (event.type === 'message_update') {
-            const ame = event.assistantMessageEvent;
-            if (
-              ame.type === 'text_delta' &&
-              typeof (ame as { delta?: unknown }).delta === 'string'
-            ) {
-              sendEvent({
-                ...baseCtx,
-                type: 'text_delta',
-                delta: (ame as { delta: string }).delta,
-              });
-            }
-          } else if (event.type === 'tool_execution_start') {
-            sendEvent({
-              ...baseCtx,
-              type: 'tool_call_start',
-              toolName: event.toolName,
-              toolCallId: event.toolCallId,
-              args: event.args as Record<string, unknown>,
-            });
-          } else if (event.type === 'tool_execution_end') {
-            sendEvent({
-              ...baseCtx,
-              type: 'tool_call_result',
-              toolName: event.toolName,
-              toolCallId: event.toolCallId,
-              result: event.result,
-              durationMs: 0,
-            });
-          } else if (event.type === 'turn_end') {
-            const msg = event.message as { content?: Array<{ type: string; text?: string }> };
-            const rawText = (msg.content ?? [])
-              .filter(
-                (c): c is { type: 'text'; text: string } =>
-                  c.type === 'text' && typeof c.text === 'string',
-              )
-              .map((c) => c.text)
-              .join('');
-            const finalText = rawText.replace(/<artifact[\s\S]*?<\/artifact>/g, '').trim();
-            sendEvent({ ...baseCtx, type: 'turn_end', finalText });
-          } else if (event.type === 'agent_end') {
-            sendEvent({ ...baseCtx, type: 'agent_end' });
-          }
-        },
-      }).then((r) => ({
-        ...r,
-        artifacts: r.artifacts.map((a) => ({
-          ...a,
-          content: resolveLocalAssetRefs(a.content, fsMap),
-        })),
-      }));
+    try {
+      result = await runHostedGeneration(active, apiKey);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!shouldRetryHostedGenerationWithFallback(active.model, message)) {
+        throw err;
+      }
+
+      let recovered = false;
+      let lastError: unknown = err;
+      for (const fallbackModelId of getHostedGenerationFallbackModelIds(active.model)) {
+        try {
+          const fallbackActive = resolveActiveModel(cfg, {
+            provider: active.model.provider,
+            modelId: fallbackModelId,
+          });
+          const fallbackApiKey = await resolveApiKeyWithKeylessFallback(
+            fallbackActive.model.provider,
+            fallbackActive.allowKeyless,
+            {
+              ...buildResolveActiveApiKeyDeps(),
+            },
+          );
+          coreLogger.warn('generate_retry_model_fallback', {
+            fromModel: active.model.modelId,
+            toModel: fallbackModelId,
+            reason: message,
+          });
+          result = await runHostedGeneration(fallbackActive, fallbackApiKey);
+          recovered = true;
+          break;
+        } catch (fallbackErr) {
+          lastError = fallbackErr;
+        }
+      }
+
+      if (!recovered) {
+        throw lastError;
+      }
     }
 
     res.write(`data: ${JSON.stringify({ type: 'done', result })}\n\n`);
