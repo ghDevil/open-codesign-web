@@ -2383,7 +2383,7 @@ const FIGMA_PROMPT_PREFIX = [
   'Use that structured Figma data as the source of truth for layout, copy, and styling.',
   'Do not fetch the same Figma URL with generic URL-reading tools.',
 ].join(' ');
-const FIGMA_PREFETCH_CHAR_LIMIT = 18_000;
+const FIGMA_PREFETCH_CHAR_LIMIT = 1_600;
 const HTTP_URL_RE = /https?:\/\/[^\s)\]"']+/gi;
 const PLAYWRIGHT_INTENT_RE = /\b(playwright|browser|snapshot|screenshot)\b/i;
 const WEBPAGE_INTENT_RE = /\b(site|website|webpage|web page|page|screen|layout|inspect|review|audit|compare|check|test)\b/i;
@@ -2517,6 +2517,11 @@ interface FigmaContext {
   screenshot?: { data: string; mimeType: 'image/png' | 'image/jpeg' };
 }
 
+function pushUnique<T>(target: T[], value: T, max: number): void {
+  if (target.includes(value) || target.length >= max) return;
+  target.push(value);
+}
+
 /** Fetch structured design context from the Figma REST API using MCP_FIGMA_API_KEY */
 async function fetchFigmaFileContext(
   fileKey: string,
@@ -2554,13 +2559,11 @@ async function fetchFigmaFileContext(
     const textNodes: Array<{ name: string; text: string; style?: FigmaTypeStyle }> = [];
     const colorSet = new Set<string>();
     const imageNodeIds: string[] = [];
-    const imageRefs = new Set<string>();
     const typographySet = new Map<string, FigmaTypeStyle>();
 
     function collectImageFills(fills: FigmaFill[] | undefined) {
       if (!fills) return;
       for (const f of fills) {
-        if (f.type === 'IMAGE' && f.imageRef) imageRefs.add(f.imageRef);
         if (f.type === 'SOLID' && f.color) colorSet.add(figmaColorToHex(f.color));
         if (f.type === 'GRADIENT_LINEAR' || f.type === 'GRADIENT_RADIAL') {
           for (const stop of f.gradientStops ?? []) colorSet.add(figmaColorToHex(stop.color));
@@ -2580,7 +2583,7 @@ async function fetchFigmaFileContext(
         const styleStr = st
           ? ` font="${st.fontFamily ?? ''}" size=${st.fontSize ?? '?'} weight=${st.fontWeight ?? '?'}`
           : '';
-        layerLines.push(`${indent}TEXT: "${node.characters.slice(0, 100)}"${styleStr}${sizeStr}`);
+        layerLines.push(`${indent}TEXT: "${node.characters.slice(0, 72)}"${styleStr}${sizeStr}`);
         textNodes.push({ name: node.name ?? '', text: node.characters, style: node.style });
         if (st?.fontFamily) typographySet.set(`${st.fontFamily}-${st.fontWeight}`, st);
         collectImageFills(node.fills);
@@ -2622,7 +2625,7 @@ async function fetchFigmaFileContext(
       walkFull(rootDoc, 0);
     }
 
-    // Step 3: fetch rendered image URLs for key nodes (max 20 to stay within API limits)
+    // Step 3: fetch rendered image URLs for key nodes (max 8 to stay within API limits and prompt budget)
     const renderIds = [...new Set(imageNodeIds)].slice(0, 20);
     const imageUrlMap = new Map<string, string>();
 
@@ -2631,7 +2634,7 @@ async function fetchFigmaFileContext(
         const imgController = new AbortController();
         const imgTimer = setTimeout(() => imgController.abort(), 20_000);
         try {
-          const idsParam = renderIds.map((id) => id.replace(/:/g, ':')).join(',');
+          const idsParam = renderIds.slice(0, 8).map((id) => id.replace(/:/g, ':')).join(',');
           const imgRes = await fetch(
             `https://api.figma.com/v1/images/${fileKey}?ids=${encodeURIComponent(idsParam)}&format=png&scale=2`,
             { headers: { 'X-Figma-Token': apiKey }, signal: imgController.signal },
@@ -2655,25 +2658,27 @@ async function fetchFigmaFileContext(
       `File: ${fileName}`,
       `Key: ${fileKey}`,
       ...(nodeId ? [`Node: ${nodeId}`] : []),
+      '',
+      'Interpretation order: screenshot -> layout structure -> visible copy -> colors/typography.',
     ];
 
     if (layerLines.length > 0) {
       summary.push('', '=== Layer Structure ===');
-      summary.push(...layerLines.slice(0, 120));
-      if (layerLines.length > 120) summary.push(`  ... (${layerLines.length - 120} more layers)`);
+      summary.push(...layerLines.slice(0, 28));
+      if (layerLines.length > 28) summary.push(`  ... (${layerLines.length - 28} more layers)`);
     }
 
     // Deduplicated text content
-    const uniqueTexts = [...new Set(textNodes.map((t) => t.text))].slice(0, 40);
+    const uniqueTexts = [...new Set(textNodes.map((t) => t.text.trim()).filter((t) => t.length > 0))].slice(0, 10);
     if (uniqueTexts.length > 0) {
       summary.push('', '=== Text Content ===');
-      for (const t of uniqueTexts) summary.push(`  - "${t.slice(0, 150)}"`);
+      for (const t of uniqueTexts) summary.push(`  - "${t.slice(0, 120)}"`);
     }
 
     // Typography system
     if (typographySet.size > 0) {
       summary.push('', '=== Typography ===');
-      for (const [, st] of typographySet) {
+      for (const [, st] of [...typographySet.entries()].slice(0, 8)) {
         summary.push(
           `  ${st.fontFamily ?? '?'} ${st.fontWeight ?? '?'} — ${st.fontSize ?? '?'}px` +
           (st.lineHeightPx ? ` / line-height ${Math.round(st.lineHeightPx)}px` : '') +
@@ -2683,35 +2688,33 @@ async function fetchFigmaFileContext(
     }
 
     // Color palette
-    const colors = [...colorSet].slice(0, 30);
+    const colors = [...colorSet].slice(0, 8);
     if (colors.length > 0) {
       summary.push('', '=== Color Palette ===');
       summary.push(colors.map((c) => `  ${c}`).join('\n'));
     }
 
-    // Rendered image URLs (the main addition — gives AI actual CDN image URLs to embed)
+    // Rendered image URLs are useful hints, but keep only a small preview inline.
     if (imageUrlMap.size > 0) {
-      summary.push('', '=== Rendered Node Images (embed these URLs directly in HTML) ===');
-      for (const [nodeId, url] of imageUrlMap) {
-        const label = renderIds.includes(nodeId) ? nodeId : nodeId;
-        summary.push(`  ${label}: ${url}`);
+      summary.push('', '=== Rendered Node Images ===');
+      for (const [imageNodeId, url] of [...imageUrlMap.entries()].slice(0, 4)) {
+        summary.push(`  ${imageNodeId}: ${truncateForPrompt(url, 120)}`);
       }
     }
 
     // Design styles from file metadata
     const styles = fileData.styles as Record<string, { name?: string; styleType?: string }> | undefined;
     if (styles) {
-      const styleLines = Object.values(styles).slice(0, 25)
+      const styleLines = Object.values(styles).slice(0, 10)
         .map((s) => `  ${s.styleType ?? '?'}: ${s.name ?? '?'}`).join('\n');
       if (styleLines) {
         summary.push('', '=== Named Styles ===', styleLines);
       }
     }
 
-    const textContext = summary.join('\n');
+    const textContext = truncateForPrompt(summary.join('\n'), FIGMA_PREFETCH_CHAR_LIMIT);
 
-    // Step 5: fetch a rendered screenshot of the target node so the LLM can SEE the design.
-    // Use scale=0.15 + jpeg to keep the image under ~150KB (acceptable for vision context).
+    // Step 5: fetch a rendered screenshot of the target node so the LLM can see the design.
     let screenshot: { data: string; mimeType: 'image/png' | 'image/jpeg' } | undefined;
     const screenshotNodeId = nodeId ?? (rootDoc?.id ?? null);
     if (screenshotNodeId) {
@@ -2721,7 +2724,7 @@ async function fetchFigmaFileContext(
         try {
           const screenshotId = screenshotNodeId.replace(/-/g, ':');
           const sRes = await fetch(
-            `https://api.figma.com/v1/images/${fileKey}?ids=${encodeURIComponent(screenshotId)}&format=jpg&scale=0.5`,
+            `https://api.figma.com/v1/images/${fileKey}?ids=${encodeURIComponent(screenshotId)}&format=jpg&scale=0.2`,
             { headers: { 'X-Figma-Token': apiKey }, signal: sController.signal },
           );
           if (sRes.ok) {
@@ -2731,8 +2734,7 @@ async function fetchFigmaFileContext(
               const imgRes = await fetch(screenshotUrl, { signal: sController.signal });
               if (imgRes.ok) {
                 const buffer = await imgRes.arrayBuffer();
-                // Hard cap: if image > 800KB base64 (~600KB raw), skip — too large for context
-                if (buffer.byteLength < 600_000) {
+                if (buffer.byteLength < 220_000) {
                   const base64 = Buffer.from(buffer).toString('base64');
                   screenshot = { data: base64, mimeType: 'image/jpeg' };
                 } else {
