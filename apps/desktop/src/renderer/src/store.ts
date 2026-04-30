@@ -1474,22 +1474,48 @@ function intentToPromptHeader(intent: PromptContextExtras['intent']): string | n
     );
   }
   if (intent.kind === 'animation' && intent.animation) {
-    lines.push(`- Animation format: ${intent.animation.aspectRatio} at ${intent.animation.fps} fps.`);
-    lines.push(`- Animation duration: ${intent.animation.durationInFrames} frames total.`);
-    lines.push(`- Motion style: ${intent.animation.motionStyle}.`);
-    if (intent.animation.narration?.trim()) {
-      lines.push(`- Narration or pacing notes: ${intent.animation.narration.trim()}`);
+    const { aspectRatio, fps, durationInFrames, motionStyle, narration } = intent.animation;
+    lines.push(`- Animation format: ${aspectRatio} at ${fps} fps, ${durationInFrames} frames total (~${Math.round(durationInFrames / fps)}s).`);
+    lines.push(`- Motion style: ${motionStyle}.`);
+    if (narration?.trim()) {
+      lines.push(`- Narration or pacing notes: ${narration.trim()}`);
     }
-    lines.push(
-      '- The HTML artifact must contain `<script id="open-codesign-animation" type="application/json">...</script>` with valid JSON.',
-    );
-    lines.push(
-      '- Top-level JSON fields: `version`, `title`, `aspectRatio`, `fps`, `durationInFrames`, `motionStyle`, `palette`, and `scenes`.',
-    );
-    lines.push('- Supported scene layouts: `hero`, `split`, `cards`, `quote`, `metrics`, `cta`.');
-    lines.push(
-      '- Each scene should include `id`, `layout`, `durationInFrames`, `title`, plus any relevant `body`, `bullets`, `cards`, `stats`, `quote`, or `ctaLabel` fields.',
-    );
+    lines.push('');
+    lines.push('**CRITICAL — Animation output rules:**');
+    lines.push('1. The HTML artifact MUST contain `<script id="open-codesign-animation" type="application/json">` with a valid AnimationSpec JSON object.');
+    lines.push('2. Do NOT load Remotion from CDN. Do NOT try to render the animation in the HTML page itself. The app renders it natively via its built-in Remotion player.');
+    lines.push('3. The HTML body content is irrelevant — it will be hidden behind the player. A simple dark placeholder page is fine.');
+    lines.push('4. The JSON MUST include all required fields: `version` (always 1), `title`, `aspectRatio`, `fps`, `durationInFrames`, `motionStyle`, `palette`, and `scenes` (array).');
+    lines.push('5. `palette` must include: `background`, `surface`, `text`, `muted`, `accent`, `accent2` (use default dark theme if not specified).');
+    lines.push('6. Each scene must have: `id` (unique string), `layout`, `durationInFrames`, `title`. Scene durations must sum to the top-level `durationInFrames`.');
+    lines.push('7. Supported layouts: `hero`, `split`, `cards`, `quote`, `metrics`, `cta`.');
+    lines.push('');
+    lines.push('**Minimal valid example:**');
+    lines.push('```html');
+    lines.push('<script id="open-codesign-animation" type="application/json">');
+    lines.push(JSON.stringify({
+      version: 1,
+      title: 'Your Title',
+      aspectRatio,
+      fps,
+      durationInFrames,
+      motionStyle,
+      palette: {
+        background: '#08111f',
+        surface: 'rgba(255,255,255,0.10)',
+        text: '#f6f7fb',
+        muted: 'rgba(246,247,251,0.72)',
+        accent: '#7c9cff',
+        accent2: '#5eead4',
+      },
+      scenes: [
+        { id: 'scene-1', layout: 'hero', durationInFrames: Math.round(durationInFrames * 0.5), title: 'Main Headline', body: 'Supporting text.', align: 'left' },
+        { id: 'scene-2', layout: 'cta', durationInFrames: Math.round(durationInFrames * 0.5), title: 'Call to Action', body: 'Next step description.', ctaLabel: 'Get Started', align: 'center' },
+      ],
+    }, null, 2));
+    lines.push('</script>');
+    lines.push('```');
+    lines.push('Replace the scene content with real, meaningful scenes based on the user prompt. 3–6 scenes is ideal.');
   }
   return lines.join('\n');
 }

@@ -129,78 +129,104 @@ timeline.forEach(({ delay, el, animation }) => {
 
 ---
 
-### Remotion Integration (Programmatic Video)
+### Remotion Integration (Animation Mode)
 
-Remotion allows React-based video generation from code. Use it when:
-- User wants to export an animation as MP4/GIF
-- Animation is data-driven (charts, statistics that animate)
-- Presentation slides need video export
-- Screencasts or product demo videos
+This app renders Remotion animations natively — **do NOT load Remotion from CDN**. When a design is of kind `animation`, output a standard HTML file that embeds a JSON animation spec in a `<script>` tag. The app's Remotion player reads that spec and renders the animation.
 
-**In-browser preview with @remotion/player (use this for HTML artifacts):**
+**Required output format for animation designs:**
+
+The HTML artifact must contain this script tag somewhere in `<body>` or `<head>`:
 ```html
-<!-- Load from CDN - no build step needed -->
-<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/remotion@4/dist/remotion.umd.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@remotion/player@4/dist/player.umd.js"></script>
+<script id="open-codesign-animation" type="application/json">
+{
+  "version": 1,
+  "title": "Your Animation Title",
+  "aspectRatio": "16:9",
+  "fps": 30,
+  "durationInFrames": 180,
+  "motionStyle": "cinematic",
+  "palette": {
+    "background": "#08111f",
+    "surface": "rgba(255,255,255,0.10)",
+    "text": "#f6f7fb",
+    "muted": "rgba(246,247,251,0.72)",
+    "accent": "#7c9cff",
+    "accent2": "#5eead4"
+  },
+  "scenes": [
+    {
+      "id": "scene-1",
+      "layout": "hero",
+      "durationInFrames": 90,
+      "title": "Main Headline",
+      "body": "Supporting text that explains the concept.",
+      "align": "left"
+    },
+    {
+      "id": "scene-2",
+      "layout": "cards",
+      "durationInFrames": 90,
+      "title": "Key Points",
+      "cards": [
+        { "title": "Point One", "body": "Description of the first point." },
+        { "title": "Point Two", "body": "Description of the second point." },
+        { "title": "Point Three", "body": "Description of the third point." }
+      ]
+    }
+  ]
+}
+</script>
 ```
 
-```jsx
-const { AbsoluteFill, useCurrentFrame, interpolate, spring, useVideoConfig, registerRoot, Composition } = window.Remotion;
-const { Player } = window.RemotionPlayer;
+The rest of the HTML file can be a simple placeholder page (dark background, centered "Animation Loading…" text) — the app overlays the Remotion player on top.
 
-const MyScene = () => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const opacity = interpolate(frame, [0, 20], [0, 1], { extrapolateRight: 'clamp' });
-  const y = spring({ frame, fps, from: 30, to: 0, config: { damping: 12 } });
-  return (
-    <AbsoluteFill style={{ background: '#0d0d0d', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ opacity, transform: `translateY(${y}px)`, color: 'white', fontSize: 64, fontWeight: 700 }}>
-        Hello World
-      </div>
-    </AbsoluteFill>
-  );
-};
+**JSON spec field reference:**
 
-// Render the player into the page
-ReactDOM.render(
-  React.createElement(Player, {
-    component: MyScene,
-    durationInFrames: 90,
-    fps: 30,
-    compositionWidth: 1920,
-    compositionHeight: 1080,
-    style: { width: '100%', borderRadius: 8 },
-    controls: true,
-    loop: true,
-  }),
-  document.getElementById('player-root')
-);
-```
+Top-level:
+- `version`: always `1`
+- `title`: animation title (shown in the preview panel header)
+- `aspectRatio`: `"16:9"` | `"9:16"` | `"1:1"` | `"4:5"` | `"21:9"`
+- `fps`: `24` | `30` | `60`
+- `durationInFrames`: total frames (fps × seconds). Must equal sum of scene durations.
+- `motionStyle`: `"cinematic"` | `"snappy"` | `"calm"` | `"playful"`
+- `narration`: optional string, pacing or voiceover notes
+- `palette`: color tokens — `background`, `surface`, `text`, `muted`, `accent`, `accent2`
+- `scenes`: array of 1–8 scene objects
 
-**For export to MP4 (project-based workflow):**
-```bash
-npx create-video@latest
-# or add to existing project:
-npm install @remotion/cli remotion react react-dom
-# Render:
-npx remotion render MyScene output.mp4 --codec=h264 --fps=30
-npx remotion render MyScene output.gif  # GIF export
-```
+Scene object fields:
+- `id`: unique string identifier
+- `layout`: `"hero"` | `"split"` | `"cards"` | `"quote"` | `"metrics"` | `"cta"`
+- `durationInFrames`: frames for this scene (min 15)
+- `title`: main heading (required)
+- `kicker`: small eyebrow label above title (optional)
+- `body`: paragraph below title (optional)
+- `align`: `"left"` | `"center"` (default `"left"`)
+- `accent`: hex override for scene accent color (optional)
+- `background`: CSS background string override (optional)
+- `bullets`: array of strings — shown as bullet list below title (optional)
+- `cards`: array of `{eyebrow?, title, body, icon?}` — for `cards`/`split` layouts
+- `stats`: array of `{label, value}` — for `metrics` layout
+- `quote`: `{text, attribution?}` — for `quote` layout
+- `ctaLabel`: button label string — for `cta` layout
+- `imagePrompt`: visual placeholder description (optional, displayed as text cue)
 
-**Key Remotion API:**
-- `useCurrentFrame()` → frame number (0-based)
-- `interpolate(frame, [0, 30], [0, 1], { extrapolateRight: 'clamp' })` → map frame to value
-- `spring({ frame, fps, from, to, config: { damping, stiffness } })` → physics spring
-- `<Sequence from={30} durationInFrames={60}>` → time-slice a sub-scene
-- `<Audio src="./bgm.mp3" />` → synchronized audio track
+**Layout guide:**
+- `hero`: large headline + optional body + optional cards row beneath
+- `split`: headline left + panel right (cards, quote, or image cue)
+- `cards`: headline + 1–3 cards in a grid row
+- `quote`: large pull-quote centered or left-aligned
+- `metrics`: headline + stat grid (use for data/numbers)
+- `cta`: headline + body + call-to-action button
+
+**Scene count and pacing:**
+- 3–6 scenes is the sweet spot for a 6–15 second animation
+- Distribute `durationInFrames` so the total equals the top-level `durationInFrames`
+- Hero/intro: ~2s (60 frames at 30fps). Content scenes: 2–3s each. CTA: ~2s.
 
 **Frame rate guidance:**
-- 30fps: standard web video (use this by default)
-- 60fps: smooth motion graphics, product demos
-- 25fps: film-style content
+- 30fps: standard (default for most animations)
+- 60fps: smooth motion graphics or product demos
+- 24fps: cinematic/film feel
 
 ---
 
