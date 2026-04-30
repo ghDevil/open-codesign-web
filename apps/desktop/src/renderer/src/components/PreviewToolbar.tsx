@@ -1,5 +1,5 @@
 import { useT } from '@open-codesign/i18n';
-import { extractAnimationSpecFromHtml } from '@open-codesign/shared';
+import { extractAnimationCodeFromHtml, extractAnimationSpecFromHtml } from '@open-codesign/shared';
 import { Download, MessageSquare } from 'lucide-react';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
 import type { ExportFormat } from '../../../preload/index';
@@ -56,7 +56,10 @@ export function PreviewToolbar(): ReactElement {
   }, [toastMessage, dismissToast]);
 
   const disabled = !previewHtml;
-  const isAnimation = previewHtml ? extractAnimationSpecFromHtml(previewHtml) !== null : false;
+  const isAnimation = previewHtml
+    ? extractAnimationCodeFromHtml(previewHtml) !== null ||
+      extractAnimationSpecFromHtml(previewHtml) !== null
+    : false;
   const commentActive = interactionMode === 'comment';
   const exportItems: ExportItem[] = [
     ...(isAnimation
@@ -128,42 +131,42 @@ export function PreviewToolbar(): ReactElement {
 
       {!isAnimation ? (
         <div className="relative" ref={zoomRef}>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => setZoomOpen((v) => !v)}
-          className="inline-flex items-center justify-end w-[56px] h-[26px] pr-[10px] text-[12px] tabular-nums text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40 disabled:pointer-events-none transition-[background-color,color,transform] duration-[var(--duration-faster)] active:scale-[var(--scale-press-down)]"
-          aria-haspopup="menu"
-          aria-expanded={zoomOpen}
-          aria-label={t('preview.zoom')}
-          style={{ fontFamily: 'var(--font-mono)', fontFeatureSettings: "'tnum'" }}
-        >
-          {previewZoom}%
-        </button>
-
-        {zoomOpen && (
-          <div
-            role="menu"
-            className="absolute right-0 top-full mt-[var(--space-1_5)] w-[56px] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-elevated)] p-[var(--space-1)] z-10"
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setZoomOpen((v) => !v)}
+            className="inline-flex h-[26px] w-[56px] items-center justify-end pr-[10px] text-[12px] tabular-nums text-[var(--color-text-secondary)] transition-[background-color,color,transform] duration-[var(--duration-faster)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] active:scale-[var(--scale-press-down)] disabled:pointer-events-none disabled:opacity-40"
+            aria-haspopup="menu"
+            aria-expanded={zoomOpen}
+            aria-label={t('preview.zoom')}
+            style={{ fontFamily: 'var(--font-mono)', fontFeatureSettings: "'tnum'" }}
           >
-            {ZOOM_OPTIONS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                role="menuitemradio"
-                aria-checked={previewZoom === value}
-                onClick={() => {
-                  setPreviewZoom(value);
-                  setZoomOpen(false);
-                }}
-                className={`block w-full pr-[10px] py-[var(--space-1)] text-[12px] text-right rounded-[var(--radius-sm)] tabular-nums transition-colors duration-100 hover:bg-[var(--color-surface-hover)] ${previewZoom === value ? 'text-[var(--color-accent)] font-medium' : 'text-[var(--color-text-primary)]'}`}
-                style={{ fontFamily: 'var(--font-mono)', fontFeatureSettings: "'tnum'" }}
-              >
-                {value}%
-              </button>
-            ))}
-          </div>
-        )}
+            {previewZoom}%
+          </button>
+
+          {zoomOpen ? (
+            <div
+              role="menu"
+              className="absolute right-0 top-full z-10 mt-[var(--space-1_5)] w-[56px] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-[var(--space-1)] shadow-[var(--shadow-elevated)]"
+            >
+              {ZOOM_OPTIONS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={previewZoom === value}
+                  onClick={() => {
+                    setPreviewZoom(value);
+                    setZoomOpen(false);
+                  }}
+                  className={`block w-full rounded-[var(--radius-sm)] py-[var(--space-1)] pr-[10px] text-right text-[12px] tabular-nums transition-colors duration-100 hover:bg-[var(--color-surface-hover)] ${previewZoom === value ? 'font-medium text-[var(--color-accent)]' : 'text-[var(--color-text-primary)]'}`}
+                  style={{ fontFamily: 'var(--font-mono)', fontFeatureSettings: "'tnum'" }}
+                >
+                  {value}%
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

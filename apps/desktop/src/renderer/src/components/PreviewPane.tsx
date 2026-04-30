@@ -8,6 +8,7 @@ import {
   isIframeErrorMessage,
   isOverlayMessage,
 } from '@open-codesign/runtime';
+import { extractAnimationCodeFromHtml, extractAnimationSpecFromHtml } from '@open-codesign/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmptyState } from '../preview/EmptyState';
 import { ErrorState } from '../preview/ErrorState';
@@ -19,9 +20,9 @@ import { PhoneFrame } from './PhoneFrame';
 import { PreviewToolbar } from './PreviewToolbar';
 import { TweakPanel } from './TweakPanel';
 import { AnimationPreviewPanel } from './AnimationPreviewPanel';
+import { AnimationStudioPanel } from './AnimationStudioPanel';
 import { CommentBubble } from './comment/CommentBubble';
 import { PinOverlay } from './comment/PinOverlay';
-import { extractAnimationSpecFromHtml } from '@open-codesign/shared';
 
 export interface PreviewPaneProps {
   onPickStarter: (prompt: string) => void;
@@ -444,9 +445,13 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   }, [currentDesignId, previewHtml, previewHtmlByDesign, recentDesignIds]);
 
   const activeTab = canvasTabs[activeCanvasTab];
-  const animationSpec = useMemo(
-    () => (previewHtml ? extractAnimationSpecFromHtml(previewHtml) : null),
+  const animationCode = useMemo(
+    () => (previewHtml ? extractAnimationCodeFromHtml(previewHtml) : null),
     [previewHtml],
+  );
+  const animationSpec = useMemo(
+    () => (!animationCode && previewHtml ? extractAnimationSpecFromHtml(previewHtml) : null),
+    [animationCode, previewHtml],
   );
   const showCommentUi = interactionMode === 'comment';
   const snapshotComments = currentSnapshotId
@@ -502,6 +507,8 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
     );
   } else if (activeTab?.kind === 'files' && previewHtml) {
     body = <FilesTabView />;
+  } else if (animationCode && previewHtml) {
+    body = <AnimationStudioPanel html={previewHtml} />;
   } else if (animationSpec && previewHtml) {
     body = <AnimationPreviewPanel html={previewHtml} />;
   } else {
@@ -556,7 +563,7 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
         <CanvasErrorBar />
         <div className="relative flex-1 overflow-hidden">
           {body}
-          {previewHtml && !animationSpec ? <TweakPanel iframeRef={iframeRef} /> : null}
+          {previewHtml && !animationSpec && !animationCode ? <TweakPanel iframeRef={iframeRef} /> : null}
         </div>
         {commentBubble && interactionMode === 'comment'
           ? (() => {

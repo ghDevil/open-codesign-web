@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  OPEN_CODESIGN_ANIMATION_CODE_SCRIPT_ID,
   OPEN_CODESIGN_ANIMATION_SCRIPT_ID,
   aspectRatioToDimensions,
+  extractAnimationCodeFromHtml,
+  extractAnimationComponentName,
   extractAnimationSpecFromHtml,
   normalizeAnimationSpec,
+  parseAnimationCodeMeta,
 } from './animation';
 
 describe('animation helpers', () => {
@@ -73,5 +77,34 @@ describe('animation helpers', () => {
   it('maps aspect ratios to expected dimensions', () => {
     expect(aspectRatioToDimensions('16:9')).toEqual({ width: 1920, height: 1080 });
     expect(aspectRatioToDimensions('9:16')).toEqual({ width: 1080, height: 1920 });
+  });
+
+  it('extracts animation code and metadata from HTML', () => {
+    const html = `<!doctype html>
+<html lang="en">
+  <body>
+    <script id="${OPEN_CODESIGN_ANIMATION_CODE_SCRIPT_ID}" type="text/plain">
+// @fps 24
+// @duration 96
+// @width 1080
+// @height 1920
+import { AbsoluteFill, useCurrentFrame } from 'remotion';
+export const MyComposition = () => {
+  const frame = useCurrentFrame();
+  return <AbsoluteFill>{frame}</AbsoluteFill>;
+};
+    </script>
+  </body>
+</html>`;
+
+    const code = extractAnimationCodeFromHtml(html);
+    expect(code).toContain('export const MyComposition');
+    expect(parseAnimationCodeMeta(code ?? '')).toEqual({
+      fps: 24,
+      durationInFrames: 96,
+      width: 1080,
+      height: 1920,
+    });
+    expect(extractAnimationComponentName(code ?? '')).toBe('MyComposition');
   });
 });

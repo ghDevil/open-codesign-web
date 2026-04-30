@@ -44,6 +44,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@babel/standalone':
+        specifier: ^7.29.2
+        version: 7.29.2
       '@open-codesign/animation':
         specifier: workspace:*
         version: link:../../packages/animation
@@ -77,6 +80,9 @@ importers:
       '@remotion/player':
         specifier: ^4.0.454
         version: 4.0.454(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      '@types/babel__standalone':
+        specifier: ^7.1.9
+        version: 7.1.9
       better-sqlite3:
         specifier: ^12.9.0
         version: 12.9.0
@@ -95,6 +101,9 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.2.5(react@19.2.5)
+      remotion:
+        specifier: ^4.0.454
+        version: 4.0.454(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       smol-toml:
         specifier: ^1.6.1
         version: 1.6.1
@@ -161,10 +170,10 @@ importers:
     dependencies:
       '@mariozechner/pi-agent-core':
         specifier: ^0.70.2
-        version: 0.70.2(ws@8.20.0)(zod@3.25.76)
+        version: 0.70.2(ws@8.20.0)(zod@4.3.6)
       '@mariozechner/pi-ai':
         specifier: ^0.70.2
-        version: 0.70.2(ws@8.20.0)(zod@3.25.76)
+        version: 0.70.2(ws@8.20.0)(zod@4.3.6)
       '@open-codesign/artifacts':
         specifier: workspace:*
         version: link:../../packages/artifacts
@@ -353,7 +362,7 @@ importers:
     dependencies:
       '@mariozechner/pi-ai':
         specifier: ^0.70.2
-        version: 0.70.2(ws@8.20.0)(zod@4.3.6)
+        version: 0.70.2(ws@8.20.0)(zod@3.25.76)
       '@open-codesign/shared':
         specifier: workspace:*
         version: link:../shared
@@ -784,6 +793,10 @@ packages:
 
   '@babel/runtime@7.29.2':
     resolution: {integrity: sha512-JiDShH45zKHWyGe4ZNVRrCjBz8Nh9TMmZG1kh4QTK8hCBTWBi8Da+i7s1fJw7/lYpM4ccepSNfqzZ/QvABBi5g==}
+    engines: {node: '>=6.9.0'}
+
+  '@babel/standalone@7.29.2':
+    resolution: {integrity: sha512-VSuvywmVRS8efooKrvJzs6BlVSxRvAdLeGrAKUrWoBx1fFBSeE/oBpUZCQ5BcprLyXy04W8skzz7JT8GqlNRJg==}
     engines: {node: '>=6.9.0'}
 
   '@babel/template@7.28.6':
@@ -2443,6 +2456,9 @@ packages:
 
   '@types/babel__generator@7.27.0':
     resolution: {integrity: sha512-ufFd2Xi92OAVPYsy+P4n7/U7e68fex0+Ee8gSG9KX7eo084CWiQ4sdxktvdl0bOPupXtVJPY19zk6EwWqUQ8lg==}
+
+  '@types/babel__standalone@7.1.9':
+    resolution: {integrity: sha512-IcCNPLqpevUD7UpV8QB0uwQPOyoOKACFf0YtYWRHcmxcakaje4Q7dbG2+jMqxw/I8Zk0NHvEps66WwS7z/UaaA==}
 
   '@types/babel__template@7.4.4':
     resolution: {integrity: sha512-h/NUaSyG5EyxBIp8YRxo4RMe2/qQgvyowRwVMzhYhBCONbW8PUsg4lkFMrhgZhUe5z3L3MiLDuvyJ/CaPa2A8A==}
@@ -6539,6 +6555,8 @@ snapshots:
 
   '@babel/runtime@7.29.2': {}
 
+  '@babel/standalone@7.29.2': {}
+
   '@babel/template@7.28.6':
     dependencies:
       '@babel/code-frame': 7.29.0
@@ -7282,19 +7300,6 @@ snapshots:
       fs-extra: 8.1.0
       globby: 11.1.0
       read-yaml-file: 1.1.0
-
-  '@mariozechner/pi-agent-core@0.70.2(ws@8.20.0)(zod@3.25.76)':
-    dependencies:
-      '@mariozechner/pi-ai': 0.70.2(ws@8.20.0)(zod@3.25.76)
-      typebox: 1.1.33
-    transitivePeerDependencies:
-      - '@modelcontextprotocol/sdk'
-      - aws-crt
-      - bufferutil
-      - supports-color
-      - utf-8-validate
-      - ws
-      - zod
 
   '@mariozechner/pi-agent-core@0.70.2(ws@8.20.0)(zod@4.3.6)':
     dependencies:
@@ -8238,6 +8243,15 @@ snapshots:
   '@types/babel__generator@7.27.0':
     dependencies:
       '@babel/types': 7.29.0
+
+  '@types/babel__standalone@7.1.9':
+    dependencies:
+      '@babel/parser': 7.29.2
+      '@babel/types': 7.29.0
+      '@types/babel__core': 7.20.5
+      '@types/babel__generator': 7.27.0
+      '@types/babel__template': 7.4.4
+      '@types/babel__traverse': 7.28.0
 
   '@types/babel__template@7.4.4':
     dependencies:

@@ -1,16 +1,20 @@
-import { stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import {
   CodesignError,
   ERROR_CODES,
+  extractAnimationCodeFromHtml,
+  extractAnimationComponentName,
+  parseAnimationCodeMeta,
   OPEN_CODESIGN_ANIMATION_COMPOSITION_ID,
   extractAnimationSpecFromHtml,
 } from '@open-codesign/shared';
 
 const require = createRequire(import.meta.url);
 const RUNTIME_NODE_MODULES_DIR = path.join(process.cwd(), 'runtime', 'node_modules');
+const DYNAMIC_ANIMATION_COMPOSITION_ID = 'OpenCodesignDynamicAnimation';
 
 type RemotionBundlerModule = typeof import('@remotion/bundler');
 type RemotionRendererModule = typeof import('@remotion/renderer');
@@ -99,42 +103,132 @@ async function getAnimationBundle(): Promise<string> {
   return animationBundlePromise;
 }
 
+function stripCodeFence(code: string): string {
+  const trimmed = code.trim();
+  const match = trimmed.match(/^```(?:tsx|jsx|ts|js)?\s*([\s\S]*?)\s*```$/i);
+  return match?.[1]?.trim() ?? trimmed;
+}
+
+function ensureNamedExport(code: string, componentName: string): string {
+  if (
+    new RegExp(`export\\s+(?:const|function|class)\\s+${componentName}\\b`).test(code) ||
+    new RegExp(`export\\s+default\\s+function\\s+${componentName}\\b`).test(code) ||
+    new RegExp(`export\\s+default\\s+${componentName}\\b`).test(code)
+  ) {
+    return code;
+  }
+  if (new RegExp(`\\b(?:const|function|class)\\s+${componentName}\\b`).test(code)) {
+    return `${code}\n\nexport { ${componentName} };`;
+  }
+  return code;
+}
+
+async function renderFromBundle(params: {
+  serveUrl: string;
+  compositionId: string;
+  destinationPath: string;
+  inputProps?: Record<string, unknown>;
+}): Promise<{ bytes: number; path: string }> {
+  const { renderMedia, selectComposition } = await getRemotionRenderer();
+  const browserExecutable = findBrowserExecutable();
+  const composition = await selectComposition({
+    serveUrl: params.serveUrl,
+    id: params.compositionId,
+    ...(params.inputProps ? { inputProps: params.inputProps } : {}),
+    ...(browserExecutable ? { browserExecutable } : {}),
+    logLevel: 'error',
+  });
+  await renderMedia({
+    composition,
+    serveUrl: params.serveUrl,
+    codec: 'h264',
+    outputLocation: params.destinationPath,
+    ...(params.inputProps ? { inputProps: params.inputProps } : {}),
+    imageFormat: 'jpeg',
+    ...(browserExecutable ? { browserExecutable } : {}),
+    logLevel: 'error',
+  });
+  const details = await stat(params.destinationPath);
+  return { bytes: details.size, path: params.destinationPath };
+}
+
+async function renderDynamicAnimationCode(
+  code: string,
+  destinationPath: string,
+): Promise<{ bytes: number; path: string }> {
+  const componentName = extractAnimationComponentName(code);
+  if (!componentName) {
+    throw new CodesignError(
+      'MP4 export requires an exported Remotion component in the animation code.',
+      ERROR_CODES.EXPORTER_MP4_FAILED,
+    );
+  }
+
+  const meta = parseAnimationCodeMeta(code);
+  const normalizedCode = ensureNamedExport(stripCodeFence(code), componentName);
+  const runtimeRoot = path.join(process.cwd(), 'runtime');
+  const buildRoot = path.join(runtimeRoot, 'generated');
+  await mkdir(buildRoot, { recursive: true });
+  const tempDir = await mkdtemp(path.join(buildRoot, 'animation-'));
+
+  try {
+    const compositionPath = path.join(tempDir, 'composition.tsx');
+    const rootPath = path.join(tempDir, 'root.tsx');
+    await writeFile(compositionPath, normalizedCode, 'utf8');
+    await writeFile(
+      rootPath,
+      [
+        "import React from 'react';",
+        "import { Composition, registerRoot } from 'remotion';",
+        `import { ${componentName} } from './composition';`,
+        '',
+        'const Root = () => (',
+        `  <Composition id="${DYNAMIC_ANIMATION_COMPOSITION_ID}" component={${componentName}} durationInFrames={${meta.durationInFrames}} fps={${meta.fps}} width={${meta.width}} height={${meta.height}} />`,
+        ');',
+        '',
+        'registerRoot(Root);',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const { bundle } = await getRemotionBundler();
+    const serveUrl = await bundle({ entryPoint: rootPath });
+    return await renderFromBundle({
+      serveUrl,
+      compositionId: DYNAMIC_ANIMATION_COMPOSITION_ID,
+      destinationPath,
+    });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 export async function exportMp4(htmlContent: string, destinationPath: string): Promise<{
   bytes: number;
   path: string;
 }> {
+  const animationCode = extractAnimationCodeFromHtml(htmlContent);
   const spec = extractAnimationSpecFromHtml(htmlContent);
-  if (!spec) {
+  if (!spec && !animationCode) {
     throw new CodesignError(
-      'MP4 export requires a valid embedded animation spec.',
+      'MP4 export requires embedded animation code or a valid animation spec.',
       ERROR_CODES.EXPORTER_MP4_FAILED,
     );
   }
 
   try {
+    if (animationCode) {
+      return await renderDynamicAnimationCode(animationCode, destinationPath);
+    }
+
     const serveUrl = await getAnimationBundle();
-    const { renderMedia, selectComposition } = await getRemotionRenderer();
-    const browserExecutable = findBrowserExecutable();
-    const inputProps = { spec };
-    const composition = await selectComposition({
+    return await renderFromBundle({
       serveUrl,
-      id: OPEN_CODESIGN_ANIMATION_COMPOSITION_ID,
-      inputProps,
-      ...(browserExecutable ? { browserExecutable } : {}),
-      logLevel: 'error',
+      compositionId: OPEN_CODESIGN_ANIMATION_COMPOSITION_ID,
+      inputProps: { spec },
+      destinationPath,
     });
-    await renderMedia({
-      composition,
-      serveUrl,
-      codec: 'h264',
-      outputLocation: destinationPath,
-      inputProps,
-      imageFormat: 'jpeg',
-      ...(browserExecutable ? { browserExecutable } : {}),
-      logLevel: 'error',
-    });
-    const details = await stat(destinationPath);
-    return { bytes: details.size, path: destinationPath };
   } catch (error) {
     if (error instanceof CodesignError) throw error;
     const message = error instanceof Error ? error.message : String(error);

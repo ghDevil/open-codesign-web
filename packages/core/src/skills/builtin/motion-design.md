@@ -1,4 +1,4 @@
----
+﻿---
 schemaVersion: 1
 name: motion-design
 description: >
@@ -19,13 +19,13 @@ user_invocable: true
 
 Wrong easing makes motion feel mechanical. Right easing makes it feel alive.
 
-**For UI entrances:** `cubic-bezier(0.16, 1, 0.3, 1)` — expo-out. Fast start, smooth deceleration. Elements arrive with confidence.
+**For UI entrances:** `cubic-bezier(0.16, 1, 0.3, 1)` â€” expo-out. Fast start, smooth deceleration. Elements arrive with confidence.
 
-**For UI exits:** `cubic-bezier(0.5, 0, 1, 0.5)` — ease-in. Slow start, accelerates away. Elements leave quickly without jarring.
+**For UI exits:** `cubic-bezier(0.5, 0, 1, 0.5)` â€” ease-in. Slow start, accelerates away. Elements leave quickly without jarring.
 
-**For hover/state changes:** `cubic-bezier(0.4, 0, 0.2, 1)` — standard material ease. Balanced, feels responsive.
+**For hover/state changes:** `cubic-bezier(0.4, 0, 0.2, 1)` â€” standard material ease. Balanced, feels responsive.
 
-**For elastic/spring:** `cubic-bezier(0.34, 1.56, 0.64, 1)` — slight overshoot. Use sparingly for playful interfaces.
+**For elastic/spring:** `cubic-bezier(0.34, 1.56, 0.64, 1)` â€” slight overshoot. Use sparingly for playful interfaces.
 
 **Never use:** `linear` (robotic), `ease` (CSS default, mediocre), `ease-in-out` (fine but generic).
 
@@ -103,10 +103,10 @@ document.querySelectorAll('[data-animate]').forEach(el => observer.observe(el));
 For hero animations or onboarding sequences, divide into phases:
 
 **Phase structure:**
-1. **Context** (0–15%): Establish the world. Background, ambient elements.
-2. **Reveal** (15–45%): Main content arrives. Logo, headline, hero image.
-3. **Elaboration** (45–75%): Supporting content builds. Features, stats, subtext.
-4. **Resolution** (75–100%): CTA, call to action, final state.
+1. **Context** (0â€“15%): Establish the world. Background, ambient elements.
+2. **Reveal** (15â€“45%): Main content arrives. Logo, headline, hero image.
+3. **Elaboration** (45â€“75%): Supporting content builds. Features, stats, subtext.
+4. **Resolution** (75â€“100%): CTA, call to action, final state.
 
 **Implementation with JS timeline:**
 ```javascript
@@ -125,111 +125,80 @@ timeline.forEach(({ delay, el, animation }) => {
 });
 ```
 
-**Text reveal rule:** Text that users need to read should stay visible for ≥3 seconds before any exit animation. Never auto-advance narrative text faster than reading speed.
+**Text reveal rule:** Text that users need to read should stay visible for â‰¥3 seconds before any exit animation. Never auto-advance narrative text faster than reading speed.
 
 ---
 
 ### Remotion Integration (Animation Mode)
 
-This app renders Remotion animations natively — **do NOT load Remotion from CDN**. When a design is of kind `animation`, output a standard HTML file that embeds a JSON animation spec in a `<script>` tag. The app's Remotion player reads that spec and renders the animation.
+This app now has a dedicated **Animation Studio** that compiles Remotion code live in the preview. When a design is of kind `animation`, output a standard HTML file that embeds raw React/Remotion component code in a special `<script>` tag.
 
-**Required output format for animation designs:**
+**CRITICAL rules:**
+1. Do not load Remotion from a CDN.
+2. Do not render the animation in the HTML body yourself.
+3. Output one exported React component named `MyComposition`.
+4. Keep imports limited to `react` and `remotion` only.
+5. Do not wrap the component in `<Composition>` or call `registerRoot()`.
 
-The HTML artifact must contain this script tag somewhere in `<body>` or `<head>`:
+**Required output format:**
+
 ```html
-<script id="open-codesign-animation" type="application/json">
-{
-  "version": 1,
-  "title": "Your Animation Title",
-  "aspectRatio": "16:9",
-  "fps": 30,
-  "durationInFrames": 180,
-  "motionStyle": "cinematic",
-  "palette": {
-    "background": "#08111f",
-    "surface": "rgba(255,255,255,0.10)",
-    "text": "#f6f7fb",
-    "muted": "rgba(246,247,251,0.72)",
-    "accent": "#7c9cff",
-    "accent2": "#5eead4"
-  },
-  "scenes": [
-    {
-      "id": "scene-1",
-      "layout": "hero",
-      "durationInFrames": 90,
-      "title": "Main Headline",
-      "body": "Supporting text that explains the concept.",
-      "align": "left"
-    },
-    {
-      "id": "scene-2",
-      "layout": "cards",
-      "durationInFrames": 90,
-      "title": "Key Points",
-      "cards": [
-        { "title": "Point One", "body": "Description of the first point." },
-        { "title": "Point Two", "body": "Description of the second point." },
-        { "title": "Point Three", "body": "Description of the third point." }
-      ]
-    }
-  ]
-}
+<!doctype html>
+<html>
+<head><meta charset="UTF-8"><title>Animation</title></head>
+<body>
+<script id="open-codesign-animation-code" type="text/plain">
+// @fps 30
+// @duration 150
+// @width 1920
+// @height 1080
+
+import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
+
+export const MyComposition = () => {
+  const frame = useCurrentFrame();
+  const { fps, durationInFrames, width, height } = useVideoConfig();
+
+  const opacity = interpolate(frame, [0, 20], [0, 1], { extrapolateRight: 'clamp' });
+  const scale = spring({ frame, fps, config: { damping: 14, stiffness: 180 } });
+
+  return (
+    <AbsoluteFill style={{ background: '#08111f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ opacity, transform: `scale(${scale})`, color: '#f6f7fb', fontSize: 96, fontWeight: 700, fontFamily: 'Inter, sans-serif' }}>
+        Hello World
+      </div>
+    </AbsoluteFill>
+  );
+};
 </script>
+</body>
+</html>
 ```
 
-The rest of the HTML file can be a simple placeholder page (dark background, centered "Animation Loading…" text) — the app overlays the Remotion player on top.
+**Common Remotion APIs to use:**
+- `useCurrentFrame()` for frame-based animation timing
+- `useVideoConfig()` for `fps`, `durationInFrames`, `width`, and `height`
+- `interpolate()` for mapping frames to values
+- `spring()` for eased motion
+- `AbsoluteFill` for the root composition wrapper
+- `Sequence` and `Series` for scene timing
+- `Easing` for custom easing curves
 
-**JSON spec field reference:**
+**Metadata comments at the top are required:**
+```
+// @fps 30
+// @duration 150
+// @width 1920
+// @height 1080
+```
 
-Top-level:
-- `version`: always `1`
-- `title`: animation title (shown in the preview panel header)
-- `aspectRatio`: `"16:9"` | `"9:16"` | `"1:1"` | `"4:5"` | `"21:9"`
-- `fps`: `24` | `30` | `60`
-- `durationInFrames`: total frames (fps × seconds). Must equal sum of scene durations.
-- `motionStyle`: `"cinematic"` | `"snappy"` | `"calm"` | `"playful"`
-- `narration`: optional string, pacing or voiceover notes
-- `palette`: color tokens — `background`, `surface`, `text`, `muted`, `accent`, `accent2`
-- `scenes`: array of 1–8 scene objects
-
-Scene object fields:
-- `id`: unique string identifier
-- `layout`: `"hero"` | `"split"` | `"cards"` | `"quote"` | `"metrics"` | `"cta"`
-- `durationInFrames`: frames for this scene (min 15)
-- `title`: main heading (required)
-- `kicker`: small eyebrow label above title (optional)
-- `body`: paragraph below title (optional)
-- `align`: `"left"` | `"center"` (default `"left"`)
-- `accent`: hex override for scene accent color (optional)
-- `background`: CSS background string override (optional)
-- `bullets`: array of strings — shown as bullet list below title (optional)
-- `cards`: array of `{eyebrow?, title, body, icon?}` — for `cards`/`split` layouts
-- `stats`: array of `{label, value}` — for `metrics` layout
-- `quote`: `{text, attribution?}` — for `quote` layout
-- `ctaLabel`: button label string — for `cta` layout
-- `imagePrompt`: visual placeholder description (optional, displayed as text cue)
-
-**Layout guide:**
-- `hero`: large headline + optional body + optional cards row beneath
-- `split`: headline left + panel right (cards, quote, or image cue)
-- `cards`: headline + 1–3 cards in a grid row
-- `quote`: large pull-quote centered or left-aligned
-- `metrics`: headline + stat grid (use for data/numbers)
-- `cta`: headline + body + call-to-action button
-
-**Scene count and pacing:**
-- 3–6 scenes is the sweet spot for a 6–15 second animation
-- Distribute `durationInFrames` so the total equals the top-level `durationInFrames`
-- Hero/intro: ~2s (60 frames at 30fps). Content scenes: 2–3s each. CTA: ~2s.
-
-**Frame rate guidance:**
-- 30fps: standard (default for most animations)
-- 60fps: smooth motion graphics or product demos
-- 24fps: cinematic/film feel
+**Design guidance:**
+- Break longer animations into multiple scenes with `Sequence`
+- Use spring entrances and interpolated exits
+- Favor layered typography, panels, and visual hierarchy over empty motion
+- Keep compositions self-contained and deterministic
 
 ---
-
 ### Reduced Motion (Required)
 
 Always include this:
@@ -248,8 +217,9 @@ Always include this:
 
 ### Performance Rules
 
-- Never animate `width`, `height`, `top`, `left`, `margin`, `padding` — triggers layout reflow
-- Only animate: `transform`, `opacity`, `filter`, `clip-path` — GPU-composited
+- Never animate `width`, `height`, `top`, `left`, `margin`, `padding` â€” triggers layout reflow
+- Only animate: `transform`, `opacity`, `filter`, `clip-path` â€” GPU-composited
 - For scroll parallax: use `transform: translateY()` on a `will-change: transform` element
 - Debounce scroll handlers at 16ms (one frame) or use IntersectionObserver instead
-- `will-change: transform` only on elements actually animating — overuse wastes GPU memory
+- `will-change: transform` only on elements actually animating â€” overuse wastes GPU memory
+

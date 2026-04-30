@@ -1,4 +1,4 @@
-import { i18n } from '@open-codesign/i18n';
+﻿import { i18n } from '@open-codesign/i18n';
 import type {
   ChatAppendInput,
   ChatMessage,
@@ -60,7 +60,7 @@ export interface CreateDesignOptions {
 
 /** Cap on the in-memory ReportableError ring. Dropping the oldest entries keeps
  *  the store bounded during long sessions while still covering every recent
- *  user-visible error — the Report dialog only needs whatever is on-screen. */
+ *  user-visible error â€” the Report dialog only needs whatever is on-screen. */
 export const MAX_REPORTABLE = 100;
 
 /**
@@ -85,13 +85,13 @@ export interface Toast {
   /**
    * Pointer into `reportableErrors` for the Report button. Set when a
    * ReportableError was constructed alongside this toast (every error toast
-   * should have one — see `createReportableError`). Missing for info/success
+   * should have one â€” see `createReportableError`). Missing for info/success
    * toasts that don't need a Report affordance.
    */
   localId?: string;
   /**
    * Optional secondary action rendered as a button inside the toast. Used
-   * to turn diagnostic toasts into actionable ones — e.g. a "no API key"
+   * to turn diagnostic toasts into actionable ones â€” e.g. a "no API key"
    * generate error becomes a toast with "Open Settings" that jumps the
    * user to the fix. `onClick` is called before the toast is dismissed.
    */
@@ -132,10 +132,10 @@ export type InteractionMode = 'default' | 'comment';
 
 export type PreviewViewport = 'desktop' | 'tablet' | 'mobile';
 
-// Workstream G — canvas tabs.
+// Workstream G â€” canvas tabs.
 // 'files' is the pinned tab that hosts the file list + inline preview; 'file'
 // tabs wrap a single file preview opened by double-clicking the list. Closing
-// a 'file' tab is purely UI state — it does NOT delete anything.
+// a 'file' tab is purely UI state â€” it does NOT delete anything.
 export type CanvasTab = { kind: 'files' } | { kind: 'file'; path: string };
 
 export const FILES_TAB: CanvasTab = { kind: 'files' };
@@ -155,7 +155,7 @@ export function closeTabAt(
 ): { tabs: CanvasTab[]; activeIndex: number } {
   const tab = tabs[target];
   if (!tab) return { tabs, activeIndex };
-  // The pinned 'files' tab cannot be closed — it always anchors index 0.
+  // The pinned 'files' tab cannot be closed â€” it always anchors index 0.
   if (tab.kind === 'files') return { tabs, activeIndex };
   const next = tabs.filter((_, i) => i !== target);
   let nextActive = activeIndex;
@@ -196,7 +196,7 @@ interface CodesignState {
   previewHtml: string | null;
   /** LRU cache of `previewHtml` per design id, capped to PREVIEW_POOL_LIMIT.
    *  PreviewPane renders one (display:none) iframe per entry so switching back
-   *  to a recently visited design is instant — no IPC, no srcDoc reparse. */
+   *  to a recently visited design is instant â€” no IPC, no srcDoc reparse. */
   previewHtmlByDesign: Record<string, string>;
   /** Most-recent-first list of design ids in the preview pool. */
   recentDesignIds: string[];
@@ -204,7 +204,7 @@ interface CodesignState {
   activeGenerationId: string | null;
   /** Design id that owns the in-flight generation. Lets the user switch to
    *  another design while a generation runs (it stays bound to its origin
-   *  design via designIdAtStart) — UI only shows "generating" affordances on
+   *  design via designIdAtStart) â€” UI only shows "generating" affordances on
    *  the design that actually has the run. */
   generatingDesignId: string | null;
   generationStage: GenerationStage;
@@ -254,29 +254,29 @@ interface CodesignState {
   // Sidebar v2 chat state
   chatMessages: ChatMessageRow[];
   chatLoaded: boolean;
-  /** In-flight tool calls that haven't completed yet. Purely in-memory —
+  /** In-flight tool calls that haven't completed yet. Purely in-memory â€”
    *  only persisted to SQLite when the result arrives (done/error). */
   pendingToolCalls: ChatToolCallPayload[];
   sidebarCollapsed: boolean;
 
-  // Workstream D — comments
+  // Workstream D â€” comments
   comments: CommentRow[];
   commentsLoaded: boolean;
   commentBubble: CommentBubbleAnchor | null;
-  /** Id of the snapshot currently visible in the preview — pins filter by it. */
+  /** Id of the snapshot currently visible in the preview â€” pins filter by it. */
   currentSnapshotId: string | null;
   /** Live, iframe-viewport-relative rects keyed by selector. Updated on
    *  every iframe scroll/resize so pins and bubbles track their anchor
    *  element even when the design scrolls inside the sandbox. Consumers
-   *  prefer this over the stored rect when present. Unscaled — callers
+   *  prefer this over the stored rect when present. Unscaled â€” callers
    *  apply zoom themselves. */
   liveRects: Record<string, CommentRect>;
 
-  // Workstream G — canvas file tabs
+  // Workstream G â€” canvas file tabs
   canvasTabs: CanvasTab[];
   activeCanvasTab: number;
 
-  // PR4 — diagnostics slice. Pull-based: Diagnostics panel + error UI call
+  // PR4 â€” diagnostics slice. Pull-based: Diagnostics panel + error UI call
   // `refreshDiagnosticEvents` on mount / when a failure surfaces. No polling.
   recentEvents: DiagnosticEventRow[];
   unreadErrorCount: number;
@@ -284,7 +284,7 @@ interface CodesignState {
    *  `unreadErrorCount` counts error-level events whose `ts > lastReadTs`. */
   lastReadTs: number;
   /** Guard so we only hydrate `lastReadTs` from persisted preferences once
-   *  per session — first `refreshDiagnosticEvents` call does the read. */
+   *  per session â€” first `refreshDiagnosticEvents` call does the read. */
   diagnosticsPrefsHydrated: boolean;
   refreshDiagnosticEvents: () => Promise<void>;
   markDiagnosticsRead: () => void;
@@ -312,7 +312,7 @@ interface CodesignState {
 
   /** localId of the ReportableError whose Report dialog is currently open, or
    *  null if no dialog is active. Hoisted to the store so only one dialog
-   *  ever mounts — multiple error toasts can't stack overlapping modals. */
+   *  ever mounts â€” multiple error toasts can't stack overlapping modals. */
   activeReportLocalId: string | null;
   openReportDialog: (localId: string) => void;
   closeReportDialog: () => void;
@@ -327,7 +327,7 @@ interface CodesignState {
     skipClarification?: boolean | undefined;
     /** Silent prompts skip the user chat bubble and the auto-rename trigger.
      *  Used by the auto-polish flow so the injected "deepen" request isn't
-     *  visible as a user message — the agent still receives it and responds
+     *  visible as a user message â€” the agent still receives it and responds
      *  normally, but the chat transcript reads as one continuous run. */
     silent?: boolean | undefined;
   }) => Promise<void>;
@@ -410,7 +410,7 @@ interface CodesignState {
    * Convenience wrapper that pairs `createReportableError` with `pushToast`
    * so callers don't have to stitch them together. Prefer this over raw
    * `pushToast({ variant: 'error', ... })` at any site where a meaningful
-   * `code` + `scope` can be supplied — the Report dialog then gets real
+   * `code` + `scope` can be supplied â€” the Report dialog then gets real
    * triage fields instead of the generic RENDERER_ERROR / renderer pair
    * that `pushToast`'s auto-wrap falls back to.
    */
@@ -447,14 +447,14 @@ interface CodesignState {
   /** Persist the current in-memory `previewHtml` for a finished agentic run as
    *  a SQLite snapshot row. Without this, agentic runs never write to disk
    *  and reload boots back into the empty welcome state even when the agent
-   *  produced a valid index.html. Fires-and-forgets — failures are toasted. */
+   *  produced a valid index.html. Fires-and-forgets â€” failures are toasted. */
   persistAgentRunSnapshot: (input: { designId: string; finalText?: string }) => Promise<void>;
   /** Replace the current preview source verbatim. Used by the host's tweak
    *  panel to write a re-serialized EDITMODE block back into the artifact. */
   setPreviewHtml: (content: string) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
 
-  // Workstream D — comments
+  // Workstream D â€” comments
   loadCommentsForCurrentDesign: () => Promise<void>;
   openCommentBubble: (anchor: CommentBubbleAnchor) => void;
   closeCommentBubble: () => void;
@@ -472,7 +472,7 @@ interface CodesignState {
   /** Single entry point used by CommentBubble. If `existingCommentId` is set,
    *  routes to updateComment (editing a saved comment); otherwise addComment
    *  (creating a new one). Returns the resulting row on success, null on
-   *  failure — callers must check before closing UI so drafts aren't lost. */
+   *  failure â€” callers must check before closing UI so drafts aren't lost. */
   submitComment: (input: {
     existingCommentId?: string;
     kind: CommentKind;
@@ -485,15 +485,15 @@ interface CodesignState {
     parentOuterHTML?: string;
   }) => Promise<CommentRow | null>;
   removeComment: (id: string) => Promise<void>;
-  /** Replace the live rects map — called from PreviewPane when the sandbox
+  /** Replace the live rects map â€” called from PreviewPane when the sandbox
    *  broadcasts an ELEMENT_RECTS message. Entries are iframe-viewport-relative
    *  and unscaled. */
   applyLiveRects: (entries: Array<{ selector: string; rect: CommentRect }>) => void;
-  /** Reset live rects — call on design/snapshot switch to avoid stale
+  /** Reset live rects â€” call on design/snapshot switch to avoid stale
    *  overlays pointing at the previous iframe's layout. */
   clearLiveRects: () => void;
 
-  // Workstream G — canvas file tabs
+  // Workstream G â€” canvas file tabs
   openCanvasFileTab: (path: string) => void;
   closeCanvasTab: (index: number) => void;
   setActiveCanvasTab: (index: number) => void;
@@ -505,7 +505,7 @@ export interface CommentBubbleAnchor {
   tag: string;
   outerHTML: string;
   rect: CommentRect;
-  /** v2 enrichment — parent element outerHTML, truncated. */
+  /** v2 enrichment â€” parent element outerHTML, truncated. */
   parentOuterHTML?: string;
   /** If set, the bubble is editing an existing saved comment. */
   existingCommentId?: string;
@@ -517,7 +517,7 @@ const THEME_STORAGE_KEY = 'open-codesign:theme';
 
 // PreviewPane keeps an iframe per recently-visited design alive so switching
 // back is instant. Bound the pool so memory stays small for users with lots
-// of designs — 5 covers the typical "compare two or three" workflow with
+// of designs â€” 5 covers the typical "compare two or three" workflow with
 // headroom and only costs a few MB of iframe documents.
 const PREVIEW_POOL_LIMIT = 5;
 
@@ -741,23 +741,23 @@ type GetState = StoreApi<CodesignState>['getState'];
  * Quick sanity gate for artifact content before we overwrite the design's
  * latest snapshot. Catches the dominant failure mode: an agent run that was
  * interrupted mid-edit (context blowup, provider 400, autopolish crash, user
- * cancel) leaves a truncated JSX file in the virtual FS — its tail is missing
+ * cancel) leaves a truncated JSX file in the virtual FS â€” its tail is missing
  * the `ReactDOM.createRoot(...).render(<App/>)` line and braces are wildly
  * unbalanced. Persisting that as the new snapshot would blank the hub
  * thumbnail and lose the previous good state. The check is intentionally
- * tolerant (±2 on bracket count) so whitespace quirks in valid artifacts pass.
+ * tolerant (Â±2 on bracket count) so whitespace quirks in valid artifacts pass.
  */
 function looksRunnableArtifact(src: string): boolean {
   const trimmed = src.trim();
   if (trimmed.length === 0) return false;
-  // HTML artifacts (legacy paste) don't need the JSX gate — accept anything
+  // HTML artifacts (legacy paste) don't need the JSX gate â€” accept anything
   // that at least has an <html> or <body>.
   if (/<html[\s>]/i.test(trimmed) || /<body[\s>]/i.test(trimmed)) return true;
   // JSX contract: must end with a mount call. Without it the iframe renders
   // nothing and the thumbnail stays blank.
   if (!/ReactDOM\.createRoot\s*\([\s\S]*?\)\s*\.render\s*\(/.test(trimmed)) return false;
   // Rough brace / paren balance. Not string-aware (that's overkill for a
-  // truncation gate) — the ±2 tolerance absorbs the usual legitimate drift
+  // truncation gate) â€” the Â±2 tolerance absorbs the usual legitimate drift
   // inside template literals or comments.
   const opens = (trimmed.match(/\{/g) ?? []).length;
   const closes = (trimmed.match(/\}/g) ?? []).length;
@@ -771,7 +771,7 @@ function looksRunnableArtifact(src: string): boolean {
 function autoNameFromPrompt(prompt: string): string {
   const condensed = prompt.replace(/\s+/g, ' ').trim();
   if (condensed.length === 0) return 'Untitled design';
-  return condensed.length > 40 ? `${condensed.slice(0, 40).trimEnd()}…` : condensed;
+  return condensed.length > 40 ? `${condensed.slice(0, 40).trimEnd()}â€¦` : condensed;
 }
 
 function isDefaultDesignName(name: string): boolean {
@@ -780,7 +780,7 @@ function isDefaultDesignName(name: string): boolean {
 
 // Core emits 'html' | 'svg' | 'slides' | 'bundle' but the snapshots schema only
 // stores 'html' | 'react' | 'svg' (see DesignSnapshotV1). 'slides'/'bundle' fold
-// into 'html' because their on-disk source is HTML — keeping the column
+// into 'html' because their on-disk source is HTML â€” keeping the column
 // constraint stable means we don't need a schema migration to persist them.
 // Unknown types throw so a new core ArtifactType doesn't silently round-trip
 // as the wrong renderer.
@@ -817,8 +817,8 @@ function artifactFromResult(
 }
 
 // Per-designId serialization queue. A single generate run reaches this
-// function twice — once from applyGenerateResult → persistDesignState and once
-// from the agent_end handler → persistAgentRunSnapshot. Without serialization
+// function twice â€” once from applyGenerateResult â†’ persistDesignState and once
+// from the agent_end handler â†’ persistAgentRunSnapshot. Without serialization
 // both callers race on `snapshots.list`, see zero rows, and both write a fresh
 // parent-less 'initial' snapshot. Chaining per design collapses the race and
 // lets the content-based dedupe below drop the second write cleanly.
@@ -861,7 +861,7 @@ async function persistArtifactSnapshot(
 
 /**
  * Rebuild the agent-facing history from chat_messages (single source of truth
- * for the sidebar chat). Only user + assistant_text rows contribute — tool_call
+ * for the sidebar chat). Only user + assistant_text rows contribute â€” tool_call
  * / artifact_delivered / error are dropped because the agent re-reads live file
  * state via text_editor.view(). seedFromSnapshots first so legacy designs with
  * only snapshot-era user prompts get backfilled. Falls back to [] when designId
@@ -911,7 +911,7 @@ async function persistDesignState(
         const raw = (firstUser?.payload as { text?: string } | null)?.text;
         if (typeof raw === 'string' && raw.length > 0) thumbText = raw.slice(0, 200);
       } catch {
-        // Non-fatal — thumbnail stays unchanged.
+        // Non-fatal â€” thumbnail stays unchanged.
       }
       await window.codesign.snapshots.setThumbnail(designId, thumbText);
     }
@@ -950,7 +950,7 @@ async function maybeAutoRename(
       if (trimmed.length > 0) newName = trimmed;
     }
   } catch (err) {
-    // Fall through to the truncation fallback — don't surface a toast; the
+    // Fall through to the truncation fallback â€” don't surface a toast; the
     // name itself is a nice-to-have and the user can always rename manually.
     // But DO log the failure so we can see why in the main-process log.
     rendererLogger.warn('store', '[title] generateTitle failed, using prompt fallback', {
@@ -1052,13 +1052,13 @@ function applyGenerateSuccess(
     set({ previewHtmlByDesign: pool.cache, recentDesignIds: pool.recent });
   }
   if (didApply) {
-    // Workstream G — auto-open the generated file as a tab so the user sees
+    // Workstream G â€” auto-open the generated file as a tab so the user sees
     // the preview immediately. For Phase 1 the only file is `index.html`;
     // post-Workstream E we'll use the file the agent actually wrote.
     if (firstArtifact) {
       get().openCanvasFileTab('index.html');
     }
-    // Prefer the designId captured when the prompt was sent — if the user
+    // Prefer the designId captured when the prompt was sent â€” if the user
     // switched designs mid-generation, get().currentDesignId would now point
     // at the new one and we'd write the artifact + assistant text into the
     // wrong chat. Fall back to current only when caller didn't pass one
@@ -1113,7 +1113,7 @@ export function extractCodesignErrorCode(err: unknown): string | undefined {
 /**
  * Pull NormalizedProviderError-shaped upstream fields off a caught error so the
  * Report dialog's "Upstream context" block can render them. Returns undefined
- * when none of the expected keys are present — callers then omit `context`
+ * when none of the expected keys are present â€” callers then omit `context`
  * rather than attaching an empty object.
  */
 export function extractUpstreamContext(err: unknown): Record<string, unknown> | undefined {
@@ -1210,7 +1210,7 @@ function applyGenerateError(
 
   // Bridge the failure into the connection-test diagnostics system so the
   // toast tells the user WHY and WHAT TO TRY instead of just dumping the
-  // upstream message. Fixes #130 (404 → "add /v1") and gives #158 / #134 a
+  // upstream message. Fixes #130 (404 â†’ "add /v1") and gives #158 / #134 a
   // home for gateway / instructions-required hints.
   const cfg = get().config;
   const hypothesis = deriveGenerateHypothesis(err, cfg);
@@ -1251,7 +1251,7 @@ function deriveGenerateHypothesis(
   };
   const hypotheses = diagnoseGenerateFailure(ctx);
   const primary = hypotheses[0];
-  // Skip the bare "unknown" hypothesis — appending "Unknown error" to a
+  // Skip the bare "unknown" hypothesis â€” appending "Unknown error" to a
   // toast that already shows the upstream message is just noise.
   if (primary === undefined || primary.cause === 'diagnostics.cause.unknown') {
     return undefined;
@@ -1308,7 +1308,7 @@ export async function applyGenerateBaseUrlFix(
   nextBaseUrl: string,
 ): Promise<void> {
   const api = window.codesign?.config?.updateProvider;
-  // Don't silently swallow "this app version lacks the IPC" — surface it as a
+  // Don't silently swallow "this app version lacks the IPC" â€” surface it as a
   // reportable error so users know why the Apply-fix button did nothing and
   // can fall back to editing baseUrl manually in Settings.
   if (api === undefined) {
@@ -1363,7 +1363,7 @@ async function runGenerate(
   const api = window.codesign;
   if (!api) throw new Error(tr('errors.rendererDisconnected'));
   const result = await api.generate(payload);
-  // Response fully received — move through parsing → rendering before finalising.
+  // Response fully received â€” move through parsing â†’ rendering before finalising.
   advanceStageIfCurrent(get, set, generationId, 'parsing');
   advanceStageIfCurrent(get, set, generationId, 'rendering');
   applyGenerateSuccess(
@@ -1442,7 +1442,7 @@ export interface PromptContextExtras {
 
 const FIDELITY_GUIDANCE: Record<string, string> = {
   wireframe:
-    'WIREFRAME mode: produce a low-fidelity exploration. Use neutral grey blocks, dashed borders, system-ui sans-serif, placeholder text like "Lorem ipsum…", and no images or photographs (use captioned grey rectangles instead). Prioritize structure and information hierarchy over visual polish.',
+    'WIREFRAME mode: produce a low-fidelity exploration. Use neutral grey blocks, dashed borders, system-ui sans-serif, placeholder text like "Lorem ipsumâ€¦", and no images or photographs (use captioned grey rectangles instead). Prioritize structure and information hierarchy over visual polish.',
   high:
     'HIGH-FIDELITY mode: produce a polished, magazine-quality result. Use real-feeling content (proper headlines, concrete copy), brand-grade typography, layered backgrounds, real images via cdn.midjourney-mirror.com or unsplash.com, and proper spacing/shadow tokens. Match a real launched product, not a wireframe.',
 };
@@ -1451,71 +1451,79 @@ const KIND_GUIDANCE: Record<string, string> = {
   prototype:
     'Output a clickable prototype: phone or browser-frame app screen with realistic interactions.',
   slideDeck:
-    'Output a multi-slide deck (each slide is a section with id="slide-1", "slide-2", …). Use scroll-snap for navigation. Cover, agenda, content slides, then closing.',
+    'Output a multi-slide deck (each slide is a section with id="slide-1", "slide-2", and so on). Use scroll-snap for navigation. Cover, agenda, content slides, then closing.',
   animation:
-    'Output a Remotion-ready animation. Return a normal HTML artifact, but include an embedded JSON animation spec in <script id="open-codesign-animation" type="application/json">...</script> so the app can preview and export it.',
+    'Output a Remotion animation. Return a normal HTML artifact containing raw React/Remotion TSX code inside <script id="open-codesign-animation-code" type="text/plain">. The app compiles it live in the animation studio and can render it to MP4.',
   template:
-    'Honor the chosen template starter — extend rather than override its structure unless asked.',
+    'Honor the chosen template starter and extend it rather than overriding its structure unless asked.',
   other:
-    'Treat the request flexibly — landing page, one-pager, infographic, or whatever the prompt suggests.',
+    'Treat the request flexibly: landing page, one-pager, infographic, or whatever the prompt suggests.',
 };
 
 function intentToPromptHeader(intent: PromptContextExtras['intent']): string | null {
   if (!intent || !intent.kind) return null;
   const lines = ['## DESIGN INTENT'];
   const kindLine = KIND_GUIDANCE[intent.kind];
-  if (kindLine) lines.push(`- Kind: **${intent.kind}** — ${kindLine}`);
+  if (kindLine) lines.push(`- Kind: **${intent.kind}** â€” ${kindLine}`);
   if (intent.fidelity && FIDELITY_GUIDANCE[intent.fidelity]) {
     lines.push(`- Fidelity: ${FIDELITY_GUIDANCE[intent.fidelity]}`);
   }
   if (intent.speakerNotes && intent.kind === 'slideDeck') {
     lines.push(
-      '- Speaker notes: include a `<aside class="speaker-notes">…</aside>` block under each slide with delivery cues; hide it from default view but show with a "Notes" toggle.',
+      '- Speaker notes: include a `<aside class="speaker-notes">â€¦</aside>` block under each slide with delivery cues; hide it from default view but show with a "Notes" toggle.',
     );
   }
   if (intent.kind === 'animation' && intent.animation) {
     const { aspectRatio, fps, durationInFrames, motionStyle, narration } = intent.animation;
-    lines.push(`- Animation format: ${aspectRatio} at ${fps} fps, ${durationInFrames} frames total (~${Math.round(durationInFrames / fps)}s).`);
-    lines.push(`- Motion style: ${motionStyle}.`);
-    if (narration?.trim()) {
-      lines.push(`- Narration or pacing notes: ${narration.trim()}`);
-    }
+    const [aw, ah] =
+      aspectRatio === '9:16'
+        ? [1080, 1920]
+        : aspectRatio === '1:1'
+          ? [1080, 1080]
+          : aspectRatio === '4:5'
+            ? [1080, 1350]
+            : aspectRatio === '21:9'
+              ? [1680, 720]
+              : [1920, 1080];
+    lines.push(
+      `- Format: ${aspectRatio} (${aw}x${ah}px), ${fps}fps, ${durationInFrames} frames (~${Math.round(durationInFrames / fps)}s), motion style: ${motionStyle}.`,
+    );
+    if (narration?.trim()) lines.push(`- Pacing/narration: ${narration.trim()}`);
     lines.push('');
-    lines.push('**CRITICAL — Animation output rules:**');
-    lines.push('1. The HTML artifact MUST contain `<script id="open-codesign-animation" type="application/json">` with a valid AnimationSpec JSON object.');
-    lines.push('2. Do NOT load Remotion from CDN. Do NOT try to render the animation in the HTML page itself. The app renders it natively via its built-in Remotion player.');
-    lines.push('3. The HTML body content is irrelevant — it will be hidden behind the player. A simple dark placeholder page is fine.');
-    lines.push('4. The JSON MUST include all required fields: `version` (always 1), `title`, `aspectRatio`, `fps`, `durationInFrames`, `motionStyle`, `palette`, and `scenes` (array).');
-    lines.push('5. `palette` must include: `background`, `surface`, `text`, `muted`, `accent`, `accent2` (use default dark theme if not specified).');
-    lines.push('6. Each scene must have: `id` (unique string), `layout`, `durationInFrames`, `title`. Scene durations must sum to the top-level `durationInFrames`.');
-    lines.push('7. Supported layouts: `hero`, `split`, `cards`, `quote`, `metrics`, `cta`.');
+    lines.push('CRITICAL animation output format:');
+    lines.push(
+      'Return a normal HTML artifact whose body contains a <script id="open-codesign-animation-code" type="text/plain"> block with the full Remotion component source.',
+    );
     lines.push('');
-    lines.push('**Minimal valid example:**');
+    lines.push('Rules:');
+    lines.push('1. Output exactly one exported React component named `MyComposition`.');
+    lines.push('2. Imports are allowed, but only from `react` and `remotion`. Do not import any third-party packages.');
+    lines.push('3. Include metadata comments first: `// @fps`, `// @duration`, `// @width`, `// @height`.');
+    lines.push('4. Do not wrap the component in `<Composition>` or call `registerRoot()`. The app handles the Remotion Player and MP4 render pipeline.');
+    lines.push('5. Do not use markdown fences outside the script tag. Do not load Remotion from a CDN.');
+    lines.push('');
+    lines.push('Required template:');
     lines.push('```html');
-    lines.push('<script id="open-codesign-animation" type="application/json">');
-    lines.push(JSON.stringify({
-      version: 1,
-      title: 'Your Title',
-      aspectRatio,
-      fps,
-      durationInFrames,
-      motionStyle,
-      palette: {
-        background: '#08111f',
-        surface: 'rgba(255,255,255,0.10)',
-        text: '#f6f7fb',
-        muted: 'rgba(246,247,251,0.72)',
-        accent: '#7c9cff',
-        accent2: '#5eead4',
-      },
-      scenes: [
-        { id: 'scene-1', layout: 'hero', durationInFrames: Math.round(durationInFrames * 0.5), title: 'Main Headline', body: 'Supporting text.', align: 'left' },
-        { id: 'scene-2', layout: 'cta', durationInFrames: Math.round(durationInFrames * 0.5), title: 'Call to Action', body: 'Next step description.', ctaLabel: 'Get Started', align: 'center' },
-      ],
-    }, null, 2));
+    lines.push('<script id="open-codesign-animation-code" type="text/plain">');
+    lines.push(`// @fps ${fps}`);
+    lines.push(`// @duration ${durationInFrames}`);
+    lines.push(`// @width ${aw}`);
+    lines.push(`// @height ${ah}`);
+    lines.push('');
+    lines.push("import { AbsoluteFill, Easing, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';");
+    lines.push('');
+    lines.push('export const MyComposition = () => {');
+    lines.push('  const frame = useCurrentFrame();');
+    lines.push('  const { fps, durationInFrames, width, height } = useVideoConfig();');
+    lines.push('  return (');
+    lines.push("    <AbsoluteFill style={{ background: '#08111f' }}>");
+    lines.push('      {/* animation scenes go here */}');
+    lines.push('    </AbsoluteFill>');
+    lines.push('  );');
+    lines.push('};');
     lines.push('</script>');
     lines.push('```');
-    lines.push('Replace the scene content with real, meaningful scenes based on the user prompt. 3–6 scenes is ideal.');
+    lines.push('Make it feel like a real Remotion piece: strong composition, scene timing, layered motion, and polished typography.');
   }
   return lines.join('\n');
 }
@@ -1526,7 +1534,7 @@ function extractedDocsToPromptHeader(
   if (!docs || docs.length === 0) return null;
   const lines = ['## ATTACHED DOCUMENTS', ''];
   for (const doc of docs) {
-    const cap = doc.text.length > 8000 ? `${doc.text.slice(0, 8000)}\n…[truncated]` : doc.text;
+    const cap = doc.text.length > 8000 ? `${doc.text.slice(0, 8000)}\nâ€¦[truncated]` : doc.text;
     lines.push(`### ${doc.name} (${doc.kind})`);
     lines.push(cap);
     lines.push('');
@@ -1551,10 +1559,10 @@ export function buildEnrichedPrompt(
   }
 
   const MAX_HTML = 600;
-  const truncate = (s: string) => (s.length > MAX_HTML ? `${s.slice(0, MAX_HTML)}…` : s);
+  const truncate = (s: string) => (s.length > MAX_HTML ? `${s.slice(0, MAX_HTML)}â€¦` : s);
 
   const lines: string[] = [
-    '## REQUIRED EDITS — you MUST apply every edit below to index.html',
+    '## REQUIRED EDITS â€” you MUST apply every edit below to index.html',
     '',
     'Each edit targets a specific element identified by its selector and outerHTML.',
     'Use text_editor str_replace to find and modify the element. Do NOT skip any edit.',
@@ -1596,7 +1604,7 @@ function formatClarificationAssistantText(
   questions.forEach((question, index) => {
     lines.push(`${index + 1}. ${question.label}`);
     if (question.options && question.options.length > 0) {
-      lines.push(`   Options: ${question.options.join(' · ')}`);
+      lines.push(`   Options: ${question.options.join(' Â· ')}`);
     }
   });
   return lines.join('\n');
@@ -1647,7 +1655,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     if (s.isGenerating) return;
     // Require that the design has at least one completed assistant_text row
     // for the just-finished round. If the agent ended without producing
-    // prose, the run likely errored or was trivial — skip polish.
+    // prose, the run likely errored or was trivial â€” skip polish.
     const designMessages = s.chatMessages.filter((m) => m.designId === designId);
     const hasAssistantText = designMessages.some((m) => m.kind === 'assistant_text');
     if (!hasAssistantText) return;
@@ -1657,7 +1665,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     const latest = designMessages[designMessages.length - 1];
     if (latest?.kind === 'error') return;
     // Skip polish if there was an error anywhere in the latest chain of
-    // events after the most recent user message — same rationale.
+    // events after the most recent user message â€” same rationale.
     const lastUserIdx = designMessages.map((m) => m.kind).lastIndexOf('user');
     if (lastUserIdx >= 0 && designMessages.slice(lastUserIdx).some((m) => m.kind === 'error')) {
       return;
@@ -1668,7 +1676,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     nextFired.add(designId);
     set({ autoPolishFired: nextFired });
     // Local import to avoid a circular include with the hook file at module
-    // load time — the store is imported by the hook and vice-versa.
+    // load time â€” the store is imported by the hook and vice-versa.
     void import('./hooks/polishPrompt').then(({ pickPolishPrompt }) => {
       const prompt = pickPolishPrompt(locale);
       void get().sendPrompt({ prompt, silent: true });
@@ -1856,7 +1864,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     if (!isReadyConfig(cfg)) {
       // Give the user something actionable instead of "Onboarding is not
       // complete." In practice the common path here is "imported a provider
-      // but no key" — see runImportClaudeCode for the local-proxy /
+      // but no key" â€” see runImportClaudeCode for the local-proxy /
       // remote-gateway branches that intentionally create an entry without
       // a key. Tell them which provider is missing a key and where to fix it.
       const msg =
@@ -1878,7 +1886,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       return;
     }
 
-    // Pending edit chips let the user submit with an empty prompt — we
+    // Pending edit chips let the user submit with an empty prompt â€” we
     // substitute a default trailer so buildPromptRequest still passes.
     const pendingEdits = get().comments.filter((c) => c.kind === 'edit' && c.status === 'pending');
     const trimmedInput = input.prompt.trim();
@@ -1900,7 +1908,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     // history offers diminishing value and pushes us toward the token ceiling.
     const HISTORY_CAP = 12;
     // chat_messages is the single source of truth for agent history. Fixes
-    // the race where a broken session + "继续" made the agent see a stale or
+    // the race where a broken session + "ç»§ç»­" made the agent see a stale or
     // empty history from a legacy mirror and drift off-task.
     const fullHistory = await buildHistoryFromChat(designIdAtStart);
     const history =
@@ -2047,7 +2055,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       // overlay + chips flip state consistently with the new preview.
       if (pendingEditIds.length > 0 && designIdAtStart && window.codesign) {
         try {
-          // Retry fetching the newest snapshot — persistDesignState runs
+          // Retry fetching the newest snapshot â€” persistDesignState runs
           // asynchronously, so the snapshot may not be available immediately.
           let appliedIn: string | null = null;
           for (let attempt = 0; attempt < 5; attempt++) {
@@ -2374,7 +2382,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       const result = await window.codesign.folders.list();
       set({ folders: result?.folders ?? [] });
     } catch {
-      /* folders are optional — don't fail the app */
+      /* folders are optional â€” don't fail the app */
     }
   },
 
@@ -2424,7 +2432,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       if (first) await get().switchDesign(first.id);
       return;
     }
-    // No designs exist yet — create the first one silently. The user can
+    // No designs exist yet â€” create the first one silently. The user can
     // rename it later or just send a prompt and we'll auto-name it.
     await get().createNewDesign();
   },
@@ -2432,7 +2440,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
   async createNewDesign(workspacePath?: string | null | CreateDesignOptions) {
     if (!window.codesign) return null;
     if (get().isGenerating) {
-      // Don't silently drop the request — callers like the Examples flow
+      // Don't silently drop the request â€” callers like the Examples flow
       // assume "clicked = new design". A hidden no-op makes the prompt appear
       // to have vanished into the current design instead.
       get().pushToast({
@@ -2544,7 +2552,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
           )
         : { cache: state.previewHtmlByDesign, recent: state.recentDesignIds };
 
-    // Cache hit on the incoming design — render instantly, refresh in the
+    // Cache hit on the incoming design â€” render instantly, refresh in the
     // background so any external edits eventually land.
     const cachedHtml = outgoingPool.cache[id];
     const designContext = readDesignContext(id);
@@ -2555,7 +2563,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         id,
         cachedHtml,
       );
-      // Commit the visual switch instantly — iframe is already alive in the
+      // Commit the visual switch instantly â€” iframe is already alive in the
       // pool so no reparse cost.
       set({
         currentDesignId: id,
@@ -2602,13 +2610,13 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
             });
           }
         } catch {
-          // Background refresh failure is harmless — cached preview remains.
+          // Background refresh failure is harmless â€” cached preview remains.
         }
       })();
       return;
     }
 
-    // Cold path — first visit (or evicted from pool). Pay the IPC + parse cost.
+    // Cold path â€” first visit (or evicted from pool). Pay the IPC + parse cost.
     try {
       const snapshots = await window.codesign.snapshots.list(id);
       const latest = snapshots[0] ?? null;
@@ -2886,7 +2894,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       // Seed existing designs' chat history from snapshots on first open.
       await window.codesign.chat.seedFromSnapshots(designId);
       const rows = await window.codesign.chat.list(designId);
-      // Guard against a design switch happening while the IPC was in flight —
+      // Guard against a design switch happening while the IPC was in flight â€”
       // we'd otherwise render the previous design's chat into the new one.
       if (get().currentDesignId !== designId) return;
       set({ chatMessages: rows, chatLoaded: true });
@@ -2901,7 +2909,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     if (!window.codesign) return null;
     try {
       const row = await window.codesign.chat.append(input);
-      // Only merge into state if the append belongs to the current design —
+      // Only merge into state if the append belongs to the current design â€”
       // a background append to a previous design must not pollute the view.
       if (get().currentDesignId === input.designId) {
         set((s) => ({ chatMessages: [...s.chatMessages, row] }));
@@ -2995,7 +3003,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     // run on design A from blowing away the preview while the user has switched
     // to design B.
     if (state.currentDesignId !== designId && state.generatingDesignId !== designId) {
-      // The event's design isn't visible — still update its pool entry so
+      // The event's design isn't visible â€” still update its pool entry so
       // switching back later reflects the streamed-in HTML.
       const pool = recordPreviewInPool(
         state.previewHtmlByDesign,
@@ -3062,7 +3070,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       return;
     }
     // The "prompt" associated with this snapshot is the most recent user
-    // message in the chat — that is what the agent was answering.
+    // message in the chat â€” that is what the agent was answering.
     const lastUser = [...state.chatMessages].reverse().find((m) => m.kind === 'user');
     const prompt = (lastUser?.payload as { text?: string } | undefined)?.text ?? null;
     const artifact: PersistArtifact = {
@@ -3417,3 +3425,4 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     set({ activeReportLocalId: null });
   },
 }));
+

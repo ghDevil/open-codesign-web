@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const OPEN_CODESIGN_ANIMATION_SCRIPT_ID = 'open-codesign-animation';
+export const OPEN_CODESIGN_ANIMATION_CODE_SCRIPT_ID = 'open-codesign-animation-code';
 export const OPEN_CODESIGN_ANIMATION_COMPOSITION_ID = 'OpenCodesignAnimation';
 
 export const AnimationAspectRatio = z.enum(['16:9', '9:16', '1:1', '4:5', '21:9']);
@@ -95,6 +96,80 @@ const SCRIPT_RE = new RegExp(
   `<script[^>]*id=["']${OPEN_CODESIGN_ANIMATION_SCRIPT_ID}["'][^>]*type=["']application/json["'][^>]*>([\\s\\S]*?)<\\/script>`,
   'i',
 );
+const CODE_SCRIPT_RE = new RegExp(
+  `<script[^>]*id=["']${OPEN_CODESIGN_ANIMATION_CODE_SCRIPT_ID}["'][^>]*>([\\s\\S]*?)<\\/script>`,
+  'i',
+);
+const CODE_FENCE_RE = /^```(?:tsx|jsx|ts|js)?\s*([\s\S]*?)\s*```$/i;
+
+export interface AnimationCodeMeta {
+  fps: number;
+  durationInFrames: number;
+  width: number;
+  height: number;
+}
+
+function unwrapCodeFence(value: string): string {
+  const trimmed = value.trim();
+  const match = trimmed.match(CODE_FENCE_RE);
+  return match?.[1]?.trim() ?? trimmed;
+}
+
+export function extractAnimationCodeFromHtml(html: string): string | null {
+  const scriptMatch = html.match(CODE_SCRIPT_RE);
+  if (scriptMatch?.[1]) return unwrapCodeFence(scriptMatch[1]);
+
+  const commentMatch = html.match(/<!--\s*REMOTION-CODE\s*([\s\S]*?)\s*REMOTION-CODE-END\s*-->/i);
+  if (commentMatch?.[1]) return unwrapCodeFence(commentMatch[1]);
+
+  return null;
+}
+
+export function parseAnimationCodeMeta(code: string): AnimationCodeMeta {
+  const fallback: AnimationCodeMeta = {
+    fps: 30,
+    durationInFrames: 150,
+    width: 1920,
+    height: 1080,
+  };
+  const lines = code.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const read = (key: string): string | undefined =>
+      trimmed.match(new RegExp(`//\\s*@${key}\\s+(\\S+)`))?.[1];
+    if (read('fps')) fallback.fps = Number(read('fps')) || fallback.fps;
+    if (read('duration')) {
+      fallback.durationInFrames = Number(read('duration')) || fallback.durationInFrames;
+    }
+    if (read('width')) fallback.width = Number(read('width')) || fallback.width;
+    if (read('height')) fallback.height = Number(read('height')) || fallback.height;
+    if (
+      trimmed &&
+      !trimmed.startsWith('//') &&
+      !trimmed.startsWith('import') &&
+      !trimmed.startsWith('*')
+    ) {
+      break;
+    }
+  }
+  return fallback;
+}
+
+export function extractAnimationComponentName(code: string): string | null {
+  const patterns = [
+    /export\s+default\s+function\s+([A-Za-z_$][\w$]*)/,
+    /export\s+(?:const|function|class)\s+([A-Za-z_$][\w$]*)/,
+    /export\s+default\s+([A-Za-z_$][\w$]*)\s*;?/,
+    /\bconst\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=/,
+    /\bfunction\s+([A-Za-z_$][\w$]*)\s*\(/,
+    /\bclass\s+([A-Za-z_$][\w$]*)\s+/,
+  ];
+  for (const pattern of patterns) {
+    const match = code.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
 
 export function aspectRatioToDimensions(aspectRatio: AnimationAspectRatio): {
   width: number;

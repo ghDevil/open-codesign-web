@@ -18,6 +18,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@babel/standalone": "^7.29.2",
     "@open-codesign/animation": "workspace:*",
     "@open-codesign/artifacts": "workspace:*",
     "@open-codesign/core": "workspace:*",
@@ -29,12 +30,14 @@
     "@open-codesign/templates": "workspace:*",
     "@open-codesign/ui": "workspace:*",
     "@remotion/player": "^4.0.454",
+    "@types/babel__standalone": "^7.1.9",
     "better-sqlite3": "^12.9.0",
     "electron-log": "^5",
     "electron-updater": "^6.3.9",
     "lucide-react": "^1.11.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "remotion": "^4.0.454",
     "smol-toml": "^1.6.1",
     "zip-lib": "^1.0.4",
     "zustand": "^5.0.2"
