@@ -1234,12 +1234,13 @@ app.post('/api/generate', async (req: Request, res: Response) => {
   const designId = payload.designId ?? null;
   const previousHtml = payload.previousHtml ?? null;
   const figmaPrefetch = await buildPrefetchedFigmaPromptContext(payload.prompt, payload.referenceUrl);
+  const hasFigmaContext = extractFigmaFileUrls(`${payload.prompt}\n${payload.referenceUrl ?? ''}`).length > 0;
   const browserPrefetch = await buildPrefetchedBrowserPromptContext(
     figmaPrefetch.prompt,
     // Skip browser prefetch for Figma URLs — they're handled above
     extractFigmaFileUrls(payload.referenceUrl ?? '').length > 0 ? undefined : payload.referenceUrl,
   );
-  const steeredPrompt = applyPlaywrightPromptSteering(browserPrefetch.prompt);
+  const steeredPrompt = applyPlaywrightPromptSteering(browserPrefetch.prompt, { hasFigmaContext });
   const baseMcpServers = browserPrefetch.toolServers ?? figmaPrefetch.toolServers ?? MCP_SERVERS;
   // Load bcgpt on-demand only when the prompt explicitly mentions Basecamp/projects
   const selectedMcpServers =
@@ -2379,9 +2380,9 @@ function resolveLocalAssetRefs(source: string, files: Map<string, string>): stri
 
 const FIGMA_FILE_URL_RE = /https?:\/\/(?:www\.)?figma\.com\/(?:file|design)\/[A-Za-z0-9]+[^\s)\]"']*/gi;
 const FIGMA_PROMPT_PREFIX = [
-  'Figma design context is preloaded below from the official Figma MCP.',
-  'Use that structured Figma data as the source of truth for layout, copy, and styling.',
-  'Do not fetch the same Figma URL with generic URL-reading tools.',
+  'Figma design context is preloaded below from the official Figma source.',
+  'Use that structured Figma data and attached frame image as the source of truth for layout, copy, and styling.',
+  'Do not open the Figma URL with browser tools or generic URL-reading tools.',
 ].join(' ');
 const FIGMA_PREFETCH_CHAR_LIMIT = 1_600;
 const HTTP_URL_RE = /https?:\/\/[^\s)\]"']+/gi;
@@ -2812,14 +2813,16 @@ async function buildPrefetchedFigmaPromptContext(prompt: string, referenceUrl?: 
     '--- END PRELOADED FIGMA CONTEXT ---',
   ].join('\n\n');
 
-  const toolServers = MCP_SERVERS.filter(
-    (server) => server.name === 'playwright' || server.name === 'bcgpt-basecamp',
-  );
+  const toolServers = MCP_SERVERS.filter((server) => server.name === 'bcgpt-basecamp');
 
   return { prompt: nextPrompt, toolServers, figmaImages, designSystem };
 }
 
-function applyPlaywrightPromptSteering(prompt: string): string {
+function applyPlaywrightPromptSteering(
+  prompt: string,
+  options?: { hasFigmaContext?: boolean },
+): string {
+  if (options?.hasFigmaContext) return prompt;
   if (!PLAYWRIGHT_INTENT_RE.test(prompt)) return prompt;
   return `${PLAYWRIGHT_PROMPT_PREFIX}\n\n${prompt}`;
 }
