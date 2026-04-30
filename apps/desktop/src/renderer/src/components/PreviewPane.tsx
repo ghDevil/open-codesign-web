@@ -513,7 +513,7 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
     );
   } else if (activeTab?.kind === 'files' && previewHtml) {
     body = <FilesTabView />;
-  } else if (isAnimationDesign && (!previewHtml || animationCode)) {
+  } else if (isAnimationDesign && (animationCode || !animationSpec)) {
     body = <AnimationStudioPanel html={previewHtml ?? ''} />;
   } else if (animationSpec && previewHtml) {
     body = <AnimationPreviewPanel html={previewHtml} />;
