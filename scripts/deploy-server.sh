@@ -58,15 +58,38 @@ docker exec "$APP_CONTAINER" rm -rf /app/apps/desktop/out/renderer
 docker cp apps/desktop/out/renderer "$APP_CONTAINER":/app/apps/desktop/out/renderer
 
 echo "==> Materializing Remotion runtime deps"
-rm -rf .runtime-node_modules
-mkdir -p .runtime-node_modules
-cp -LR packages/exporters/node_modules/. .runtime-node_modules/
-cp -LR packages/animation/node_modules/. .runtime-node_modules/
+rm -rf .runtime-package
+mkdir -p .runtime-package
+cat > .runtime-package/package.json <<'EOF'
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@remotion/bundler": "4.0.454",
+    "@remotion/renderer": "4.0.454",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "remotion": "4.0.454",
+    "zod": "3.24.1"
+  }
+}
+EOF
+docker run --rm \
+  -v "$REPO_DIR:/app" \
+  -w /app/.runtime-package \
+  node:22-slim \
+  bash -c "npm install --omit=dev --no-package-lock --silent"
+mkdir -p .runtime-package/node_modules/@open-codesign/animation
+mkdir -p .runtime-package/node_modules/@open-codesign/shared
+cp packages/animation/package.json .runtime-package/node_modules/@open-codesign/animation/package.json
+cp -R packages/animation/src .runtime-package/node_modules/@open-codesign/animation/src
+cp packages/shared/package.json .runtime-package/node_modules/@open-codesign/shared/package.json
+cp -R packages/shared/src .runtime-package/node_modules/@open-codesign/shared/src
 
 echo "==> Copying Remotion runtime deps into container"
 docker exec "$APP_CONTAINER" rm -rf /app/runtime/node_modules
 docker exec "$APP_CONTAINER" mkdir -p /app/runtime/node_modules
-docker cp .runtime-node_modules/. "$APP_CONTAINER":/app/runtime/node_modules/
+docker cp .runtime-package/node_modules/. "$APP_CONTAINER":/app/runtime/node_modules/
 
 echo "==> Ensuring runtime dependencies"
 docker exec -u 0 "$APP_CONTAINER" sh -c \
