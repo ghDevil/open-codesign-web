@@ -193,6 +193,8 @@ export const MyComposition = () => {
 
 **Design guidance:**
 - Break longer animations into multiple scenes with `Sequence`
+- Name major scenes using `name="Intro"` / `name="CTA"` or similar so the studio timeline can label each lane
+- Prefer `Series.Sequence` when the story is a clean linear sequence of beats
 - Use spring entrances and interpolated exits
 - Favor layered typography, panels, and visual hierarchy over empty motion
 - Keep compositions self-contained and deterministic

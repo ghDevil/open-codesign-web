@@ -1,4 +1,9 @@
-import { extractAnimationCodeFromHtml, parseAnimationCodeMeta } from '@open-codesign/shared';
+import {
+  extractAnimationCodeFromHtml,
+  extractAnimationTimelineFromCode,
+  parseAnimationCodeMeta,
+  type AnimationTimelineLane,
+} from '@open-codesign/shared';
 import { Player, type ErrorFallback, type PlayerRef } from '@remotion/player';
 import {
   AlertCircle,
@@ -16,6 +21,7 @@ import {
   Sparkles,
   StepBack,
   StepForward,
+  TimerReset,
 } from 'lucide-react';
 import type { ReactElement } from 'react';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -36,37 +42,91 @@ export const MyComposition = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const opacity = interpolate(frame, [0, 20], [0, 1], {
+  const introOpacity = interpolate(frame, [0, 20], [0, 1], {
     extrapolateRight: 'clamp',
   });
-  const scale = spring({
+  const introScale = spring({
     frame,
     fps,
     config: { damping: 14, stiffness: 180 },
+  });
+  const panelY = interpolate(frame, [50, 80], [50, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+  const panelOpacity = interpolate(frame, [48, 72], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
   });
 
   return (
     <AbsoluteFill
       style={{
         background: '#08111f',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        color: '#f6f7fb',
+        fontFamily: 'Inter, sans-serif',
       }}
     >
-      <div
-        style={{
-          opacity,
-          transform: \`scale(\${scale})\`,
-          color: '#f6f7fb',
-          fontSize: 96,
-          fontWeight: 700,
-          fontFamily: 'Inter, sans-serif',
-          letterSpacing: '-0.02em',
-        }}
-      >
-        Hello Remotion
-      </div>
+      <Sequence name="Intro" from={0} durationInFrames={60}>
+        <AbsoluteFill
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <div
+            style={{
+              opacity: introOpacity,
+              transform: \`scale(\${introScale})\`,
+              fontSize: 96,
+              fontWeight: 700,
+              letterSpacing: '-0.02em',
+            }}
+          >
+            Hello Remotion
+          </div>
+        </AbsoluteFill>
+      </Sequence>
+
+      <Sequence name="Details" from={54} durationInFrames={72}>
+        <AbsoluteFill
+          style={{
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 80,
+          }}
+        >
+          <div
+            style={{
+              width: 720,
+              borderRadius: 28,
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              padding: '36px 40px',
+              transform: \`translateY(\${panelY}px)\`,
+              opacity: panelOpacity,
+              boxShadow: '0 32px 80px rgba(0,0,0,0.24)',
+            }}
+          >
+            <div style={{ fontSize: 18, color: 'rgba(246,247,251,0.65)' }}>Starter scene</div>
+            <div style={{ marginTop: 14, fontSize: 44, fontWeight: 650, lineHeight: 1.05 }}>
+              Add more beats with Sequence or Series.Sequence
+            </div>
+            <div
+              style={{
+                marginTop: 18,
+                maxWidth: 520,
+                fontSize: 22,
+                lineHeight: 1.45,
+                color: 'rgba(246,247,251,0.72)',
+              }}
+            >
+              The timeline below will lay out each scene automatically once the composition is structured.
+            </div>
+          </div>
+        </AbsoluteFill>
+      </Sequence>
     </AbsoluteFill>
   );
 };
@@ -81,6 +141,14 @@ const errorFallback: ErrorFallback = ({ error }) => (
     </pre>
   </div>
 );
+
+function laneColor(lane: AnimationTimelineLane): string {
+  const palette =
+    lane.kind === 'series'
+      ? ['#6f7cff', '#5ea8ff', '#52d3b8', '#b480ff']
+      : ['#ff8a5b', '#ffbc57', '#ff6a7a', '#f59e0b'];
+  return palette[lane.depth % palette.length] ?? palette[0] ?? '#6f7cff';
+}
 
 function formatFrameClock(frame: number, fps: number): string {
   const safeFrame = Math.max(0, Math.round(frame));
@@ -130,6 +198,8 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const [showCodePanel, setShowCodePanel] = useState(true);
   const [currentFrame, setCurrentFrame] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedLaneId, setSelectedLaneId] = useState<string | null>(null);
   const playerRef = useRef<PlayerRef>(null);
 
   useEffect(() => {
@@ -155,7 +225,39 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const meta = useMemo(() => parseAnimationCodeMeta(codeForCompilation), [codeForCompilation]);
   const compositionName = useMemo(() => extractCompositionName(codeForCompilation), [codeForCompilation]);
   const assetRefs = useMemo(() => extractAssetRefs(codeForCompilation), [codeForCompilation]);
+  const timelineLanes = useMemo(
+    () => extractAnimationTimelineFromCode(codeForCompilation),
+    [codeForCompilation],
+  );
   const isPlaying = playerRef.current?.isPlaying() ?? false;
+
+  const visibleLanes = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return timelineLanes;
+    return timelineLanes.filter((lane) => lane.label.toLowerCase().includes(query));
+  }, [searchQuery, timelineLanes]);
+
+  useEffect(() => {
+    if (visibleLanes.length === 0) {
+      setSelectedLaneId(null);
+      return;
+    }
+    if (selectedLaneId && visibleLanes.some((lane) => lane.id === selectedLaneId)) return;
+    setSelectedLaneId(visibleLanes[0]?.id ?? null);
+  }, [selectedLaneId, visibleLanes]);
+
+  const activeLaneIds = useMemo(
+    () =>
+      new Set(
+        timelineLanes
+          .filter((lane) => currentFrame >= lane.startFrame && currentFrame < lane.endFrame)
+          .map((lane) => lane.id),
+      ),
+    [currentFrame, timelineLanes],
+  );
+
+  const timelineRows = Math.max(visibleLanes.length, 1);
+  const timelineHeight = 46 + timelineRows * 34;
 
   const playerKey = useMemo(
     () =>
@@ -178,6 +280,13 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
     playerRef.current?.seekTo(frame);
     setCurrentFrame(frame);
   }, []);
+  const handleSelectLane = useCallback(
+    (lane: AnimationTimelineLane) => {
+      setSelectedLaneId(lane.id);
+      handleSeek(lane.startFrame);
+    },
+    [handleSeek],
+  );
   const seekBy = useCallback(
     (delta: number) => {
       const next = Math.max(0, Math.min(meta.durationInFrames, currentFrame + delta));
@@ -247,12 +356,22 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                 <div className="text-[11px] text-[rgba(255,255,255,0.45)]">
                   Duration {formatDuration(meta.durationInFrames, meta.fps)}
                 </div>
+                <div className="mt-2 flex items-center gap-2 text-[10.5px] text-[rgba(255,255,255,0.5)]">
+                  <span>{timelineLanes.length} timed lane{timelineLanes.length === 1 ? '' : 's'}</span>
+                  <span>•</span>
+                  <span>{assetRefs.length} asset{assetRefs.length === 1 ? '' : 's'}</span>
+                </div>
               </div>
               <div className="px-3 py-2">
-                <div className="flex items-center gap-2 rounded-md border border-[rgba(255,255,255,0.08)] bg-[#14171a] px-2 py-1.5 text-[11px] text-[rgba(255,255,255,0.45)]">
+                <label className="flex items-center gap-2 rounded-md border border-[rgba(255,255,255,0.08)] bg-[#14171a] px-2 py-1.5 text-[11px] text-[rgba(255,255,255,0.45)]">
                   <Search className="h-3.5 w-3.5" />
-                  <span>Search compositions</span>
-                </div>
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Search sequences"
+                    className="min-w-0 flex-1 bg-transparent text-[11px] text-[rgba(255,255,255,0.72)] outline-none placeholder:text-[rgba(255,255,255,0.35)]"
+                  />
+                </label>
               </div>
               <div className="min-h-0 flex-1 overflow-auto px-2 pb-2">
                 <button
@@ -270,6 +389,52 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                     </div>
                   </div>
                 </button>
+                <div className="mt-3 space-y-1">
+                  {visibleLanes.length > 0 ? (
+                    visibleLanes.map((lane) => {
+                      const selected = lane.id === selectedLaneId;
+                      const active = activeLaneIds.has(lane.id);
+                      return (
+                        <button
+                          key={lane.id}
+                          type="button"
+                          onClick={() => handleSelectLane(lane)}
+                          className={`flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left transition-colors ${
+                            selected
+                              ? 'border-[rgba(111,124,255,0.45)] bg-[rgba(111,124,255,0.14)]'
+                              : 'border-[rgba(255,255,255,0.05)] bg-[#14171a] hover:bg-[#1b2026]'
+                          }`}
+                        >
+                          <span
+                            className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: laneColor(lane) }}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate text-[11.5px] font-medium text-[rgba(255,255,255,0.92)]">
+                                {lane.label}
+                              </span>
+                              {active ? (
+                                <span className="rounded-full bg-[rgba(255,255,255,0.1)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[rgba(255,255,255,0.76)]">
+                                  live
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="mt-0.5 text-[10px] text-[rgba(255,255,255,0.46)]">
+                              {lane.kind === 'series' ? 'Series' : 'Sequence'} •{' '}
+                              {formatFrameClock(lane.startFrame, meta.fps)} -{' '}
+                              {formatFrameClock(lane.endFrame, meta.fps)}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="rounded-md border border-dashed border-[rgba(255,255,255,0.08)] bg-[#14171a] px-4 py-5 text-[11px] leading-[1.6] text-[rgba(255,255,255,0.5)]">
+                      No explicit `Sequence` or `Series.Sequence` blocks yet. The studio will lay out lanes as soon as the composition is scene-structured.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           ) : (
@@ -470,40 +635,111 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                     <span>{formatFrameClock(meta.durationInFrames, meta.fps)}</span>
                   </div>
 
-                  <div className="relative mt-3 h-28 overflow-hidden rounded-md border border-[rgba(255,255,255,0.06)] bg-[#0f1114]">
+                  <div
+                    className="relative mt-3 overflow-hidden rounded-md border border-[rgba(255,255,255,0.06)] bg-[#0f1114]"
+                    style={{ height: timelineHeight }}
+                  >
                     <div className="absolute inset-x-0 top-0 flex h-7 items-center border-b border-[rgba(255,255,255,0.05)] px-3">
-                      <div className="text-[10px] uppercase tracking-[0.12em] text-[rgba(255,255,255,0.34)]">
-                        Timeline
+                      <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.12em] text-[rgba(255,255,255,0.34)]">
+                        <span>Timeline</span>
+                        <span className="text-[rgba(255,255,255,0.18)]">/</span>
+                        <span>{visibleLanes.length > 0 ? `${visibleLanes.length} lanes` : 'Awaiting scene lanes'}</span>
                       </div>
                     </div>
 
-                    <div className="absolute inset-x-0 top-7 px-3 pt-3">
-                      <div className="relative h-9 rounded bg-[#171b20]">
-                        <div
-                          className="absolute left-0 top-1.5 h-6 rounded bg-[linear-gradient(90deg,#6f7cff,#4a9eff)]"
-                          style={{ width: '100%' }}
-                        />
-                        <div className="absolute inset-y-0 left-3 flex items-center text-[11px] font-medium text-white">
-                          {compositionName}
+                    <div className="absolute inset-0 top-7">
+                      <div className="absolute inset-x-0 top-0 grid h-6 border-b border-[rgba(255,255,255,0.05)] text-[10px] text-[rgba(255,255,255,0.34)]">
+                        <div className="grid h-full grid-cols-6">
+                          {timelineTicks.slice(0, 6).map((tick) => (
+                            <div
+                              key={tick.frame}
+                              className="border-r border-[rgba(255,255,255,0.04)] px-3 py-1 last:border-r-0"
+                            >
+                              {tick.label}
+                            </div>
+                          ))}
                         </div>
                       </div>
-
-                      <input
-                        type="range"
-                        min={0}
-                        max={meta.durationInFrames}
-                        step={1}
-                        value={Math.min(currentFrame, meta.durationInFrames)}
-                        onChange={(event) => handleSeek(Number(event.target.value))}
-                        className="mt-4 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[rgba(255,255,255,0.12)] accent-[#ff503b]"
-                      />
-
-                      <div className="mt-3 grid grid-cols-6 gap-0 text-[10px] text-[rgba(255,255,255,0.34)]">
-                        {timelineTicks.slice(0, 6).map((tick) => (
-                          <div key={tick.frame}>{tick.label}</div>
-                        ))}
+                      <div className="absolute inset-x-0 bottom-0 top-6">
+                        <div className="absolute inset-0 grid grid-cols-6">
+                          {timelineTicks.slice(0, 6).map((tick) => (
+                            <div
+                              key={tick.frame}
+                              className="border-r border-[rgba(255,255,255,0.04)] last:border-r-0"
+                            />
+                          ))}
+                        </div>
+                        {visibleLanes.length > 0 ? (
+                          visibleLanes.map((lane, index) => {
+                            const top = index * 34 + 6;
+                            const leftPct = (lane.startFrame / meta.durationInFrames) * 100;
+                            const widthPct = (lane.durationInFrames / meta.durationInFrames) * 100;
+                            const selected = lane.id === selectedLaneId;
+                            return (
+                              <button
+                                key={lane.id}
+                                type="button"
+                                onClick={() => handleSelectLane(lane)}
+                                className={`absolute left-0 right-0 mx-3 flex h-7 items-center rounded-md text-left transition-transform hover:scale-[1.01] ${
+                                  selected ? 'ring-1 ring-white/20' : ''
+                                }`}
+                                style={{ top }}
+                              >
+                                <div className="w-28 shrink-0 pr-3 text-[10px] text-[rgba(255,255,255,0.52)]">
+                                  <div className="truncate">{lane.label}</div>
+                                </div>
+                                <div className="relative h-full flex-1 rounded bg-[rgba(255,255,255,0.04)]">
+                                  <div
+                                    className="absolute inset-y-0 rounded"
+                                    style={{
+                                      left: `${leftPct}%`,
+                                      width: `${Math.max(widthPct, 2)}%`,
+                                      backgroundColor: laneColor(lane),
+                                      opacity: selected || activeLaneIds.has(lane.id) ? 0.95 : 0.72,
+                                    }}
+                                  />
+                                </div>
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="flex h-full items-center justify-center px-6 text-center text-[11px] text-[rgba(255,255,255,0.44)]">
+                            Generate a scene-based Remotion composition to populate timeline lanes.
+                          </div>
+                        )}
+                        <div className="pointer-events-none absolute inset-y-0 left-[124px] right-3">
+                          <div
+                            className="absolute bottom-0 top-0 w-px bg-[#ff503b]"
+                            style={{
+                              left: `${Math.min(currentFrame / meta.durationInFrames, 1) * 100}%`,
+                            }}
+                          >
+                            <div className="absolute -top-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rounded-full border border-[#ff7a67] bg-[#ff503b]" />
+                          </div>
+                        </div>
                       </div>
                     </div>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={meta.durationInFrames}
+                    step={1}
+                    value={Math.min(currentFrame, meta.durationInFrames)}
+                    onChange={(event) => handleSeek(Number(event.target.value))}
+                    className="mt-3 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[rgba(255,255,255,0.12)] accent-[#ff503b]"
+                  />
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[10.5px] text-[rgba(255,255,255,0.46)]">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[rgba(255,255,255,0.05)] px-2 py-1">
+                      <TimerReset className="h-3.5 w-3.5" />
+                      Scrub to inspect timings
+                    </span>
+                    {selectedLaneId ? (
+                      <span className="rounded-full bg-[rgba(255,255,255,0.05)] px-2 py-1">
+                        Selected:{' '}
+                        {visibleLanes.find((lane) => lane.id === selectedLaneId)?.label ?? compositionName}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               </div>

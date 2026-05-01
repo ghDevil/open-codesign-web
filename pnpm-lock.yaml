@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@babel/parser':
+        specifier: ^7.29.2
+        version: 7.29.2
       '@biomejs/biome':
         specifier: ^1.9.4
         version: 1.9.4
@@ -398,6 +401,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@babel/parser':
+        specifier: ^7.29.2
+        version: 7.29.2
       zod:
         specifier: ^3.24.1
         version: 3.25.76

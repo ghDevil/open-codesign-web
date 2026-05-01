@@ -1502,6 +1502,7 @@ function intentToPromptHeader(intent: PromptContextExtras['intent']): string | n
     lines.push('4. Do not wrap the component in `<Composition>` or call `registerRoot()`. The app handles the Remotion Player and MP4 render pipeline.');
     lines.push('5. Do not apologize about output format or say the environment cannot do this. Just write the HTML so the resulting `index.html` contains the script block. Do not use markdown fences outside the script tag. Do not load Remotion from a CDN.');
     lines.push('6. Available APIs: useCurrentFrame, useVideoConfig, interpolate, spring, Easing, AbsoluteFill, Sequence, Series, Img, staticFile, random. Shapes: Rect, Circle, Triangle, Star, Polygon, Ellipse, Heart, Pie. Transitions: TransitionSeries, linearTiming, springTiming, fade, slide, wipe, flip, clockWipe.');
+    lines.push('7. Prefer explicit scene structure. For multi-beat animations, break the composition into named `Sequence` blocks or `Series.Sequence` blocks so the studio timeline can lay out each beat as a separate lane.');
     lines.push('');
     lines.push('Required `index.html` body shape:');
     lines.push('<script id="open-codesign-animation-code" type="text/plain">');
@@ -1522,7 +1523,7 @@ function intentToPromptHeader(intent: PromptContextExtras['intent']): string | n
     lines.push('  );');
     lines.push('};');
     lines.push('</script>');
-    lines.push('Make it feel like a real Remotion piece: strong composition, scene timing, layered motion, and polished typography.');
+    lines.push('Make it feel like a real Remotion piece: strong composition, explicit scene timing, layered motion, polished typography, and named sequences for each major beat.');
   }
   return lines.join('\n');
 }

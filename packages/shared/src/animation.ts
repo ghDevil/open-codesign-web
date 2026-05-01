@@ -1,3 +1,4 @@
+import { parse } from '@babel/parser';
 import { z } from 'zod';
 
 export const OPEN_CODESIGN_ANIMATION_SCRIPT_ID = 'open-codesign-animation';
@@ -109,6 +110,16 @@ export interface AnimationCodeMeta {
   height: number;
 }
 
+export interface AnimationTimelineLane {
+  id: string;
+  label: string;
+  startFrame: number;
+  durationInFrames: number;
+  endFrame: number;
+  depth: number;
+  kind: 'sequence' | 'series';
+}
+
 function unwrapCodeFence(value: string): string {
   const trimmed = value.trim();
   const match = trimmed.match(CODE_FENCE_RE);
@@ -123,6 +134,326 @@ export function extractAnimationCodeFromHtml(html: string): string | null {
   if (commentMatch?.[1]) return unwrapCodeFence(commentMatch[1]);
 
   return null;
+}
+
+type NumericEnv = Record<string, number>;
+
+function getNodeType(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const type = Reflect.get(value, 'type');
+  return typeof type === 'string' ? type : null;
+}
+
+function getRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function getArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function getString(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return typeof value === 'string' ? value : null;
+}
+
+function evaluateNumericExpression(node: unknown, env: NumericEnv): number | null {
+  const record = getRecord(node);
+  if (!record) return null;
+  switch (record['type']) {
+    case 'NumericLiteral':
+      return typeof record['value'] === 'number' ? record['value'] : null;
+    case 'Identifier': {
+      const name = getString(record, 'name');
+      return name ? env[name] ?? null : null;
+    }
+    case 'UnaryExpression': {
+      const value = evaluateNumericExpression(record['argument'], env);
+      if (value === null) return null;
+      if (record['operator'] === '-') return -value;
+      if (record['operator'] === '+') return value;
+      return null;
+    }
+    case 'ParenthesizedExpression':
+    case 'TSAsExpression':
+    case 'TSTypeAssertion':
+      return evaluateNumericExpression(record['expression'], env);
+    case 'BinaryExpression': {
+      const left = evaluateNumericExpression(record['left'], env);
+      const right = evaluateNumericExpression(record['right'], env);
+      if (left === null || right === null || typeof record['operator'] !== 'string') return null;
+      switch (record['operator']) {
+        case '+':
+          return left + right;
+        case '-':
+          return left - right;
+        case '*':
+          return left * right;
+        case '/':
+          return right === 0 ? null : left / right;
+        case '%':
+          return right === 0 ? null : left % right;
+        case '**':
+          return left ** right;
+        default:
+          return null;
+      }
+    }
+    default:
+      return null;
+  }
+}
+
+function collectNumericBindings(node: unknown, env: NumericEnv): void {
+  const record = getRecord(node);
+  if (!record) return;
+  if (record['type'] === 'VariableDeclarator') {
+    const id = getRecord(record['id']);
+    if (id?.['type'] === 'Identifier' && typeof id['name'] === 'string') {
+      const value = evaluateNumericExpression(record['init'], env);
+      if (value !== null) env[id['name']] = value;
+    }
+  }
+  for (const value of Object.values(record)) {
+    if (Array.isArray(value)) {
+      for (const entry of value) collectNumericBindings(entry, env);
+      continue;
+    }
+    if (getNodeType(value)) collectNumericBindings(value, env);
+  }
+}
+
+function getJsxName(node: unknown): string | null {
+  const record = getRecord(node);
+  if (!record) return null;
+  if (record['type'] === 'JSXIdentifier' && typeof record['name'] === 'string') return record['name'];
+  if (record['type'] === 'JSXMemberExpression') {
+    const objectName = getJsxName(record['object']);
+    const propertyName = getJsxName(record['property']);
+    return objectName && propertyName ? `${objectName}.${propertyName}` : null;
+  }
+  return null;
+}
+
+function getJsxAttribute(openingElement: unknown, name: string): unknown {
+  const opening = getRecord(openingElement);
+  if (!opening) return null;
+  for (const attribute of getArray(opening['attributes'])) {
+    const attributeRecord = getRecord(attribute);
+    if (!attributeRecord || attributeRecord['type'] !== 'JSXAttribute') continue;
+    const attributeName = getJsxName(attributeRecord['name']);
+    if (attributeName !== name) continue;
+    const value = getRecord(attributeRecord['value']);
+    if (!value) return true;
+    if (value['type'] === 'StringLiteral') return value;
+    if (value['type'] === 'JSXExpressionContainer') return value['expression'];
+    return value;
+  }
+  return null;
+}
+
+function readNumericProp(openingElement: unknown, name: string, env: NumericEnv): number | null {
+  const value = getJsxAttribute(openingElement, name);
+  if (value === null || value === true) return null;
+  return evaluateNumericExpression(value, env);
+}
+
+function readStringProp(openingElement: unknown, name: string): string | null {
+  const value = getJsxAttribute(openingElement, name);
+  const record = getRecord(value);
+  if (!record) return null;
+  if (record['type'] === 'StringLiteral' && typeof record['value'] === 'string') return record['value'];
+  return null;
+}
+
+function getDirectJsxChildren(element: unknown): Record<string, unknown>[] {
+  const record = getRecord(element);
+  if (!record) return [];
+  return getArray(record['children'])
+    .map((child) => getRecord(child))
+    .filter((child): child is Record<string, unknown> =>
+      child?.['type'] === 'JSXElement' || child?.['type'] === 'JSXFragment',
+    );
+}
+
+function collectReturnJsx(node: unknown, results: Record<string, unknown>[]): void {
+  const record = getRecord(node);
+  if (!record) return;
+  if (record['type'] === 'ReturnStatement') {
+    const argument = getRecord(record['argument']);
+    if (argument?.['type'] === 'JSXElement' || argument?.['type'] === 'JSXFragment') results.push(argument);
+  }
+  for (const value of Object.values(record)) {
+    if (Array.isArray(value)) {
+      for (const entry of value) collectReturnJsx(entry, results);
+      continue;
+    }
+    if (getNodeType(value)) collectReturnJsx(value, results);
+  }
+}
+
+function findComponentRoots(code: string, componentName: string): Record<string, unknown>[] {
+  try {
+    const ast = parse(code, {
+      sourceType: 'module',
+      plugins: ['jsx', 'typescript'],
+      errorRecovery: true,
+    });
+    const roots: Record<string, unknown>[] = [];
+    const body = getArray(getRecord(ast.program)?.['body']);
+    for (const statement of body) {
+      const record = getRecord(statement);
+      if (!record) continue;
+      const declaration =
+        record['type'] === 'ExportNamedDeclaration' ? getRecord(record['declaration']) : record;
+      if (!declaration) continue;
+      if (declaration['type'] === 'FunctionDeclaration') {
+        const id = getRecord(declaration['id']);
+        if (id?.['name'] === componentName) collectReturnJsx(declaration['body'], roots);
+      }
+      if (declaration['type'] === 'VariableDeclaration') {
+        for (const declarator of getArray(declaration['declarations'])) {
+          const declaratorRecord = getRecord(declarator);
+          const id = getRecord(declaratorRecord?.['id']);
+          if (id?.['type'] !== 'Identifier' || id['name'] !== componentName) continue;
+          const init = getRecord(declaratorRecord?.['init']);
+          if (!init) continue;
+          if (init['type'] === 'ArrowFunctionExpression') {
+            const bodyNode = getRecord(init['body']);
+            if (bodyNode?.['type'] === 'JSXElement' || bodyNode?.['type'] === 'JSXFragment') roots.push(bodyNode);
+            else collectReturnJsx(bodyNode, roots);
+          }
+          if (init['type'] === 'FunctionExpression') collectReturnJsx(init['body'], roots);
+        }
+      }
+    }
+    return roots;
+  } catch {
+    return [];
+  }
+}
+
+function laneLabel(openingElement: unknown, kind: 'sequence' | 'series', index: number): string {
+  const named =
+    readStringProp(openingElement, 'name') ??
+    readStringProp(openingElement, 'id') ??
+    readStringProp(openingElement, 'key');
+  if (named?.trim()) return named.trim();
+  return kind === 'series' ? `Scene ${index + 1}` : `Sequence ${index + 1}`;
+}
+
+function collectTimelineLanesFromJsx(
+  element: Record<string, unknown>,
+  env: NumericEnv,
+  lanes: AnimationTimelineLane[],
+  context: { offset: number; duration: number; depth: number },
+): void {
+  const openingElement = getRecord(element['openingElement']);
+  const name = getJsxName(openingElement?.['name']);
+  if (name === 'Sequence') {
+    const from = readNumericProp(openingElement, 'from', env) ?? 0;
+    const duration =
+      readNumericProp(openingElement, 'durationInFrames', env) ??
+      Math.max(1, context.duration - from);
+    const startFrame = Math.max(0, context.offset + from);
+    const durationInFrames = Math.max(1, duration);
+    lanes.push({
+      id: `sequence-${lanes.length}`,
+      label: laneLabel(openingElement, 'sequence', lanes.length),
+      startFrame,
+      durationInFrames,
+      endFrame: startFrame + durationInFrames,
+      depth: context.depth,
+      kind: 'sequence',
+    });
+    for (const child of getDirectJsxChildren(element)) {
+      collectTimelineLanesFromJsx(child, env, lanes, {
+        offset: startFrame,
+        duration: durationInFrames,
+        depth: context.depth + 1,
+      });
+    }
+    return;
+  }
+
+  if (name === 'Series' || name === 'TransitionSeries') {
+    let cursor = 0;
+    for (const child of getDirectJsxChildren(element)) {
+      const childOpening = getRecord(child['openingElement']);
+      const childName = getJsxName(childOpening?.['name']);
+      const isSeriesLane =
+        childName === 'Series.Sequence' || childName === 'TransitionSeries.Sequence';
+      if (!isSeriesLane) {
+        collectTimelineLanesFromJsx(child, env, lanes, context);
+        continue;
+      }
+      const offset = readNumericProp(childOpening, 'offset', env) ?? 0;
+      const duration = readNumericProp(childOpening, 'durationInFrames', env) ?? context.duration;
+      const localStart = Math.max(0, cursor + offset);
+      const absoluteStart = context.offset + localStart;
+      const durationInFrames = Math.max(1, duration);
+      lanes.push({
+        id: `series-${lanes.length}`,
+        label: laneLabel(childOpening, 'series', lanes.length),
+        startFrame: absoluteStart,
+        durationInFrames,
+        endFrame: absoluteStart + durationInFrames,
+        depth: context.depth,
+        kind: 'series',
+      });
+      cursor = localStart + durationInFrames;
+      for (const nestedChild of getDirectJsxChildren(child)) {
+        collectTimelineLanesFromJsx(nestedChild, env, lanes, {
+          offset: absoluteStart,
+          duration: durationInFrames,
+          depth: context.depth + 1,
+        });
+      }
+    }
+    return;
+  }
+
+  for (const child of getDirectJsxChildren(element)) {
+    collectTimelineLanesFromJsx(child, env, lanes, context);
+  }
+}
+
+export function extractAnimationTimelineFromCode(code: string): AnimationTimelineLane[] {
+  const componentName = extractAnimationComponentName(code);
+  if (!componentName) return [];
+
+  const meta = parseAnimationCodeMeta(code);
+  const env: NumericEnv = {
+    fps: meta.fps,
+    durationInFrames: meta.durationInFrames,
+    width: meta.width,
+    height: meta.height,
+  };
+
+  try {
+    const ast = parse(code, {
+      sourceType: 'module',
+      plugins: ['jsx', 'typescript'],
+      errorRecovery: true,
+    });
+    collectNumericBindings(ast.program, env);
+  } catch {
+    return [];
+  }
+
+  const roots = findComponentRoots(code, componentName);
+  const lanes: AnimationTimelineLane[] = [];
+  for (const root of roots) {
+    collectTimelineLanesFromJsx(root, env, lanes, {
+      offset: 0,
+      duration: meta.durationInFrames,
+      depth: 0,
+    });
+  }
+
+  return lanes
+    .filter((lane) => Number.isFinite(lane.startFrame) && Number.isFinite(lane.durationInFrames))
+    .sort((a, b) => a.startFrame - b.startFrame || a.depth - b.depth);
 }
 
 export function parseAnimationCodeMeta(code: string): AnimationCodeMeta {

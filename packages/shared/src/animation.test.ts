@@ -6,6 +6,7 @@ import {
   extractAnimationCodeFromHtml,
   extractAnimationComponentName,
   extractAnimationSpecFromHtml,
+  extractAnimationTimelineFromCode,
   normalizeAnimationSpec,
   parseAnimationCodeMeta,
 } from './animation';
@@ -106,5 +107,77 @@ export const MyComposition = () => {
       height: 1920,
     });
     expect(extractAnimationComponentName(code ?? '')).toBe('MyComposition');
+  });
+
+  it('extracts sequence lanes from remotion code', () => {
+    const code = `
+// @fps 30
+// @duration 180
+// @width 1920
+// @height 1080
+import { AbsoluteFill, Sequence, Series, useVideoConfig } from 'remotion';
+
+export const MyComposition = () => {
+  const { fps } = useVideoConfig();
+  const beat = fps * 2;
+
+  return (
+    <AbsoluteFill>
+      <Sequence from={0} durationInFrames={beat} name="Intro">
+        <div>Intro</div>
+      </Sequence>
+      <Series>
+        <Series.Sequence durationInFrames={beat} name="Middle">
+          <div>Middle</div>
+        </Series.Sequence>
+        <Series.Sequence durationInFrames={90} offset={-15} name="Outro">
+          <Sequence from={15} durationInFrames={30} name="Tag">
+            <div>Tag</div>
+          </Sequence>
+        </Series.Sequence>
+      </Series>
+    </AbsoluteFill>
+  );
+};
+`;
+
+    expect(extractAnimationTimelineFromCode(code)).toEqual([
+      {
+        id: 'sequence-0',
+        label: 'Intro',
+        startFrame: 0,
+        durationInFrames: 60,
+        endFrame: 60,
+        depth: 0,
+        kind: 'sequence',
+      },
+      {
+        id: 'series-1',
+        label: 'Middle',
+        startFrame: 0,
+        durationInFrames: 60,
+        endFrame: 60,
+        depth: 0,
+        kind: 'series',
+      },
+      {
+        id: 'series-2',
+        label: 'Outro',
+        startFrame: 45,
+        durationInFrames: 90,
+        endFrame: 135,
+        depth: 0,
+        kind: 'series',
+      },
+      {
+        id: 'sequence-3',
+        label: 'Tag',
+        startFrame: 60,
+        durationInFrames: 30,
+        endFrame: 90,
+        depth: 1,
+        kind: 'sequence',
+      },
+    ]);
   });
 });
