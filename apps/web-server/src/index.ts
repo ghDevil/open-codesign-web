@@ -2964,7 +2964,7 @@ function filterMcpToolsForPrompt<T extends { name: string }>(prompt: string, too
     PLAYWRIGHT_INTENT_RE.test(prompt) || extractPlayableUrl(prompt) !== undefined;
 
   if (!shouldKeepBrowserTools) {
-    return tools.filter((tool) => !PLAYWRIGHT_TOOL_NAMES.has(tool.name)).slice(0, 128);
+    return tools.filter((tool) => !tool.name.startsWith('browser_')).slice(0, 128);
   }
 
   const browserTools = tools.filter((tool) => PLAYWRIGHT_TOOL_NAMES.has(tool.name));
