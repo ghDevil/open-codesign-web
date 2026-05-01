@@ -1,29 +1,20 @@
 import * as Babel from '@babel/standalone';
+import * as Remotion from 'remotion';
 import * as RemotionShapes from '@remotion/shapes';
 import {
   TransitionSeries,
   linearTiming,
   springTiming,
+  useTransitionProgress,
 } from '@remotion/transitions';
+import { none } from '@remotion/transitions/none';
 import { fade } from '@remotion/transitions/fade';
 import { slide } from '@remotion/transitions/slide';
 import { wipe } from '@remotion/transitions/wipe';
 import { flip } from '@remotion/transitions/flip';
 import { clockWipe } from '@remotion/transitions/clock-wipe';
+import { zoomBlur, zoomBlurShader } from '@remotion/transitions/zoom-blur';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  AbsoluteFill,
-  Easing,
-  Img,
-  Sequence,
-  Series,
-  interpolate,
-  random,
-  spring,
-  staticFile,
-  useCurrentFrame,
-  useVideoConfig,
-} from 'remotion';
 
 export interface CompilationResult {
   Component: React.ComponentType | null;
@@ -148,98 +139,33 @@ export function compileRemotionCode(
       );
     };
 
-    const createComponent = new Function(
-      'React',
-      'useState',
-      'useEffect',
-      'useMemo',
-      'useRef',
-      // Remotion core
-      'AbsoluteFill',
-      'Sequence',
-      'Series',
-      'Img',
-      'Easing',
-      'interpolate',
-      'spring',
-      'random',
-      'staticFile',
-      'useCurrentFrame',
-      'useVideoConfig',
-      // Shapes
-      'Rect',
-      'Circle',
-      'Triangle',
-      'Star',
-      'Polygon',
-      'Ellipse',
-      'Heart',
-      'Pie',
-      'makeRect',
-      'makeCircle',
-      'makeTriangle',
-      'makeStar',
-      'makePolygon',
-      'makeEllipse',
-      'makeHeart',
-      'makePie',
-      // Transitions
-      'TransitionSeries',
-      'linearTiming',
-      'springTiming',
-      'fade',
-      'slide',
-      'wipe',
-      'flip',
-      'clockWipe',
-      wrappedCode,
-    );
-
-    const Component = createComponent(
+    const scope = {
       React,
       useState,
       useEffect,
       useMemo,
       useRef,
-      // Remotion core
-      AbsoluteFill,
-      Sequence,
-      Series,
-      Img,
-      Easing,
-      interpolate,
-      spring,
-      random,
-      resolveStaticFile ?? staticFile,
-      useCurrentFrame,
-      useVideoConfig,
-      // Shapes
-      RemotionShapes.Rect,
-      RemotionShapes.Circle,
-      RemotionShapes.Triangle,
-      RemotionShapes.Star,
-      RemotionShapes.Polygon,
-      RemotionShapes.Ellipse,
-      RemotionShapes.Heart,
-      RemotionShapes.Pie,
-      RemotionShapes.makeRect,
-      RemotionShapes.makeCircle,
-      RemotionShapes.makeTriangle,
-      RemotionShapes.makeStar,
-      RemotionShapes.makePolygon,
-      RemotionShapes.makeEllipse,
-      RemotionShapes.makeHeart,
-      RemotionShapes.makePie,
-      // Transitions
+      ...Remotion,
+      ...RemotionShapes,
       TransitionSeries,
       linearTiming,
       springTiming,
+      useTransitionProgress,
       fade,
       slide,
       wipe,
       flip,
       clockWipe,
-    ) as React.ComponentType | null;
+      none,
+      zoomBlur,
+      zoomBlurShader,
+      staticFile: resolveStaticFile,
+    };
+    const scopeKeys = Object.keys(scope).filter((key) => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key));
+    const prelude = `const { ${scopeKeys.join(', ')} } = __scope;`;
+    const createComponent = new Function('__scope', `${prelude}\n${wrappedCode}`);
+
+    const Component = createComponent(scope) as React.ComponentType | null;
 
     if (typeof Component !== 'function') {
       return {

@@ -1499,11 +1499,11 @@ function intentToPromptHeader(intent: PromptContextExtras['intent']): string | n
     lines.push('');
     lines.push('Rules:');
     lines.push('1. Output exactly one exported React component named `MyComposition`.');
-    lines.push('2. Imports are allowed from: `react`, `remotion`, `@remotion/shapes`, `@remotion/transitions`, `@remotion/transitions/fade`, `@remotion/transitions/slide`, `@remotion/transitions/wipe`, `@remotion/transitions/flip`, `@remotion/transitions/clock-wipe`. Do not import any other packages.');
+    lines.push('2. Imports are allowed from: `react`, `remotion`, `@remotion/shapes`, `@remotion/transitions`, `@remotion/transitions/fade`, `@remotion/transitions/slide`, `@remotion/transitions/wipe`, `@remotion/transitions/flip`, `@remotion/transitions/clock-wipe`, `@remotion/transitions/none`, and `@remotion/transitions/zoom-blur`. Do not import any other packages.');
     lines.push('3. Include metadata comments first: `// @fps`, `// @duration`, `// @width`, `// @height`.');
     lines.push('4. Do not wrap the component in `<Composition>` or call `registerRoot()`. The app handles the Remotion Player and MP4 render pipeline.');
     lines.push('5. Do not apologize about output format or say the environment cannot do this. Just write the HTML so the resulting `index.html` contains the script block. Do not use markdown fences outside the script tag. Do not load Remotion from a CDN.');
-    lines.push('6. Available APIs: useCurrentFrame, useVideoConfig, interpolate, spring, Easing, AbsoluteFill, Sequence, Series, Img, staticFile, random. Shapes: Rect, Circle, Triangle, Star, Polygon, Ellipse, Heart, Pie. Transitions: TransitionSeries, linearTiming, springTiming, fade, slide, wipe, flip, clockWipe.');
+    lines.push('6. Available APIs include the common Remotion runtime surface: AbsoluteFill, Audio, Video, OffthreadVideo, Html5Video, Html5Audio, AnimatedImage, Freeze, Loop, Sequence, Series, Img, IFrame, HtmlInCanvas, useCurrentFrame, useCurrentScale, useVideoConfig, interpolate, interpolateColors, spring, measureSpring, Easing, delayRender, continueRender, cancelRender, prefetch, staticFile, watchStaticFile, getInputProps, random. Shapes: Rect, Circle, Triangle, Star, Polygon, Ellipse, Heart, Pie plus their make* helpers. Transitions: TransitionSeries, linearTiming, springTiming, useTransitionProgress, fade, slide, wipe, flip, clockWipe, none, zoomBlur, zoomBlurShader.');
     lines.push('7. Prefer explicit scene structure. For multi-beat animations, break the composition into named `Sequence` blocks or `Series.Sequence` blocks so the studio timeline can lay out each beat as a separate lane.');
     lines.push('');
     lines.push('Required `index.html` body shape:');

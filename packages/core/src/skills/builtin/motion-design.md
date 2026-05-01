@@ -137,7 +137,7 @@ This app now has a dedicated **Animation Studio** that compiles Remotion code li
 1. Do not load Remotion from a CDN.
 2. Do not render the animation in the HTML body yourself.
 3. Output one exported React component named `MyComposition`.
-4. Keep imports limited to `react` and `remotion` only.
+4. Imports may come from `react`, `remotion`, `@remotion/shapes`, `@remotion/transitions`, `@remotion/transitions/fade`, `@remotion/transitions/slide`, `@remotion/transitions/wipe`, `@remotion/transitions/flip`, `@remotion/transitions/clock-wipe`, `@remotion/transitions/none`, and `@remotion/transitions/zoom-blur`.
 5. Do not wrap the component in `<Composition>` or call `registerRoot()`.
 6. If the environment uses a Codex-style `text_editor` / virtual-fs workflow, write this structure directly into `index.html` rather than apologizing about format limitations.
 
@@ -175,13 +175,11 @@ export const MyComposition = () => {
 </html>
 
 **Common Remotion APIs to use:**
-- `useCurrentFrame()` for frame-based animation timing
-- `useVideoConfig()` for `fps`, `durationInFrames`, `width`, and `height`
-- `interpolate()` for mapping frames to values
-- `spring()` for eased motion
-- `AbsoluteFill` for the root composition wrapper
-- `Sequence` and `Series` for scene timing
-- `Easing` for custom easing curves
+- Core: `AbsoluteFill`, `Audio`, `Video`, `OffthreadVideo`, `Html5Video`, `Html5Audio`, `AnimatedImage`, `Freeze`, `Loop`, `Sequence`, `Series`, `Img`, `IFrame`, `HtmlInCanvas`
+- Hooks and animation: `useCurrentFrame()`, `useCurrentScale()`, `useVideoConfig()`, `interpolate()`, `interpolateColors()`, `spring()`, `measureSpring()`, `Easing`
+- Assets and loading: `staticFile()`, `watchStaticFile()`, `prefetch()`, `delayRender()`, `continueRender()`, `cancelRender()`, `getInputProps()`
+- Shapes: `Rect`, `Circle`, `Triangle`, `Star`, `Polygon`, `Ellipse`, `Heart`, `Pie`, plus the `make*` helpers
+- Transitions: `TransitionSeries`, `linearTiming`, `springTiming`, `useTransitionProgress`, `fade`, `slide`, `wipe`, `flip`, `clockWipe`, `none`, `zoomBlur`, `zoomBlurShader`
 
 **Metadata comments at the top are required:**
 ```
