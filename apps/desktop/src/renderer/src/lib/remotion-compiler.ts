@@ -66,6 +66,20 @@ function extractComponentBody(code: string): { source: string; componentName: st
     return { source, componentName };
   }
 
+  // Try concise arrow form: `[helpers] export const X = (props) => <Foo {...props} />`
+  const conciseArrowMatch = cleaned.match(
+    /^([\s\S]*?)export\s+const\s+(\w+)\s*(?::[\s\S]*?)?=\s*(\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*([\s\S]*?)\s*;?\s*$/,
+  );
+  if (conciseArrowMatch?.[2] && conciseArrowMatch[4] !== undefined) {
+    const helpers = (conciseArrowMatch[1] ?? '').trim();
+    const componentName = conciseArrowMatch[2];
+    const params = conciseArrowMatch[3];
+    const expression = conciseArrowMatch[4].trim();
+    const wrapped = `const ${componentName} = ${params} => ${expression};`;
+    const source = helpers ? `${helpers}\n\n${wrapped}` : wrapped;
+    return { source, componentName };
+  }
+
   // Try function form: `export function X() { ... }` or `export default function X() { ... }`
   const fnMatch = cleaned.match(/export\s+(?:default\s+)?function\s+(\w+)/);
   if (fnMatch?.[1]) {
