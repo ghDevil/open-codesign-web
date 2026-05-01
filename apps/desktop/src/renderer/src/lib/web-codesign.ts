@@ -83,7 +83,9 @@ function buildInit(init?: JsonInit): RequestInit {
 
 async function readError(response: Response): Promise<string> {
   try {
-    const json = (await response.json()) as {
+    const text = await response.text();
+    if (!text.trim()) return response.statusText || `HTTP ${response.status}`;
+    const json = JSON.parse(text) as {
       error?: { message?: string };
       message?: string;
     };
@@ -98,7 +100,16 @@ async function apiJson<T>(path: string, init?: JsonInit): Promise<T> {
   if (!response.ok) {
     throw new Error(await readError(response));
   }
-  return (await response.json()) as T;
+  const text = await response.text();
+  if (!text.trim()) {
+    throw new Error(`Empty JSON response from ${path}`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid JSON response from ${path}: ${reason}`);
+  }
 }
 
 function localStorageGet<T>(key: string, fallback: T): T {
@@ -754,6 +765,11 @@ function installWebCodesign(): void {
         apiJson<DesignFile>(
           `/api/designs/${encodeURIComponent(designId)}/files/view?path=${encodeURIComponent(path)}`,
         ),
+      upsert: (designId: string, path: string, content: string) =>
+        apiJson<DesignFile>(`/api/designs/${encodeURIComponent(designId)}/files/upsert`, {
+          method: 'POST',
+          body: { path, content },
+        }),
     },
     chat: {
       list: (designId: string) => apiJson(`/api/designs/${encodeURIComponent(designId)}/chat`),

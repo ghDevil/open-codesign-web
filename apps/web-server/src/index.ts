@@ -571,8 +571,6 @@ interface WebExportRequest {
   format: ExporterFormat;
   htmlContent: string;
   defaultFilename?: string;
-  projectFiles?: Array<{ path: string; content: string }>;
-  compositionId?: string;
 }
 
 const EXPORT_CONTENT_TYPES: Record<ExporterFormat, string> = {
@@ -592,8 +590,6 @@ function parseWebExportRequest(raw: unknown): WebExportRequest {
   const format = record['format'];
   const htmlContent = record['htmlContent'];
   const defaultFilename = record['defaultFilename'];
-  const projectFiles = record['projectFiles'];
-  const compositionId = record['compositionId'];
   if (
     format !== 'html' &&
     format !== 'mp4' &&
@@ -614,18 +610,6 @@ function parseWebExportRequest(raw: unknown): WebExportRequest {
   const out: WebExportRequest = { format, htmlContent };
   if (typeof defaultFilename === 'string' && defaultFilename.trim().length > 0) {
     out.defaultFilename = defaultFilename.trim();
-  }
-  if (Array.isArray(projectFiles)) {
-    const normalized = projectFiles.flatMap((file) => {
-      if (typeof file !== 'object' || file === null) return [];
-      const entry = file as Record<string, unknown>;
-      if (typeof entry['path'] !== 'string' || typeof entry['content'] !== 'string') return [];
-      return [{ path: entry['path'], content: entry['content'] }];
-    });
-    if (normalized.length > 0) out.projectFiles = normalized;
-  }
-  if (typeof compositionId === 'string' && compositionId.trim().length > 0) {
-    out.compositionId = compositionId.trim();
   }
   return out;
 }
@@ -977,7 +961,14 @@ app.post('/api/config/list-endpoint-models', async (req, res) => {
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) return res.json({ ok: false, error: `HTTP ${response.status}` });
-    const body = (await response.json()) as Record<string, unknown>;
+    const rawBody = await response.text();
+    if (!rawBody.trim()) return res.json({ ok: false, error: 'empty response body' });
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(rawBody) as Record<string, unknown>;
+    } catch {
+      return res.json({ ok: false, error: 'invalid JSON response' });
+    }
     const data = body['data'] ?? body['models'];
     if (!Array.isArray(data)) return res.json({ ok: false, error: 'unexpected response shape' });
     const ids = data
@@ -1107,7 +1098,22 @@ app.get('/api/models/provider/:id', async (req, res) => {
         : res.json({ ok: false, error: `HTTP ${response.status}` });
     }
 
-    const ids = extractModelIds(await response.json());
+    const rawBody = await response.text();
+    if (!rawBody.trim()) {
+      return hinted.length > 0
+        ? res.json({ ok: true, models: hinted })
+        : res.json({ ok: false, error: 'empty response body' });
+    }
+    let parsedBody: unknown;
+    try {
+      parsedBody = JSON.parse(rawBody);
+    } catch {
+      return hinted.length > 0
+        ? res.json({ ok: true, models: hinted })
+        : res.json({ ok: false, error: 'invalid JSON response' });
+    }
+
+    const ids = extractModelIds(parsedBody);
     if (ids === null) {
       return hinted.length > 0
         ? res.json({ ok: true, models: hinted })
@@ -1349,9 +1355,7 @@ app.post('/api/generate', async (req: Request, res: Response) => {
     currentApiKey: string,
   ) => {
     const input = buildGenerateInput(resolved, currentApiKey);
-    const shouldBypassAgentRuntimeForCodex =
-      resolved.model.provider === CHATGPT_CODEX_PROVIDER_ID;
-    if (!USE_AGENT_RUNTIME || shouldBypassAgentRuntimeForCodex) {
+    if (!USE_AGENT_RUNTIME) {
       return generate(input);
     }
 
@@ -1744,25 +1748,23 @@ app.get('/api/designs/:id/files/view', (req, res) => {
   }
 });
 
-app.put('/api/designs/:id/files', express.json({ limit: '5mb' }), (req, res) => {
+app.post('/api/designs/:id/files/upsert', (req, res) => {
   try {
     const designId = req.params.id;
     const design = getDesign(getDb(), designId);
     if (!design) return sendError(res, 404, 'Design not found', 'not_found');
-    const pathValue = req.body?.path;
-    const contentValue = req.body?.content;
-    if (typeof pathValue !== 'string' || pathValue.trim().length === 0) {
-      return sendError(res, 400, 'path is required', 'bad_request');
-    }
-    if (typeof contentValue !== 'string') {
+
+    const body = req.body as { path?: unknown; content?: unknown };
+    const rawPath = typeof body.path === 'string' ? body.path.trim() : '';
+    if (!rawPath) return sendError(res, 400, 'path is required', 'bad_request');
+    if (typeof body.content !== 'string') {
       return sendError(res, 400, 'content must be a string', 'bad_request');
     }
-    const file = upsertDesignFile(
-      getDb(),
-      designId,
-      normalizeDesignFilePath(pathValue.trim()),
-      contentValue,
-    );
+
+    const normalizedPath = normalizeDesignFilePath(rawPath);
+    upsertDesignFile(getDb(), designId, normalizedPath, body.content);
+    const file = viewDesignFile(getDb(), designId, normalizedPath);
+    if (!file) return sendError(res, 500, 'Failed to persist file', 'internal_error');
     res.json(file);
   } catch (err) {
     handleError(res, err);
@@ -2029,10 +2031,7 @@ app.post('/api/export', async (req, res) => {
     const filename = sanitizeExportFilename(request.defaultFilename, request.format);
     stagingDir = await mkdtemp(join(tmpdir(), 'codesign-export-'));
     const destinationPath = join(stagingDir, filename);
-    await exportArtifact(request.format, request.htmlContent, destinationPath, undefined, {
-      ...(request.projectFiles ? { projectFiles: request.projectFiles } : {}),
-      ...(request.compositionId ? { compositionId: request.compositionId } : {}),
-    });
+    await exportArtifact(request.format, request.htmlContent, destinationPath);
     const bytes = await readFile(destinationPath);
     res.setHeader('Content-Type', EXPORT_CONTENT_TYPES[request.format]);
     res.setHeader('Content-Length', String(bytes.byteLength));
@@ -2515,8 +2514,7 @@ const FIGMA_PROMPT_PREFIX = [
 const FIGMA_PREFETCH_CHAR_LIMIT = 1_600;
 const HTTP_URL_RE = /https?:\/\/[^\s)\]"']+/gi;
 const PLAYWRIGHT_INTENT_RE = /\b(playwright|browser|snapshot|screenshot)\b/i;
-const WEBPAGE_REVIEW_INTENT_RE =
-  /\b(inspect|review|audit|compare|check|test|verify|validate|crawl|qa)\b/i;
+const WEBPAGE_INTENT_RE = /\b(site|website|webpage|web page|page|screen|layout|inspect|review|audit|compare|check|test)\b/i;
 const PLAYWRIGHT_PROMPT_PREFIX = [
   'When inspecting a web page, do not use generic URL-reading tools.',
   'Use the Playwright MCP browser_navigate tool first, then browser_snapshot or browser_take_screenshot.',
@@ -2571,7 +2569,7 @@ function shouldPrefetchBrowserContext(prompt: string, referenceUrl?: string): bo
   const playableUrl = extractPlayableUrl(prompt);
   if (playableUrl === undefined) return false;
 
-  return PLAYWRIGHT_INTENT_RE.test(prompt) || WEBPAGE_REVIEW_INTENT_RE.test(prompt);
+  return PLAYWRIGHT_INTENT_RE.test(prompt) || WEBPAGE_INTENT_RE.test(prompt);
 }
 
 /** Extract file key and optional node-id from a figma.com/design URL */
@@ -3006,12 +3004,7 @@ async function buildPrefetchedBrowserPromptContext(
 const BCGPT_INTENT_RE = /basecamp|project|todo|message|campfire|schedule|checkin/i;
 
 function filterMcpToolsForPrompt<T extends { name: string }>(prompt: string, tools: T[]): T[] {
-  const shouldKeepBrowserTools =
-    PLAYWRIGHT_INTENT_RE.test(prompt) || extractPlayableUrl(prompt) !== undefined;
-
-  if (!shouldKeepBrowserTools) {
-    return tools.filter((tool) => !tool.name.startsWith('browser_')).slice(0, 128);
-  }
+  if (!PLAYWRIGHT_INTENT_RE.test(prompt)) return tools.slice(0, 128);
 
   const browserTools = tools.filter((tool) => PLAYWRIGHT_TOOL_NAMES.has(tool.name));
   const nonBrowserTools = tools.filter((tool) => !tool.name.startsWith('browser_'));
