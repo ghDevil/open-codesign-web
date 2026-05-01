@@ -131,7 +131,7 @@ timeline.forEach(({ delay, el, animation }) => {
 
 ### Remotion Integration (Animation Mode)
 
-This app now has a dedicated **Animation Studio** that compiles Remotion code live in the preview. When a design is of kind `animation`, output a standard HTML file that embeds raw React/Remotion component code in a special `<script>` tag.
+This app now has a dedicated **Animation Studio** that compiles Remotion code live in the preview. When a design is of kind `animation`, produce the app's normal HTML output and make sure the resulting `index.html` embeds raw React/Remotion component code in a special `<script>` tag.
 
 **CRITICAL rules:**
 1. Do not load Remotion from a CDN.
@@ -139,10 +139,10 @@ This app now has a dedicated **Animation Studio** that compiles Remotion code li
 3. Output one exported React component named `MyComposition`.
 4. Keep imports limited to `react` and `remotion` only.
 5. Do not wrap the component in `<Composition>` or call `registerRoot()`.
+6. If the environment uses a Codex-style `text_editor` / virtual-fs workflow, write this structure directly into `index.html` rather than apologizing about format limitations.
 
-**Required output format:**
+**Required `index.html` structure:**
 
-```html
 <!doctype html>
 <html>
 <head><meta charset="UTF-8"><title>Animation</title></head>
@@ -173,7 +173,6 @@ export const MyComposition = () => {
 </script>
 </body>
 </html>
-```
 
 **Common Remotion APIs to use:**
 - `useCurrentFrame()` for frame-based animation timing

@@ -1492,7 +1492,7 @@ function intentToPromptHeader(intent: PromptContextExtras['intent']): string | n
     lines.push('');
     lines.push('CRITICAL animation output format:');
     lines.push(
-      'Return a normal HTML artifact whose body contains a <script id="open-codesign-animation-code" type="text/plain"> block with the full Remotion component source.',
+      'Produce the normal design HTML output for this app. In whatever delivery channel this environment uses (`<artifact>` output or the Codex text_editor / virtual-fs path), the resulting `index.html` must contain a `<script id="open-codesign-animation-code" type="text/plain">` block with the full Remotion component source.',
     );
     lines.push('');
     lines.push('Rules:');
@@ -1500,11 +1500,10 @@ function intentToPromptHeader(intent: PromptContextExtras['intent']): string | n
     lines.push('2. Imports are allowed from: `react`, `remotion`, `@remotion/shapes`, `@remotion/transitions`, `@remotion/transitions/fade`, `@remotion/transitions/slide`, `@remotion/transitions/wipe`, `@remotion/transitions/flip`, `@remotion/transitions/clock-wipe`. Do not import any other packages.');
     lines.push('3. Include metadata comments first: `// @fps`, `// @duration`, `// @width`, `// @height`.');
     lines.push('4. Do not wrap the component in `<Composition>` or call `registerRoot()`. The app handles the Remotion Player and MP4 render pipeline.');
-    lines.push('5. Do not use markdown fences outside the script tag. Do not load Remotion from a CDN.');
+    lines.push('5. Do not apologize about output format or say the environment cannot do this. Just write the HTML so the resulting `index.html` contains the script block. Do not use markdown fences outside the script tag. Do not load Remotion from a CDN.');
     lines.push('6. Available APIs: useCurrentFrame, useVideoConfig, interpolate, spring, Easing, AbsoluteFill, Sequence, Series, Img, staticFile, random. Shapes: Rect, Circle, Triangle, Star, Polygon, Ellipse, Heart, Pie. Transitions: TransitionSeries, linearTiming, springTiming, fade, slide, wipe, flip, clockWipe.');
     lines.push('');
-    lines.push('Required template:');
-    lines.push('```html');
+    lines.push('Required `index.html` body shape:');
     lines.push('<script id="open-codesign-animation-code" type="text/plain">');
     lines.push(`// @fps ${fps}`);
     lines.push(`// @duration ${durationInFrames}`);
@@ -1523,7 +1522,6 @@ function intentToPromptHeader(intent: PromptContextExtras['intent']): string | n
     lines.push('  );');
     lines.push('};');
     lines.push('</script>');
-    lines.push('```');
     lines.push('Make it feel like a real Remotion piece: strong composition, scene timing, layered motion, and polished typography.');
   }
   return lines.join('\n');
@@ -3426,4 +3424,3 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
     set({ activeReportLocalId: null });
   },
 }));
-
