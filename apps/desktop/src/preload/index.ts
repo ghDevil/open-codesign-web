@@ -34,13 +34,11 @@ import type {
   ModelsListResponse,
   TestEndpointResponse,
 } from '../main/connection-ipc';
-import type { ExportProgressEvent } from '../main/exporter-ipc';
 import type { ImageGenerationSettingsView } from '../main/image-generation-settings';
 
 export type { ConnectionTestError, ConnectionTestResult, ModelsListResponse, TestEndpointResponse };
 export type { ClaudeCodeUserType, ExternalConfigsDetection };
 export type { CodexOAuthStatus };
-export type { ExportProgressEvent };
 export type { ImageGenerationSettingsView };
 
 export interface ValidateKeyResult {
@@ -59,10 +57,15 @@ export interface ExportInvokeResponse {
   path?: string;
   bytes?: number;
 }
-
-export interface ExportProjectFile {
-  path: string;
-  content: string;
+export interface ExportProgressEvent {
+  exportId: string;
+  format: ExportFormat;
+  phase: 'queued' | 'preparing' | 'rendering' | 'encoding' | 'finalizing' | 'done';
+  progress: number;
+  message: string;
+  renderedFrames?: number;
+  encodedFrames?: number;
+  totalFrames?: number;
 }
 
 export interface ProviderRow {
@@ -301,16 +304,14 @@ const api = {
     htmlContent: string;
     defaultFilename?: string;
     exportId?: string;
-    projectFiles?: ExportProjectFile[];
+    projectFiles?: Array<{ path: string; content: string }>;
     compositionId?: string;
   }) =>
     ipcRenderer.invoke('codesign:export', payload) as Promise<ExportInvokeResponse>,
-  onExportProgress: (cb: (event: ExportProgressEvent) => void) => {
+  onExportProgress: (cb: (event: ExportProgressEvent) => void): (() => void) => {
     const listener = (_e: unknown, event: ExportProgressEvent) => cb(event);
     ipcRenderer.on('codesign:export-progress', listener);
-    return () => {
-      ipcRenderer.removeListener('codesign:export-progress', listener);
-    };
+    return () => { ipcRenderer.removeListener('codesign:export-progress', listener); };
   },
   locale: {
     getSystem: () => ipcRenderer.invoke('locale:get-system') as Promise<string>,

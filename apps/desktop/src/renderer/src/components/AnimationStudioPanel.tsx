@@ -747,7 +747,7 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
             setPreviewHtml(buildAnimationProjectPlaceholderHtml(saved.content));
           }
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
           setProjectError(error instanceof Error ? error.message : String(error));
         });
     }, 320);
