@@ -1497,10 +1497,11 @@ function intentToPromptHeader(intent: PromptContextExtras['intent']): string | n
     lines.push('');
     lines.push('Rules:');
     lines.push('1. Output exactly one exported React component named `MyComposition`.');
-    lines.push('2. Imports are allowed, but only from `react` and `remotion`. Do not import any third-party packages.');
+    lines.push('2. Imports are allowed from: `react`, `remotion`, `@remotion/shapes`, `@remotion/transitions`, `@remotion/transitions/fade`, `@remotion/transitions/slide`, `@remotion/transitions/wipe`, `@remotion/transitions/flip`, `@remotion/transitions/clock-wipe`. Do not import any other packages.');
     lines.push('3. Include metadata comments first: `// @fps`, `// @duration`, `// @width`, `// @height`.');
     lines.push('4. Do not wrap the component in `<Composition>` or call `registerRoot()`. The app handles the Remotion Player and MP4 render pipeline.');
     lines.push('5. Do not use markdown fences outside the script tag. Do not load Remotion from a CDN.');
+    lines.push('6. Available APIs: useCurrentFrame, useVideoConfig, interpolate, spring, Easing, AbsoluteFill, Sequence, Series, Img, staticFile, random. Shapes: Rect, Circle, Triangle, Star, Polygon, Ellipse, Heart, Pie. Transitions: TransitionSeries, linearTiming, springTiming, fade, slide, wipe, flip, clockWipe.');
     lines.push('');
     lines.push('Required template:');
     lines.push('```html');
