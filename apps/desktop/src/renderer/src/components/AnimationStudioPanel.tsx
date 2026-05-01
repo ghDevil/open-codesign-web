@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Clapperboard,
   Code2,
+  ExternalLink,
   FolderOpen,
   Maximize2,
   Pause,
@@ -25,6 +26,7 @@ import {
 } from 'lucide-react';
 import type { ReactElement } from 'react';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCodesignStore } from '../store';
 import { useCompilation } from '../hooks/useCompilation';
 
 const RemotionCodeEditor = lazy(() =>
@@ -32,6 +34,14 @@ const RemotionCodeEditor = lazy(() =>
 );
 
 type LeftTab = 'compositions' | 'assets';
+type StudioMenu = 'file' | 'view' | 'tools' | 'render' | null;
+
+interface MenuItem {
+  id: string;
+  label: string;
+  hint?: string;
+  onSelect: () => void | Promise<void>;
+}
 
 const STARTER_TEMPLATE = `// @fps 30
 // @duration 150
@@ -192,6 +202,7 @@ interface AnimationStudioPanelProps {
 }
 
 export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): ReactElement {
+  const exportActive = useCodesignStore((s) => s.exportActive);
   const generatedCode = useMemo(() => extractAnimationCodeFromHtml(html), [html]);
   const [editedCode, setEditedCode] = useState<string | null>(null);
   const [leftTab, setLeftTab] = useState<LeftTab>('compositions');
@@ -200,7 +211,9 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const [playbackRate, setPlaybackRate] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLaneId, setSelectedLaneId] = useState<string | null>(null);
+  const [activeMenu, setActiveMenu] = useState<StudioMenu>(null);
   const playerRef = useRef<PlayerRef>(null);
+  const menuBarRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setEditedCode(null);
@@ -217,6 +230,24 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
 
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!activeMenu) return;
+    function onPointerDown(event: MouseEvent): void {
+      if (!menuBarRef.current) return;
+      if (event.target instanceof Node && menuBarRef.current.contains(event.target)) return;
+      setActiveMenu(null);
+    }
+    function onEscape(event: KeyboardEvent): void {
+      if (event.key === 'Escape') setActiveMenu(null);
+    }
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onEscape);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onEscape);
+    };
+  }, [activeMenu]);
 
   const code = editedCode ?? generatedCode ?? '';
   const showStarter = !code;
@@ -311,6 +342,127 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const handleFullscreen = useCallback(() => {
     playerRef.current?.requestFullscreen();
   }, []);
+  const openExternalDoc = useCallback((url: string) => {
+    void window.codesign?.openExternal(url);
+  }, []);
+  const runMenuAction = useCallback((action: () => void | Promise<void>) => {
+    setActiveMenu(null);
+    void action();
+  }, []);
+
+  const fileMenuItems = useMemo<MenuItem[]>(
+    () => [
+      {
+        id: 'file-export-mp4',
+        label: 'Export MP4 video',
+        hint: 'Remotion render',
+        onSelect: () => exportActive('mp4'),
+      },
+      {
+        id: 'file-export-html',
+        label: 'Export HTML snapshot',
+        hint: '.html',
+        onSelect: () => exportActive('html'),
+      },
+      {
+        id: 'file-export-pdf',
+        label: 'Export PDF',
+        hint: '.pdf',
+        onSelect: () => exportActive('pdf'),
+      },
+      {
+        id: 'file-export-pptx',
+        label: 'Export PowerPoint',
+        hint: '.pptx',
+        onSelect: () => exportActive('pptx'),
+      },
+      {
+        id: 'file-export-zip',
+        label: 'Export ZIP package',
+        hint: '.zip',
+        onSelect: () => exportActive('zip'),
+      },
+      {
+        id: 'file-export-markdown',
+        label: 'Export Markdown',
+        hint: '.md',
+        onSelect: () => exportActive('markdown'),
+      },
+    ],
+    [exportActive],
+  );
+
+  const viewMenuItems = useMemo<MenuItem[]>(
+    () => [
+      {
+        id: 'view-toggle-code',
+        label: showCodePanel ? 'Hide code panel' : 'Show code panel',
+        hint: 'Side panel',
+        onSelect: () => setShowCodePanel((value) => !value),
+      },
+      {
+        id: 'view-compositions',
+        label: 'Show compositions rail',
+        hint: 'Left panel',
+        onSelect: () => setLeftTab('compositions'),
+      },
+      {
+        id: 'view-assets',
+        label: 'Show assets rail',
+        hint: 'Left panel',
+        onSelect: () => setLeftTab('assets'),
+      },
+      {
+        id: 'view-fullscreen',
+        label: 'Open fullscreen preview',
+        hint: 'Player',
+        onSelect: handleFullscreen,
+      },
+    ],
+    [handleFullscreen, showCodePanel],
+  );
+
+  const toolsMenuItems = useMemo<MenuItem[]>(
+    () => [
+      {
+        id: 'tools-docs-studio',
+        label: 'Open Remotion Studio docs',
+        hint: 'Official docs',
+        onSelect: () => openExternalDoc('https://www.remotion.dev/docs/studio'),
+      },
+      {
+        id: 'tools-docs-ai',
+        label: 'Open Remotion AI docs',
+        hint: 'Official docs',
+        onSelect: () => openExternalDoc('https://www.remotion.dev/docs/ai'),
+      },
+      {
+        id: 'tools-docs-compile',
+        label: 'Open JIT compilation guide',
+        hint: 'Dynamic compilation',
+        onSelect: () => openExternalDoc('https://www.remotion.dev/docs/ai/dynamic-compilation'),
+      },
+      {
+        id: 'tools-docs-prompt',
+        label: 'Open system prompt guide',
+        hint: 'LLM integration',
+        onSelect: () => openExternalDoc('https://www.remotion.dev/docs/ai/system-prompt'),
+      },
+    ],
+    [openExternalDoc],
+  );
+
+  const renderMenuItems = useMemo<MenuItem[]>(
+    () => [
+      {
+        id: 'render-mp4',
+        label: 'Render MP4 video',
+        hint: 'Uses export pipeline',
+        onSelect: () => exportActive('mp4'),
+      },
+    ],
+    [exportActive],
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#111315] text-[rgba(255,255,255,0.9)]">
@@ -462,12 +614,43 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
         </aside>
 
         <section className="flex min-w-0 flex-1 flex-col bg-[#111315]">
-          <div className="flex h-8 shrink-0 items-center justify-between border-b border-[rgba(255,255,255,0.06)] bg-[#181b1f] px-3 text-[11px]">
-            <div className="flex items-center gap-2 text-[rgba(255,255,255,0.55)]">
-              <span>File</span>
-              <span>View</span>
-              <span>Tools</span>
-              <span>Render</span>
+          <div
+            ref={menuBarRef}
+            className="relative flex h-8 shrink-0 items-center justify-between border-b border-[rgba(255,255,255,0.06)] bg-[#181b1f] px-3 text-[11px]"
+          >
+            <div className="flex items-center gap-1 text-[rgba(255,255,255,0.55)]">
+              <StudioMenuButton
+                label="File"
+                open={activeMenu === 'file'}
+                onClick={() => setActiveMenu((value) => (value === 'file' ? null : 'file'))}
+              />
+              <StudioMenuButton
+                label="View"
+                open={activeMenu === 'view'}
+                onClick={() => setActiveMenu((value) => (value === 'view' ? null : 'view'))}
+              />
+              <StudioMenuButton
+                label="Tools"
+                open={activeMenu === 'tools'}
+                onClick={() => setActiveMenu((value) => (value === 'tools' ? null : 'tools'))}
+              />
+              <StudioMenuButton
+                label="Render"
+                open={activeMenu === 'render'}
+                onClick={() => setActiveMenu((value) => (value === 'render' ? null : 'render'))}
+              />
+              {activeMenu === 'file' ? (
+                <StudioMenuDropdown items={fileMenuItems} onSelect={runMenuAction} />
+              ) : null}
+              {activeMenu === 'view' ? (
+                <StudioMenuDropdown items={viewMenuItems} onSelect={runMenuAction} />
+              ) : null}
+              {activeMenu === 'tools' ? (
+                <StudioMenuDropdown items={toolsMenuItems} onSelect={runMenuAction} />
+              ) : null}
+              {activeMenu === 'render' ? (
+                <StudioMenuDropdown items={renderMenuItems} onSelect={runMenuAction} />
+              ) : null}
             </div>
             <button
               type="button"
@@ -856,5 +1039,62 @@ function StudioTabButton({
       {icon}
       {label}
     </button>
+  );
+}
+
+function StudioMenuButton({
+  label,
+  open,
+  onClick,
+}: {
+  label: string;
+  open: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded px-2 py-1 transition-colors ${
+        open
+          ? 'bg-[rgba(255,255,255,0.08)] text-[rgba(255,255,255,0.95)]'
+          : 'hover:bg-[rgba(255,255,255,0.06)] hover:text-[rgba(255,255,255,0.92)]'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function StudioMenuDropdown({
+  items,
+  onSelect,
+}: {
+  items: MenuItem[];
+  onSelect: (action: () => void | Promise<void>) => void;
+}) {
+  return (
+    <div className="absolute left-3 top-[calc(100%+4px)] z-20 min-w-[248px] overflow-hidden rounded-lg border border-[rgba(255,255,255,0.08)] bg-[#171a1e] shadow-[0_18px_40px_rgba(0,0,0,0.35)]">
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => onSelect(item.onSelect)}
+          className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[rgba(255,255,255,0.05)]"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-[rgba(255,255,255,0.94)]">
+              {item.label}
+            </div>
+            {item.hint ? (
+              <div className="text-[10px] text-[rgba(255,255,255,0.44)]">{item.hint}</div>
+            ) : null}
+          </div>
+          {item.label.toLowerCase().includes('docs') || item.label.toLowerCase().includes('guide') ? (
+            <ExternalLink className="h-3.5 w-3.5 text-[rgba(255,255,255,0.34)]" />
+          ) : null}
+        </button>
+      ))}
+    </div>
   );
 }
