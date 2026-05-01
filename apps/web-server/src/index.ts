@@ -1333,7 +1333,9 @@ app.post('/api/generate', async (req: Request, res: Response) => {
     currentApiKey: string,
   ) => {
     const input = buildGenerateInput(resolved, currentApiKey);
-    if (!USE_AGENT_RUNTIME) {
+    const shouldBypassAgentRuntimeForCodex =
+      resolved.model.provider === CHATGPT_CODEX_PROVIDER_ID;
+    if (!USE_AGENT_RUNTIME || shouldBypassAgentRuntimeForCodex) {
       return generate(input);
     }
 
