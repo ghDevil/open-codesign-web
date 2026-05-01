@@ -25,6 +25,7 @@ import { computeFingerprint } from '@open-codesign/shared/fingerprint';
 import { create } from 'zustand';
 import type { StoreApi } from 'zustand';
 import { clearDesignIntent, copyDesignIntent, readDesignIntent } from './lib/design-intent';
+import { hostedUploadFiles } from './lib/web-codesign';
 import type { ClarifyPromptQuestion, CodesignApi, ExportFormat } from '../../preload/index';
 import { recordAction, snapshotTimeline } from './lib/action-timeline';
 import {
@@ -360,6 +361,7 @@ interface CodesignState {
   exportActive: (format: ExportFormat) => Promise<void>;
 
   pickInputFiles: () => Promise<void>;
+  uploadInputFiles: (files: FileList | File[]) => Promise<void>;
   removeInputFile: (path: string) => void;
   clearInputFiles: () => void;
   setReferenceUrl: (value: string) => void;
@@ -1813,6 +1815,36 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       });
       return { inputFiles };
     });
+  },
+
+  /**
+   * Upload a `FileList` (drag-drop or hidden `<input type="file">`) directly
+   * to the hosted upload endpoint and merge the results into `inputFiles`.
+   * Lets the animation studio accept dropped/selected media in-place without
+   * round-tripping through the OS picker.
+   */
+  async uploadInputFiles(files) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    try {
+      const uploaded = (await hostedUploadFiles(list)) as unknown as LocalInputFile[];
+      if (uploaded.length === 0) return;
+      set((s) => {
+        const inputFiles = uniqueFiles([...s.inputFiles, ...uploaded]);
+        persistDesignContext(s.currentDesignId, {
+          inputFiles,
+          referenceUrl: s.referenceUrl,
+        });
+        return { inputFiles };
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : tr('errors.generic');
+      get().pushToast({
+        variant: 'error',
+        title: 'Upload failed',
+        description: message,
+      });
+    }
   },
 
   removeInputFile(path) {

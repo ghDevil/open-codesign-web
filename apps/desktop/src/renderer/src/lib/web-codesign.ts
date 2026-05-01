@@ -146,9 +146,13 @@ function defaultImageSettings(): ImageGenerationSettingsView {
   };
 }
 
-async function uploadPickedFiles(files: FileList): Promise<Array<Record<string, unknown>>> {
+async function uploadPickedFiles(
+  files: FileList | File[],
+): Promise<Array<Record<string, unknown>>> {
+  const list = Array.from(files);
+  if (list.length === 0) return [];
   const form = new FormData();
-  for (const file of Array.from(files)) {
+  for (const file of list) {
     form.append('files', file, file.name);
   }
   const uploaded = await apiJson<
@@ -173,6 +177,18 @@ async function uploadPickedFiles(files: FileList): Promise<Array<Record<string, 
     ...(file.extractedText ? { extractedText: file.extractedText } : {}),
     ...(file.documentKind ? { documentKind: file.documentKind } : {}),
   }));
+}
+
+/**
+ * Upload a `FileList`/`File[]` directly through the hosted upload endpoint
+ * and return the same shape `pickInputFiles()` returns. Used for in-place
+ * drag-drop and `<input type="file">` flows so callers can merge the result
+ * straight into the store's `inputFiles`.
+ */
+export async function hostedUploadFiles(
+  files: FileList | File[],
+): Promise<Array<Record<string, unknown>>> {
+  return uploadPickedFiles(files);
 }
 
 function pickFilesViaInput(): Promise<Array<Record<string, unknown>>> {

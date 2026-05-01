@@ -350,6 +350,7 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const isGenerating = useCodesignStore((s) => s.isGenerating);
   const generatingDesignId = useCodesignStore((s) => s.generatingDesignId);
   const pickInputFiles = useCodesignStore((s) => s.pickInputFiles);
+  const uploadInputFiles = useCodesignStore((s) => s.uploadInputFiles);
   const removeInputFile = useCodesignStore((s) => s.removeInputFile);
   const setPreviewHtml = useCodesignStore((s) => s.setPreviewHtml);
   const lastFsUpdate = useCodesignStore((s) => s.lastFsUpdate);
@@ -387,6 +388,9 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const quickSwitcherInputRef = useRef<HTMLInputElement | null>(null);
   const projectSyncInFlightRef = useRef(false);
   const seededProjectDesignIdRef = useRef<string | null>(null);
+  const assetFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [assetDragOver, setAssetDragOver] = useState(false);
+  const [assetUploading, setAssetUploading] = useState(false);
 
   const loadProjectFiles = useCallback(
     async (seedIfMissing: boolean) => {
@@ -719,8 +723,6 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
     [currentFrame, timelineLanes],
   );
 
-  const timelineRows = Math.max(visibleLanes.length, 1);
-  const timelineHeight = 46 + timelineRows * 34;
 
   const playerKey = useMemo(
     () =>
@@ -939,8 +941,75 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
     void window.codesign?.openExternal(url);
   }, []);
   const handleAttachAssets = useCallback(() => {
-    void pickInputFiles();
     setLeftTab('assets');
+    // Prefer the in-place hidden <input type="file"> click. Falling back to the
+    // legacy `pickInputFiles` (OS picker on Electron, hosted upload on web)
+    // keeps the menu-bar action working even before the assets pane mounts.
+    const input = assetFileInputRef.current;
+    if (input) {
+      input.value = '';
+      input.click();
+      return;
+    }
+    void pickInputFiles();
+  }, [pickInputFiles]);
+
+  const handleAssetFiles = useCallback(
+    async (files: FileList | File[] | null | undefined) => {
+      if (!files) return;
+      const list = Array.from(files);
+      if (list.length === 0) return;
+      setAssetUploading(true);
+      try {
+        await uploadInputFiles(list);
+      } finally {
+        setAssetUploading(false);
+      }
+    },
+    [uploadInputFiles],
+  );
+
+  const handleAssetInputChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      void handleAssetFiles(event.target.files);
+      event.target.value = '';
+    },
+    [handleAssetFiles],
+  );
+
+  const handleAssetDragOver = useCallback((event: React.DragEvent<HTMLElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+    setAssetDragOver(true);
+  }, []);
+
+  const handleAssetDragLeave = useCallback((event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setAssetDragOver(false);
+  }, []);
+
+  const handleAssetDrop = useCallback(
+    (event: React.DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setAssetDragOver(false);
+      const files = event.dataTransfer?.files;
+      if (files && files.length > 0) void handleAssetFiles(files);
+    },
+    [handleAssetFiles],
+  );
+
+  const openAssetPicker = useCallback(() => {
+    const input = assetFileInputRef.current;
+    if (input) {
+      input.value = '';
+      input.click();
+      return;
+    }
+    void pickInputFiles();
   }, [pickInputFiles]);
   const copyToClipboard = useCallback((value: string, message: string) => {
     void navigator.clipboard?.writeText(value).then(
@@ -1449,22 +1518,41 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
               </div>
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 flex-col">
+            <div
+              className="flex min-h-0 flex-1 flex-col"
+              onDragOver={handleAssetDragOver}
+              onDragLeave={handleAssetDragLeave}
+              onDrop={handleAssetDrop}
+            >
+              <input
+                ref={assetFileInputRef}
+                type="file"
+                multiple
+                accept="image/*,video/*,audio/*,application/pdf,.svg,.png,.jpg,.jpeg,.webp,.gif,.mp4,.webm,.mp3,.wav"
+                className="hidden"
+                onChange={handleAssetInputChange}
+              />
               <div className="border-b border-[rgba(255,255,255,0.06)] px-3 py-3">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <div className="text-[13px] font-semibold text-[rgba(255,255,255,0.95)]">Project assets</div>
                     <div className="mt-1 text-[11px] text-[rgba(255,255,255,0.48)]">
-                      Attach local media, then reference it in code with <code>staticFile("filename")</code>.
+                      Drop images, SVGs, or audio here. The model can animate them with{' '}
+                      <code>staticFile("filename")</code>.
                     </div>
                   </div>
                   <button
                     type="button"
-                    onClick={handleAttachAssets}
-                    className="inline-flex items-center gap-1 rounded-md border border-[rgba(255,255,255,0.08)] bg-[#14171a] px-2.5 py-1.5 text-[11px] text-[rgba(255,255,255,0.82)] transition-colors hover:bg-[#1b2026]"
+                    onClick={openAssetPicker}
+                    disabled={assetUploading}
+                    className="inline-flex items-center gap-1 rounded-md border border-[rgba(255,255,255,0.08)] bg-[#14171a] px-2.5 py-1.5 text-[11px] text-[rgba(255,255,255,0.82)] transition-colors hover:bg-[#1b2026] disabled:opacity-50"
                   >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add
+                    {assetUploading ? (
+                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5" />
+                    )}
+                    {assetUploading ? 'Uploading' : 'Upload'}
                   </button>
                 </div>
                 <div className="mt-3">
@@ -1479,7 +1567,13 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                   </label>
                 </div>
               </div>
-              <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
+              <div className="relative min-h-0 flex-1 overflow-auto px-2 py-2">
+                {assetDragOver ? (
+                  <div className="pointer-events-none absolute inset-1 z-10 flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-[rgba(124,156,255,0.55)] bg-[rgba(124,156,255,0.08)] text-[12px] text-[#a8bbff]">
+                    <Plus className="h-4 w-4" />
+                    Drop files to upload
+                  </div>
+                ) : null}
                 {visibleAssets.length > 0 ? (
                   <div className="space-y-2">
                     {visibleAssets.map((asset) => (
@@ -1548,9 +1642,24 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                     ))}
                   </div>
                 ) : (
-                  <div className="rounded-md border border-dashed border-[rgba(255,255,255,0.08)] bg-[#14171a] px-4 py-5 text-[11px] leading-[1.6] text-[rgba(255,255,255,0.5)]">
-                    No project assets yet. Add local media here, then reference it inside the composition using <code>staticFile("filename")</code>.
-                  </div>
+                  <button
+                    type="button"
+                    onClick={openAssetPicker}
+                    disabled={assetUploading}
+                    className="flex w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-[rgba(255,255,255,0.1)] bg-[#14171a] px-4 py-8 text-[12px] leading-[1.55] text-[rgba(255,255,255,0.6)] transition-colors hover:border-[rgba(124,156,255,0.4)] hover:bg-[#181c20] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {assetUploading ? (
+                      <LoaderCircle className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <Plus className="h-5 w-5" />
+                    )}
+                    <div className="font-medium text-[rgba(255,255,255,0.86)]">
+                      {assetUploading ? 'Uploading…' : 'Upload images, SVGs, audio'}
+                    </div>
+                    <div className="text-[11px] text-[rgba(255,255,255,0.5)]">
+                      Or drop files anywhere in this panel.
+                    </div>
+                  </button>
                 )}
               </div>
             </div>
@@ -1781,97 +1890,211 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                   </div>
                 </div>
 
-                <div className="px-4 py-3">
+                <div className="flex flex-col gap-3 px-4 py-3">
                   <div className="flex items-center justify-between text-[11px] text-[rgba(255,255,255,0.42)]">
                     <span>{formatFrameClock(currentFrame, meta.fps)}</span>
                     <span>{formatFrameClock(meta.durationInFrames, meta.fps)}</span>
                   </div>
 
-                  <div
-                    className="relative mt-3 overflow-hidden rounded-md border border-[rgba(255,255,255,0.06)] bg-[#0f1114]"
-                    style={{ height: timelineHeight }}
-                  >
-                    <div className="absolute inset-x-0 top-0 flex h-7 items-center border-b border-[rgba(255,255,255,0.05)] px-3">
+                  {/*
+                    Scrollable timeline container.
+                    - Outer wrapper caps the visible height (so the player keeps room),
+                      but inner content can grow taller (vertical scroll for many lanes)
+                      and wider (horizontal scroll when zoomed past 1x — every second
+                      gets at least 80px of width).
+                    - The header row sticks to the top, the time ruler scrolls
+                      horizontally with the lanes, and the playhead overlays both.
+                    - The label gutter is also sticky-left so it stays visible while
+                      the user pans through long compositions.
+                  */}
+                  <div className="relative overflow-hidden rounded-md border border-[rgba(255,255,255,0.06)] bg-[#0f1114]">
+                    <div className="flex h-7 shrink-0 items-center border-b border-[rgba(255,255,255,0.05)] px-3">
                       <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.12em] text-[rgba(255,255,255,0.34)]">
                         <span>Timeline</span>
                         <span className="text-[rgba(255,255,255,0.18)]">/</span>
-                        <span>{visibleLanes.length > 0 ? `${visibleLanes.length} lanes` : 'Awaiting scene lanes'}</span>
+                        <span>
+                          {visibleLanes.length > 0
+                            ? `${visibleLanes.length} lanes`
+                            : 'Awaiting scene lanes'}
+                        </span>
                       </div>
                     </div>
 
-                    <div className="absolute inset-0 top-7">
-                      <div className="absolute inset-x-0 top-0 grid h-6 border-b border-[rgba(255,255,255,0.05)] text-[10px] text-[rgba(255,255,255,0.34)]">
-                        <div className="grid h-full grid-cols-6">
-                          {timelineTicks.slice(0, 6).map((tick) => (
-                            <div
-                              key={tick.frame}
-                              className="border-r border-[rgba(255,255,255,0.04)] px-3 py-1 last:border-r-0"
-                            >
-                              {tick.label}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="absolute inset-x-0 bottom-0 top-6">
-                        <div className="absolute inset-0 grid grid-cols-6">
-                          {timelineTicks.slice(0, 6).map((tick) => (
-                            <div
-                              key={tick.frame}
-                              className="border-r border-[rgba(255,255,255,0.04)] last:border-r-0"
-                            />
-                          ))}
-                        </div>
-                        {visibleLanes.length > 0 ? (
-                          visibleLanes.map((lane, index) => {
-                            const top = index * 34 + 6;
-                            const leftPct = (lane.startFrame / meta.durationInFrames) * 100;
-                            const widthPct = (lane.durationInFrames / meta.durationInFrames) * 100;
-                            const selected = lane.id === selectedLaneId;
-                            return (
-                              <button
-                                key={lane.id}
-                                type="button"
-                                onClick={() => handleSelectLane(lane)}
-                                className={`absolute left-0 right-0 mx-3 flex h-7 items-center rounded-md text-left transition-transform hover:scale-[1.01] ${
-                                  selected ? 'ring-1 ring-white/20' : ''
-                                }`}
-                                style={{ top }}
-                              >
-                                <div className="w-28 shrink-0 pr-3 text-[10px] text-[rgba(255,255,255,0.52)]">
-                                  <div className="truncate">{lane.label}</div>
-                                </div>
-                                <div className="relative h-full flex-1 rounded bg-[rgba(255,255,255,0.04)]">
-                                  <div
-                                    className="absolute inset-y-0 rounded"
-                                    style={{
-                                      left: `${leftPct}%`,
-                                      width: `${Math.max(widthPct, 2)}%`,
-                                      backgroundColor: laneColor(lane),
-                                      opacity: selected || activeLaneIds.has(lane.id) ? 0.95 : 0.72,
-                                    }}
-                                  />
-                                </div>
-                              </button>
-                            );
-                          })
-                        ) : (
-                          <div className="flex h-full items-center justify-center px-6 text-center text-[11px] text-[rgba(255,255,255,0.44)]">
-                            Generate a scene-based Remotion composition to populate timeline lanes.
-                          </div>
-                        )}
-                        <div className="pointer-events-none absolute inset-y-0 left-[124px] right-3">
+                    <div
+                      className="relative w-full overflow-auto"
+                      style={{
+                        // Cap visible height so the player stays usable. Inner
+                        // tracks list can grow past this (vertical scroll appears).
+                        maxHeight: 280,
+                      }}
+                    >
+                      {(() => {
+                        // Pixel-per-frame so the timeline grows with duration.
+                        // 1.6 px / frame at 30fps -> ~48 px per second; long
+                        // compositions naturally need horizontal scroll.
+                        const pxPerFrame = 1.6;
+                        const labelGutter = 132;
+                        const tracksWidth = Math.max(
+                          480,
+                          Math.round(meta.durationInFrames * pxPerFrame),
+                        );
+                        const totalWidth = labelGutter + tracksWidth;
+                        const rowHeight = 32;
+                        const rowGap = 6;
+                        const tracksHeight = Math.max(
+                          120,
+                          visibleLanes.length * (rowHeight + rowGap) + rowGap,
+                        );
+                        const playheadX =
+                          labelGutter +
+                          Math.min(
+                            tracksWidth,
+                            (currentFrame / Math.max(meta.durationInFrames, 1)) * tracksWidth,
+                          );
+                        return (
                           <div
-                            className="absolute bottom-0 top-0 w-px bg-[#ff503b]"
-                            style={{
-                              left: `${Math.min(currentFrame / meta.durationInFrames, 1) * 100}%`,
-                            }}
+                            className="relative"
+                            style={{ width: totalWidth, height: 26 + tracksHeight }}
                           >
-                            <div className="absolute -top-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rounded-full border border-[#ff7a67] bg-[#ff503b]" />
+                            {/* Time ruler */}
+                            <div
+                              className="sticky top-0 z-20 flex h-6 items-stretch border-b border-[rgba(255,255,255,0.05)] bg-[#0f1114] text-[10px] text-[rgba(255,255,255,0.34)]"
+                              style={{ width: totalWidth }}
+                            >
+                              <div
+                                className="sticky left-0 z-30 flex shrink-0 items-center bg-[#0f1114] px-3 text-[10px] uppercase tracking-[0.1em] text-[rgba(255,255,255,0.4)]"
+                                style={{ width: labelGutter }}
+                              >
+                                Tracks
+                              </div>
+                              <div
+                                className="relative shrink-0"
+                                style={{ width: tracksWidth }}
+                              >
+                                {timelineTicks.map((tick) => {
+                                  const left =
+                                    (tick.frame / Math.max(meta.durationInFrames, 1)) *
+                                    tracksWidth;
+                                  return (
+                                    <div
+                                      key={tick.frame}
+                                      className="absolute top-0 bottom-0 px-1.5 py-1"
+                                      style={{ left }}
+                                    >
+                                      <div className="h-full border-l border-[rgba(255,255,255,0.06)] pl-1">
+                                        {tick.label}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Lane rows */}
+                            <div
+                              className="relative"
+                              style={{ width: totalWidth, height: tracksHeight }}
+                            >
+                              {/* Vertical guide grid */}
+                              <div
+                                className="pointer-events-none absolute inset-y-0"
+                                style={{ left: labelGutter, width: tracksWidth }}
+                              >
+                                {timelineTicks.map((tick) => {
+                                  const left =
+                                    (tick.frame / Math.max(meta.durationInFrames, 1)) *
+                                    tracksWidth;
+                                  return (
+                                    <div
+                                      key={tick.frame}
+                                      className="absolute top-0 bottom-0 border-l border-[rgba(255,255,255,0.04)]"
+                                      style={{ left }}
+                                    />
+                                  );
+                                })}
+                              </div>
+
+                              {visibleLanes.length > 0 ? (
+                                visibleLanes.map((lane, index) => {
+                                  const top = rowGap + index * (rowHeight + rowGap);
+                                  const left =
+                                    (lane.startFrame / Math.max(meta.durationInFrames, 1)) *
+                                    tracksWidth;
+                                  const width = Math.max(
+                                    8,
+                                    (lane.durationInFrames /
+                                      Math.max(meta.durationInFrames, 1)) *
+                                      tracksWidth,
+                                  );
+                                  const selected = lane.id === selectedLaneId;
+                                  const active = activeLaneIds.has(lane.id);
+                                  return (
+                                    <div
+                                      key={lane.id}
+                                      className="absolute left-0 right-0 flex"
+                                      style={{ top, height: rowHeight }}
+                                    >
+                                      <div
+                                        className="sticky left-0 z-10 flex shrink-0 items-center gap-2 bg-[#0f1114] px-3 text-[11px] text-[rgba(255,255,255,0.78)]"
+                                        style={{ width: labelGutter }}
+                                      >
+                                        <span
+                                          className="h-2 w-2 shrink-0 rounded-full"
+                                          style={{ backgroundColor: laneColor(lane) }}
+                                        />
+                                        <span className="truncate">{lane.label}</span>
+                                      </div>
+                                      <div
+                                        className="relative shrink-0"
+                                        style={{ width: tracksWidth }}
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSelectLane(lane)}
+                                          className={`absolute top-0 bottom-0 rounded-md border text-left transition-colors ${
+                                            selected
+                                              ? 'border-white/30'
+                                              : 'border-transparent hover:border-white/15'
+                                          }`}
+                                          style={{
+                                            left,
+                                            width,
+                                            backgroundColor: laneColor(lane),
+                                            opacity: selected || active ? 0.96 : 0.72,
+                                          }}
+                                        >
+                                          <span className="block truncate px-2 py-1 text-[10px] font-medium text-[#0c0e12]">
+                                            {lane.label}
+                                          </span>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <div
+                                  className="absolute inset-0 flex items-center justify-center px-6 text-center text-[11px] text-[rgba(255,255,255,0.44)]"
+                                  style={{ paddingLeft: labelGutter + 16 }}
+                                >
+                                  Generate a scene-based Remotion composition to populate
+                                  timeline lanes.
+                                </div>
+                              )}
+
+                              {/* Playhead */}
+                              <div
+                                className="pointer-events-none absolute top-0 bottom-0 w-px bg-[#ff503b]"
+                                style={{ left: playheadX }}
+                              >
+                                <div className="absolute -top-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rounded-full border border-[#ff7a67] bg-[#ff503b]" />
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      </div>
+                        );
+                      })()}
                     </div>
                   </div>
+
                   <input
                     type="range"
                     min={0}
@@ -1879,17 +2102,18 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                     step={1}
                     value={Math.min(currentFrame, meta.durationInFrames)}
                     onChange={(event) => handleSeek(Number(event.target.value))}
-                    className="mt-3 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[rgba(255,255,255,0.12)] accent-[#ff503b]"
+                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[rgba(255,255,255,0.12)] accent-[#ff503b]"
                   />
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[10.5px] text-[rgba(255,255,255,0.46)]">
+                  <div className="flex flex-wrap items-center gap-2 text-[10.5px] text-[rgba(255,255,255,0.46)]">
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-[rgba(255,255,255,0.05)] px-2 py-1">
                       <TimerReset className="h-3.5 w-3.5" />
-                      Scrub to inspect timings
+                      Scroll horizontally to scrub long compositions
                     </span>
                     {selectedLaneId ? (
                       <span className="rounded-full bg-[rgba(255,255,255,0.05)] px-2 py-1">
                         Selected:{' '}
-                        {visibleLanes.find((lane) => lane.id === selectedLaneId)?.label ?? compositionName}
+                        {visibleLanes.find((lane) => lane.id === selectedLaneId)?.label ??
+                          compositionName}
                       </span>
                     ) : null}
                   </div>
