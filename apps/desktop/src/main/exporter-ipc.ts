@@ -1,4 +1,4 @@
-import { type ExporterFormat, exportArtifact } from '@open-codesign/exporters';
+import { type ExportProjectFile, type ExporterFormat, exportArtifact } from '@open-codesign/exporters';
 import { CodesignError, ERROR_CODES } from '@open-codesign/shared';
 import { BrowserWindow } from 'electron';
 import { dialog, ipcMain } from './electron-runtime';
@@ -17,6 +17,8 @@ export interface ExportRequest {
   htmlContent: string;
   defaultFilename?: string;
   exportId?: string;
+  projectFiles?: ExportProjectFile[];
+  compositionId?: string;
 }
 
 export interface ExportResponse {
@@ -45,6 +47,8 @@ export function parseRequest(raw: unknown): ExportRequest {
   const html = r['htmlContent'];
   const defaultFilename = r['defaultFilename'];
   const exportId = r['exportId'];
+  const projectFiles = r['projectFiles'];
+  const compositionId = r['compositionId'];
   if (
     format !== 'html' &&
     format !== 'mp4' &&
@@ -67,6 +71,20 @@ export function parseRequest(raw: unknown): ExportRequest {
   }
   if (typeof exportId === 'string' && exportId.length > 0) {
     out.exportId = exportId;
+  }
+  if (Array.isArray(projectFiles)) {
+    const normalized = projectFiles.flatMap((file) => {
+      if (typeof file !== 'object' || file === null) return [];
+      const record = file as Record<string, unknown>;
+      if (typeof record['path'] !== 'string' || typeof record['content'] !== 'string') return [];
+      return [{ path: record['path'], content: record['content'] }];
+    });
+    if (normalized.length > 0) {
+      out.projectFiles = normalized;
+    }
+  }
+  if (typeof compositionId === 'string' && compositionId.trim().length > 0) {
+    out.compositionId = compositionId.trim();
   }
   return out;
 }
@@ -102,9 +120,18 @@ export function registerExporterIpc(getWindow: () => BrowserWindow | null): void
       message: 'Save location selected',
     });
 
-    const result = await exportArtifact(req.format, req.htmlContent, picked.filePath, (update) => {
-      sendProgress(update);
-    });
+    const result = await exportArtifact(
+      req.format,
+      req.htmlContent,
+      picked.filePath,
+      (update) => {
+        sendProgress(update);
+      },
+      {
+        ...(req.projectFiles ? { projectFiles: req.projectFiles } : {}),
+        ...(req.compositionId ? { compositionId: req.compositionId } : {}),
+      },
+    );
 
     sendProgress({
       phase: 'done',

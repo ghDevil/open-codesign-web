@@ -60,6 +60,11 @@ export interface ExportInvokeResponse {
   bytes?: number;
 }
 
+export interface ExportProjectFile {
+  path: string;
+  content: string;
+}
+
 export interface ProviderRow {
   provider: string;
   maskedKey: string;
@@ -296,6 +301,8 @@ const api = {
     htmlContent: string;
     defaultFilename?: string;
     exportId?: string;
+    projectFiles?: ExportProjectFile[];
+    compositionId?: string;
   }) =>
     ipcRenderer.invoke('codesign:export', payload) as Promise<ExportInvokeResponse>,
   onExportProgress: (cb: (event: ExportProgressEvent) => void) => {
@@ -583,6 +590,13 @@ const api = {
         designId,
         path,
       }) as Promise<DesignFile | null>,
+    upsert: (designId: string, path: string, content: string) =>
+      ipcRenderer.invoke('files:v1:upsert', {
+        schemaVersion: 1,
+        designId,
+        path,
+        content,
+      }) as Promise<DesignFile>,
   },
   chat: {
     list: (designId: string) =>

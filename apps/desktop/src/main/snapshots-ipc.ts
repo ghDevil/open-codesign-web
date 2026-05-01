@@ -29,6 +29,7 @@ import {
   renameDesign,
   setDesignThumbnail,
   softDeleteDesign,
+  upsertDesignFile,
   updateDesignProjectInstructions,
   viewDesignFile,
 } from './snapshots-db';
@@ -399,6 +400,26 @@ export function registerSnapshotsIpc(db: Database): void {
     }
     return runDb('files:view', () =>
       viewDesignFile(db, r['designId'] as string, r['path'] as string),
+    );
+  });
+
+  ipcMain.handle('files:v1:upsert', (_e: unknown, raw: unknown): DesignFile => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new CodesignError('files:v1:upsert expects { designId, path, content }', 'IPC_BAD_INPUT');
+    }
+    const r = raw as Record<string, unknown>;
+    requireSchemaV1(r, 'files:v1:upsert');
+    if (typeof r['designId'] !== 'string' || r['designId'].trim().length === 0) {
+      throw new CodesignError('designId must be a non-empty string', 'IPC_BAD_INPUT');
+    }
+    if (typeof r['path'] !== 'string' || r['path'].trim().length === 0) {
+      throw new CodesignError('path must be a non-empty string', 'IPC_BAD_INPUT');
+    }
+    if (typeof r['content'] !== 'string') {
+      throw new CodesignError('content must be a string', 'IPC_BAD_INPUT');
+    }
+    return runDb('files:upsert', () =>
+      upsertDesignFile(db, r['designId'] as string, r['path'] as string, r['content'] as string),
     );
   });
 }

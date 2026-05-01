@@ -7,11 +7,12 @@ import {
   ERROR_CODES,
   extractAnimationCodeFromHtml,
   extractAnimationComponentName,
+  type AnimationProjectFile,
   parseAnimationCodeMeta,
   OPEN_CODESIGN_ANIMATION_COMPOSITION_ID,
   extractAnimationSpecFromHtml,
 } from '@open-codesign/shared';
-import type { ExportProgressCallback } from './index';
+import type { ExportProgressCallback, ExportProjectFile } from './index';
 
 const require = createRequire(import.meta.url);
 const RUNTIME_NODE_MODULES_DIR = path.join(process.cwd(), 'runtime', 'node_modules');
@@ -72,6 +73,43 @@ function resolveAnimationEntryPoint(): string {
       'root.tsx',
     );
   }
+}
+
+function normalizeProjectFilePath(raw: string): string {
+  const normalized = raw.replaceAll('\\', '/').replace(/^\.\/+/, '');
+  if (normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)) {
+    throw new Error(`Project file path must be relative: ${raw}`);
+  }
+  const parts = normalized.split('/').filter((segment) => segment.length > 0);
+  if (parts.length === 0 || parts.some((segment) => segment === '..')) {
+    throw new Error(`Invalid project file path: ${raw}`);
+  }
+  return parts.join('/');
+}
+
+async function writeProjectFilesToTempDir(
+  tempDir: string,
+  projectFiles: ExportProjectFile[] | AnimationProjectFile[],
+): Promise<void> {
+  for (const file of projectFiles) {
+    const relativePath = normalizeProjectFilePath(file.path);
+    const destination = path.join(tempDir, relativePath);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, file.content, 'utf8');
+  }
+}
+
+function resolveProjectEntryPoint(projectFiles: ExportProjectFile[] | AnimationProjectFile[]): string {
+  const paths = new Set(projectFiles.map((file) => normalizeProjectFilePath(file.path)));
+  const candidates = ['src/index.ts', 'src/index.tsx', 'src/index.js', 'src/index.jsx'];
+  const found = candidates.find((candidate) => paths.has(candidate));
+  if (!found) {
+    throw new CodesignError(
+      'MP4 export requires a Remotion project entry file such as src/index.ts.',
+      ERROR_CODES.EXPORTER_MP4_FAILED,
+    );
+  }
+  return found;
 }
 
 async function getRemotionBundler(): Promise<RemotionBundlerModule> {
@@ -246,14 +284,63 @@ async function renderDynamicAnimationCode(
   }
 }
 
+async function renderProjectBackedAnimation(
+  projectFiles: ExportProjectFile[] | AnimationProjectFile[],
+  compositionId: string,
+  destinationPath: string,
+  onProgress?: ExportProgressCallback,
+): Promise<{ bytes: number; path: string }> {
+  const runtimeRoot = path.join(process.cwd(), 'runtime');
+  const buildRoot = path.join(runtimeRoot, 'generated');
+  await mkdir(buildRoot, { recursive: true });
+  const tempDir = await mkdtemp(path.join(buildRoot, 'animation-project-'));
+  onProgress?.({
+    phase: 'preparing',
+    progress: 0.04,
+    message: 'Preparing Remotion project files',
+  });
+
+  try {
+    await writeProjectFilesToTempDir(tempDir, projectFiles);
+    const entryPoint = path.join(tempDir, resolveProjectEntryPoint(projectFiles));
+    const { bundle } = await getRemotionBundler();
+    onProgress?.({
+      phase: 'preparing',
+      progress: 0.08,
+      message: 'Bundling Remotion project',
+    });
+    const serveUrl = await bundle({ entryPoint });
+    return await renderFromBundle({
+      serveUrl,
+      compositionId,
+      destinationPath,
+      ...(onProgress ? { onProgress } : {}),
+    });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 export async function exportMp4(
   htmlContent: string,
   destinationPath: string,
   onProgress?: ExportProgressCallback,
+  projectFiles?: ExportProjectFile[],
+  compositionId?: string,
 ): Promise<{
   bytes: number;
   path: string;
 }> {
+  if (projectFiles && projectFiles.length > 0) {
+    if (!compositionId || compositionId.trim().length === 0) {
+      throw new CodesignError(
+        'MP4 export requires a compositionId when exporting a Remotion project.',
+        ERROR_CODES.EXPORTER_MP4_FAILED,
+      );
+    }
+    return renderProjectBackedAnimation(projectFiles, compositionId, destinationPath, onProgress);
+  }
+
   const animationCode = extractAnimationCodeFromHtml(htmlContent);
   const spec = extractAnimationSpecFromHtml(htmlContent);
   if (!spec && !animationCode) {

@@ -571,6 +571,8 @@ interface WebExportRequest {
   format: ExporterFormat;
   htmlContent: string;
   defaultFilename?: string;
+  projectFiles?: Array<{ path: string; content: string }>;
+  compositionId?: string;
 }
 
 const EXPORT_CONTENT_TYPES: Record<ExporterFormat, string> = {
@@ -590,6 +592,8 @@ function parseWebExportRequest(raw: unknown): WebExportRequest {
   const format = record['format'];
   const htmlContent = record['htmlContent'];
   const defaultFilename = record['defaultFilename'];
+  const projectFiles = record['projectFiles'];
+  const compositionId = record['compositionId'];
   if (
     format !== 'html' &&
     format !== 'mp4' &&
@@ -610,6 +614,18 @@ function parseWebExportRequest(raw: unknown): WebExportRequest {
   const out: WebExportRequest = { format, htmlContent };
   if (typeof defaultFilename === 'string' && defaultFilename.trim().length > 0) {
     out.defaultFilename = defaultFilename.trim();
+  }
+  if (Array.isArray(projectFiles)) {
+    const normalized = projectFiles.flatMap((file) => {
+      if (typeof file !== 'object' || file === null) return [];
+      const entry = file as Record<string, unknown>;
+      if (typeof entry['path'] !== 'string' || typeof entry['content'] !== 'string') return [];
+      return [{ path: entry['path'], content: entry['content'] }];
+    });
+    if (normalized.length > 0) out.projectFiles = normalized;
+  }
+  if (typeof compositionId === 'string' && compositionId.trim().length > 0) {
+    out.compositionId = compositionId.trim();
   }
   return out;
 }
@@ -1728,6 +1744,31 @@ app.get('/api/designs/:id/files/view', (req, res) => {
   }
 });
 
+app.put('/api/designs/:id/files', express.json({ limit: '5mb' }), (req, res) => {
+  try {
+    const designId = req.params.id;
+    const design = getDesign(getDb(), designId);
+    if (!design) return sendError(res, 404, 'Design not found', 'not_found');
+    const pathValue = req.body?.path;
+    const contentValue = req.body?.content;
+    if (typeof pathValue !== 'string' || pathValue.trim().length === 0) {
+      return sendError(res, 400, 'path is required', 'bad_request');
+    }
+    if (typeof contentValue !== 'string') {
+      return sendError(res, 400, 'content must be a string', 'bad_request');
+    }
+    const file = upsertDesignFile(
+      getDb(),
+      designId,
+      normalizeDesignFilePath(pathValue.trim()),
+      contentValue,
+    );
+    res.json(file);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 app.post('/api/designs/:id/workspace', upload.array('files'), async (req, res) => {
   try {
     const designIdParam = req.params.id;
@@ -1988,7 +2029,10 @@ app.post('/api/export', async (req, res) => {
     const filename = sanitizeExportFilename(request.defaultFilename, request.format);
     stagingDir = await mkdtemp(join(tmpdir(), 'codesign-export-'));
     const destinationPath = join(stagingDir, filename);
-    await exportArtifact(request.format, request.htmlContent, destinationPath);
+    await exportArtifact(request.format, request.htmlContent, destinationPath, undefined, {
+      ...(request.projectFiles ? { projectFiles: request.projectFiles } : {}),
+      ...(request.compositionId ? { compositionId: request.compositionId } : {}),
+    });
     const bytes = await readFile(destinationPath);
     res.setHeader('Content-Type', EXPORT_CONTENT_TYPES[request.format]);
     res.setHeader('Content-Length', String(bytes.byteLength));

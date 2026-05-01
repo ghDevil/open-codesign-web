@@ -258,6 +258,7 @@ interface CodesignState {
    *  only persisted to SQLite when the result arrives (done/error). */
   pendingToolCalls: ChatToolCallPayload[];
   sidebarCollapsed: boolean;
+  lastFsUpdate: { designId: string; path: string; at: number } | null;
 
   // Workstream D â€” comments
   comments: CommentRow[];
@@ -452,6 +453,7 @@ interface CodesignState {
   /** Replace the current preview source verbatim. Used by the host's tweak
    *  panel to write a re-serialized EDITMODE block back into the artifact. */
   setPreviewHtml: (content: string) => void;
+  noteAgentFileUpdate: (input: { designId: string; path: string }) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
 
   // Workstream D â€” comments
@@ -1455,7 +1457,7 @@ const KIND_GUIDANCE: Record<string, string> = {
   slideDeck:
     'Output a multi-slide deck (each slide is a section with id="slide-1", "slide-2", and so on). Use scroll-snap for navigation. Cover, agenda, content slides, then closing.',
   animation:
-    'Output a Remotion animation. Return a normal HTML artifact containing raw React/Remotion TSX code inside <script id="open-codesign-animation-code" type="text/plain">. The app compiles it live in the animation studio and can render it to MP4.',
+    'Output a Remotion project. Prefer real Remotion source files (`src/index.ts`, `src/Root.tsx`, and composition files under `src/compositions/`) so the animation studio can treat the project like an actual Remotion workspace.',
   template:
     'Honor the chosen template starter and extend it rather than overriding its structure unless asked.',
   other:
@@ -1494,20 +1496,35 @@ function intentToPromptHeader(intent: PromptContextExtras['intent']): string | n
     lines.push('');
     lines.push('CRITICAL animation output format:');
     lines.push(
-      'Produce the normal design HTML output for this app. In whatever delivery channel this environment uses (`<artifact>` output or the Codex text_editor / virtual-fs path), the resulting `index.html` must contain a `<script id="open-codesign-animation-code" type="text/plain">` block with the full Remotion component source.',
+      'If this environment exposes text_editor / virtual-fs tools, create and edit a real Remotion project: `src/index.ts`, `src/Root.tsx`, and one or more composition modules under `src/compositions/`. Only fall back to embedding a single component in `index.html` when file tools are unavailable.',
     );
     lines.push('');
     lines.push('Rules:');
-    lines.push('1. Output exactly one exported React component named `MyComposition`.');
-    lines.push('2. Imports are allowed from: `react`, `remotion`, `@remotion/shapes`, `@remotion/transitions`, `@remotion/transitions/fade`, `@remotion/transitions/slide`, `@remotion/transitions/wipe`, `@remotion/transitions/flip`, `@remotion/transitions/clock-wipe`, `@remotion/transitions/none`, and `@remotion/transitions/zoom-blur`. Do not import any other packages.');
-    lines.push('3. Include metadata comments first: `// @fps`, `// @duration`, `// @width`, `// @height`.');
-    lines.push('4. Do not wrap the component in `<Composition>` or call `registerRoot()`. The app handles the Remotion Player and MP4 render pipeline.');
-    lines.push('5. Do not apologize about output format or say the environment cannot do this. Just write the HTML so the resulting `index.html` contains the script block. Do not use markdown fences outside the script tag. Do not load Remotion from a CDN.');
+    lines.push('1. Prefer named exports for compositions and register them in `src/Root.tsx` using `<Composition />`.');
+    lines.push('2. `src/index.ts` should call `registerRoot(Root)` and `src/Root.tsx` should import compositions from local files.');
+    lines.push('3. Imports are allowed from: `react`, `remotion`, `@remotion/shapes`, `@remotion/transitions`, `@remotion/transitions/fade`, `@remotion/transitions/slide`, `@remotion/transitions/wipe`, `@remotion/transitions/flip`, `@remotion/transitions/clock-wipe`, `@remotion/transitions/none`, and `@remotion/transitions/zoom-blur`. Do not import any other packages.');
+    lines.push('4. Composition modules should include metadata comments first: `// @fps`, `// @duration`, `// @width`, `// @height`.');
+    lines.push('5. Do not load Remotion from a CDN and do not apologize about file layout. Just write the Remotion project files directly.');
     lines.push('6. Available APIs include the common Remotion runtime surface: AbsoluteFill, Audio, Video, OffthreadVideo, Html5Video, Html5Audio, AnimatedImage, Freeze, Loop, Sequence, Series, Img, IFrame, HtmlInCanvas, useCurrentFrame, useCurrentScale, useVideoConfig, interpolate, interpolateColors, spring, measureSpring, Easing, delayRender, continueRender, cancelRender, prefetch, staticFile, watchStaticFile, getInputProps, random. Shapes: Rect, Circle, Triangle, Star, Polygon, Ellipse, Heart, Pie plus their make* helpers. Transitions: TransitionSeries, linearTiming, springTiming, useTransitionProgress, fade, slide, wipe, flip, clockWipe, none, zoomBlur, zoomBlurShader.');
     lines.push('7. Prefer explicit scene structure. For multi-beat animations, break the composition into named `Sequence` blocks or `Series.Sequence` blocks so the studio timeline can lay out each beat as a separate lane.');
     lines.push('');
-    lines.push('Required `index.html` body shape:');
-    lines.push('<script id="open-codesign-animation-code" type="text/plain">');
+    lines.push('Preferred project file shape:');
+    lines.push('src/index.ts');
+    lines.push("import { registerRoot } from 'remotion';");
+    lines.push("import { Root } from './Root';");
+    lines.push('registerRoot(Root);');
+    lines.push('');
+    lines.push('src/Root.tsx');
+    lines.push("import { Composition } from 'remotion';");
+    lines.push("import { MyComposition } from './compositions/MyComposition';");
+    lines.push('');
+    lines.push('export const Root = () => (');
+    lines.push('  <>');
+    lines.push(`    <Composition id="MainComposition" component={MyComposition} durationInFrames={${durationInFrames}} fps={${fps}} width={${aw}} height={${ah}} defaultProps={{}} />`);
+    lines.push('  </>');
+    lines.push(');');
+    lines.push('');
+    lines.push('src/compositions/MyComposition.tsx');
     lines.push(`// @fps ${fps}`);
     lines.push(`// @duration ${durationInFrames}`);
     lines.push(`// @width ${aw}`);
@@ -1524,7 +1541,7 @@ function intentToPromptHeader(intent: PromptContextExtras['intent']): string | n
     lines.push('    </AbsoluteFill>');
     lines.push('  );');
     lines.push('};');
-    lines.push('</script>');
+    lines.push('Fallback only when file tools are unavailable: return a normal `index.html` artifact containing `<script id="open-codesign-animation-code" type="text/plain">` with the composition source.');
     lines.push('Make it feel like a real Remotion piece: strong composition, explicit scene timing, layered motion, polished typography, and named sequences for each major beat.');
   }
   return lines.join('\n');
@@ -1733,6 +1750,7 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
   chatMessages: [],
   chatLoaded: false,
   sidebarCollapsed: false,
+  lastFsUpdate: null,
 
   comments: [],
   commentsLoaded: false,
@@ -3075,6 +3093,16 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
       previewHtml: content,
       previewHtmlByDesign: pool.cache,
       recentDesignIds: pool.recent,
+    });
+  },
+
+  noteAgentFileUpdate({ designId, path }) {
+    set({
+      lastFsUpdate: {
+        designId,
+        path,
+        at: Date.now(),
+      },
     });
   },
 

@@ -96,13 +96,18 @@ function extractComponentBody(code: string): { source: string; componentName: st
 export function compileRemotionCode(
   code: string,
   assets: RemotionCompileAsset[] = [],
+  opts?: {
+    componentNameOverride?: string;
+  },
 ): CompilationResult {
   if (!code?.trim()) {
     return { Component: null, error: null };
   }
 
   try {
-    const { source, componentName } = extractComponentBody(code);
+    const parsed = extractComponentBody(code);
+    const source = parsed.source;
+    const componentName = opts?.componentNameOverride ?? parsed.componentName;
 
     const transpiled = Babel.transform(source, {
       presets: ['react', 'typescript'],

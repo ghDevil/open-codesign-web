@@ -1,6 +1,8 @@
 import {
+  buildRemotionProjectFilesFromCode,
   extractAnimationCodeFromHtml,
   extractAnimationTimelineFromCode,
+  type AnimationProjectFile,
   OPEN_CODESIGN_ANIMATION_CODE_SCRIPT_ID,
   parseAnimationCodeMeta,
   type AnimationTimelineLane,
@@ -38,6 +40,13 @@ import type { ExportFormat, ExportInvokeResponse, ExportProgressEvent } from '..
 import type { ReactElement } from 'react';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCompilation } from '../hooks/useCompilation';
+import {
+  assembleCompositionSource,
+  buildAnimationProjectFilesFromHtml,
+  buildAnimationProjectPlaceholderHtml,
+  extractProjectCompositions,
+  listProjectEditorFiles,
+} from '../lib/remotion-project';
 import { useCodesignStore } from '../store';
 
 const RemotionCodeEditor = lazy(() =>
@@ -103,6 +112,8 @@ const STARTER_TEMPLATE = `// @fps 30
 // @duration 150
 // @width 1920
 // @height 1080
+
+import { AbsoluteFill, Sequence, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 
 export const MyComposition = () => {
   const frame = useCurrentFrame();
@@ -336,10 +347,19 @@ interface AnimationStudioPanelProps {
 export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): ReactElement {
   const currentDesignId = useCodesignStore((s) => s.currentDesignId);
   const inputFiles = useCodesignStore((s) => s.inputFiles);
+  const isGenerating = useCodesignStore((s) => s.isGenerating);
+  const generatingDesignId = useCodesignStore((s) => s.generatingDesignId);
   const pickInputFiles = useCodesignStore((s) => s.pickInputFiles);
   const removeInputFile = useCodesignStore((s) => s.removeInputFile);
+  const setPreviewHtml = useCodesignStore((s) => s.setPreviewHtml);
+  const lastFsUpdate = useCodesignStore((s) => s.lastFsUpdate);
   const generatedCode = useMemo(() => extractAnimationCodeFromHtml(html), [html]);
   const [editedCode, setEditedCode] = useState<string | null>(null);
+  const [projectFiles, setProjectFiles] = useState<AnimationProjectFile[]>([]);
+  const [projectLoading, setProjectLoading] = useState(false);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [selectedCompositionId, setSelectedCompositionId] = useState<string | null>(null);
+  const [editorPath, setEditorPath] = useState<string>('src/compositions/MyComposition.tsx');
   const [leftTab, setLeftTab] = useState<LeftTab>('compositions');
   const [showCodePanel, setShowCodePanel] = useState(true);
   const [currentFrame, setCurrentFrame] = useState(0);
@@ -366,10 +386,96 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const exportHasLiveProgressRef = useRef(false);
   const quickSwitcherInputRef = useRef<HTMLInputElement | null>(null);
 
+  const loadProjectFiles = useCallback(
+    async (seedIfMissing: boolean) => {
+      if (!currentDesignId || !window.codesign?.files?.list || !window.codesign.files.view) {
+        const fallback = buildRemotionProjectFilesFromCode(generatedCode ?? STARTER_TEMPLATE);
+        setProjectFiles(fallback);
+        setProjectLoading(false);
+        setProjectError(null);
+        return;
+      }
+
+      setProjectLoading(true);
+      setProjectError(null);
+      try {
+        const listed = await window.codesign.files.list(currentDesignId);
+        const relevant = listed.filter(
+          (file) => file.path.startsWith('src/') || file.path === 'index.html' || file.path.startsWith('assets/'),
+        );
+        const hydrated = (
+          await Promise.all(
+            relevant.map(async (file) => {
+              const viewed = await window.codesign?.files?.view(currentDesignId, file.path);
+              return viewed ? { path: viewed.path, content: viewed.content } : null;
+            }),
+          )
+        ).filter((file): file is AnimationProjectFile => file !== null);
+
+        const hasRoot = hydrated.some((file) => file.path === 'src/Root.tsx');
+        const hasEntry = hydrated.some((file) => file.path === 'src/index.ts' || file.path === 'src/index.tsx');
+        const hasComposition = hydrated.some((file) => file.path.startsWith('src/compositions/'));
+
+        if ((!hasRoot || !hasEntry || !hasComposition) && seedIfMissing && window.codesign.files.upsert) {
+          const seeded = buildAnimationProjectFilesFromHtml(html, STARTER_TEMPLATE);
+          for (const file of seeded) {
+            await window.codesign.files.upsert(currentDesignId, file.path, file.content);
+          }
+          setPreviewHtml(buildAnimationProjectPlaceholderHtml(seeded[2]?.content ?? STARTER_TEMPLATE));
+          setProjectFiles(seeded);
+          setProjectLoading(false);
+          return;
+        }
+
+        if (hydrated.length === 0 && seedIfMissing && window.codesign.files.upsert) {
+          const seeded = buildRemotionProjectFilesFromCode(generatedCode ?? STARTER_TEMPLATE);
+          for (const file of seeded) {
+            await window.codesign.files.upsert(currentDesignId, file.path, file.content);
+          }
+          setPreviewHtml(buildAnimationProjectPlaceholderHtml(seeded[2]?.content ?? STARTER_TEMPLATE));
+          setProjectFiles(seeded);
+          setProjectLoading(false);
+          return;
+        }
+
+        setProjectFiles(hydrated);
+      } catch (error) {
+        setProjectError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setProjectLoading(false);
+      }
+    },
+    [currentDesignId, generatedCode, html, setPreviewHtml],
+  );
+
   useEffect(() => {
     setEditedCode(null);
     setCurrentFrame(0);
   }, [generatedCode]);
+
+  useEffect(() => {
+    void loadProjectFiles(true);
+  }, [loadProjectFiles]);
+
+  useEffect(() => {
+    if (!lastFsUpdate || lastFsUpdate.designId !== currentDesignId) return;
+    if (
+      lastFsUpdate.path !== 'index.html' &&
+      !lastFsUpdate.path.startsWith('src/') &&
+      !lastFsUpdate.path.startsWith('assets/')
+    ) {
+      return;
+    }
+    void loadProjectFiles(false);
+  }, [currentDesignId, lastFsUpdate, loadProjectFiles]);
+
+  useEffect(() => {
+    if (!isGenerating || generatingDesignId !== currentDesignId) return;
+    const timer = window.setInterval(() => {
+      void loadProjectFiles(false);
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [currentDesignId, generatingDesignId, isGenerating, loadProjectFiles]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -439,9 +545,45 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
     return () => window.clearInterval(timer);
   }, [exportDialog.open, exportDialog.status]);
 
-  const code = editedCode ?? generatedCode ?? '';
-  const showStarter = !code;
-  const codeForCompilation = showStarter ? STARTER_TEMPLATE : code;
+  const projectCompositions = useMemo(() => extractProjectCompositions(projectFiles), [projectFiles]);
+  const selectedComposition = useMemo(() => {
+    if (projectCompositions.length === 0) return null;
+    return (
+      projectCompositions.find((composition) => composition.id === selectedCompositionId) ??
+      projectCompositions[0] ??
+      null
+    );
+  }, [projectCompositions, selectedCompositionId]);
+  const editorFiles = useMemo(
+    () => listProjectEditorFiles(projectFiles, selectedComposition),
+    [projectFiles, selectedComposition],
+  );
+  const persistedEditorCode = useMemo(
+    () => projectFiles.find((file) => file.path === editorPath)?.content ?? '',
+    [editorPath, projectFiles],
+  );
+  const code = editedCode ?? persistedEditorCode;
+  const showStarter = projectFiles.length === 0 || editorFiles.length === 0;
+  const workingProjectFiles = useMemo(() => {
+    if (!editorPath || projectFiles.length === 0) return projectFiles;
+    return projectFiles.map((file) => (file.path === editorPath ? { ...file, content: code } : file));
+  }, [code, editorPath, projectFiles]);
+  const workingComposition = useMemo(() => {
+    if (!selectedComposition) return null;
+    return (
+      extractProjectCompositions(workingProjectFiles).find(
+        (composition) => composition.id === selectedComposition.id,
+      ) ?? selectedComposition
+    );
+  }, [selectedComposition, workingProjectFiles]);
+  const projectCompileSource = useMemo(
+    () =>
+      workingComposition
+        ? assembleCompositionSource(workingProjectFiles, workingComposition)
+        : null,
+    [workingComposition, workingProjectFiles],
+  );
+  const codeForCompilation = projectCompileSource ?? (showStarter ? STARTER_TEMPLATE : code);
   const studioAssets = useMemo<StudioAsset[]>(
     () =>
       inputFiles.map((file) => ({
@@ -466,13 +608,41 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
         ]),
     [studioAssets],
   );
-  const { Component, error } = useCompilation(codeForCompilation, compileAssets);
-  const meta = useMemo(() => parseAnimationCodeMeta(codeForCompilation), [codeForCompilation]);
-  const compositionName = useMemo(() => extractCompositionName(codeForCompilation), [codeForCompilation]);
-  const assetRefs = useMemo(() => extractAssetRefs(codeForCompilation), [codeForCompilation]);
+  const compilationOptions = useMemo(
+    () =>
+      projectCompileSource
+        ? {
+            componentNameOverride: '__OpenCodesignSelectedComposition',
+          }
+        : undefined,
+    [projectCompileSource],
+  );
+  const { Component, error } = useCompilation(codeForCompilation, compileAssets, compilationOptions);
+  const fallbackMeta = useMemo(() => parseAnimationCodeMeta(codeForCompilation), [codeForCompilation]);
+  const selectedCompositionCode = useMemo(() => {
+    if (!selectedComposition?.filePath) return code;
+    return workingProjectFiles.find((file) => file.path === selectedComposition.filePath)?.content ?? code;
+  }, [code, selectedComposition, workingProjectFiles]);
+  const meta = useMemo(
+    () =>
+      workingComposition
+        ? {
+            fps: workingComposition.fps,
+            durationInFrames: workingComposition.durationInFrames,
+            width: workingComposition.width,
+            height: workingComposition.height,
+          }
+        : fallbackMeta,
+    [fallbackMeta, workingComposition],
+  );
+  const compositionName = useMemo(
+    () => workingComposition?.id ?? extractCompositionName(codeForCompilation),
+    [codeForCompilation, workingComposition],
+  );
+  const assetRefs = useMemo(() => extractAssetRefs(selectedCompositionCode), [selectedCompositionCode]);
   const timelineLanes = useMemo(
-    () => extractAnimationTimelineFromCode(codeForCompilation),
-    [codeForCompilation],
+    () => extractAnimationTimelineFromCode(selectedCompositionCode),
+    [selectedCompositionCode],
   );
   const isPlaying = playerRef.current?.isPlaying() ?? false;
 
@@ -492,6 +662,25 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
         asset.kind.toLowerCase().includes(query),
     );
   }, [searchQuery, studioAssets]);
+
+  useEffect(() => {
+    if (!selectedComposition && projectCompositions.length === 0) {
+      setSelectedCompositionId(null);
+      return;
+    }
+    if (selectedComposition) return;
+    setSelectedCompositionId(projectCompositions[0]?.id ?? null);
+  }, [projectCompositions, selectedComposition]);
+
+  useEffect(() => {
+    if (selectedComposition?.filePath && selectedComposition.filePath !== editorPath) {
+      setEditorPath(selectedComposition.filePath);
+    }
+  }, [editorPath, selectedComposition]);
+
+  useEffect(() => {
+    setEditedCode(null);
+  }, [currentDesignId, editorPath]);
 
   useEffect(() => {
     if (visibleLanes.length === 0) {
@@ -535,9 +724,42 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
       ? 'docs'
       : 'default';
 
+  useEffect(() => {
+    if (
+      editedCode === null ||
+      !currentDesignId ||
+      !editorPath ||
+      !window.codesign?.files?.upsert
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void window.codesign?.files
+        ?.upsert(currentDesignId, editorPath, editedCode)
+        .then((saved) => {
+          setProjectFiles((current) => {
+            const next = current.filter((file) => file.path !== saved.path);
+            return [...next, { path: saved.path, content: saved.content }].sort((a, b) =>
+              a.path.localeCompare(b.path),
+            );
+          });
+          if (selectedComposition?.filePath === saved.path) {
+            setPreviewHtml(buildAnimationProjectPlaceholderHtml(saved.content));
+          }
+        })
+        .catch((error) => {
+          setProjectError(error instanceof Error ? error.message : String(error));
+        });
+    }, 320);
+    return () => window.clearTimeout(timer);
+  }, [currentDesignId, editedCode, editorPath, selectedComposition, setPreviewHtml]);
+
   const handleCodeChange = useCallback((next: string) => setEditedCode(next), []);
   const handleResetEdits = useCallback(() => setEditedCode(null), []);
-  const handleEditStarter = useCallback(() => setEditedCode(STARTER_TEMPLATE), []);
+  const handleEditStarter = useCallback(() => {
+    setEditedCode(STARTER_TEMPLATE);
+    if (!editorPath) setEditorPath('src/compositions/MyComposition.tsx');
+  }, [editorPath]);
   const handleSeek = useCallback((frame: number) => {
     playerRef.current?.seekTo(frame);
     setCurrentFrame(frame);
@@ -635,12 +857,18 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
 
     try {
       const exportHtml =
-        editedCode !== null || showStarter ? withAnimationCodeHtml(html, codeForCompilation) : html;
+        selectedComposition?.filePath && selectedCompositionCode
+          ? buildAnimationProjectPlaceholderHtml(selectedCompositionCode)
+          : editedCode !== null || showStarter
+            ? withAnimationCodeHtml(html, codeForCompilation)
+            : html;
       const result: ExportInvokeResponse = await window.codesign.export({
         format,
         htmlContent: exportHtml,
         defaultFilename,
         exportId,
+        ...(workingProjectFiles.length > 0 ? { projectFiles: workingProjectFiles } : {}),
+        ...(selectedComposition?.id ? { compositionId: selectedComposition.id } : {}),
       });
       if (result.status === 'cancelled') {
         exportHasLiveProgressRef.current = false;
@@ -674,7 +902,17 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
         message: 'Export failed.',
       }));
     }
-  }, [codeForCompilation, compositionName, editedCode, exportDialog.format, html, showStarter]);
+  }, [
+    codeForCompilation,
+    compositionName,
+    editedCode,
+    exportDialog.format,
+    html,
+    selectedComposition,
+    selectedCompositionCode,
+    showStarter,
+    workingProjectFiles,
+  ]);
   const handleShowExportedItem = useCallback(() => {
     if (!exportDialog.path || !/[\\/]/.test(exportDialog.path)) return;
     void window.codesign?.diagnostics?.showItemInFolder(exportDialog.path);
@@ -787,15 +1025,16 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   );
   const defaultQuickItems = useMemo<QuickSwitcherItem[]>(
     () => [
-      {
-        id: `composition:${compositionName}`,
-        label: compositionName,
-        subtitle: `${meta.width}x${meta.height} / ${meta.fps} FPS / ${formatDuration(meta.durationInFrames, meta.fps)}${currentDesignId ? ` / ${currentDesignId}` : ''}`,
+      ...projectCompositions.map((composition) => ({
+        id: `composition:${composition.id}`,
+        label: composition.id,
+        subtitle: `${composition.width}x${composition.height} / ${composition.fps} FPS / ${formatDuration(composition.durationInFrames, composition.fps)}${currentDesignId ? ` / ${currentDesignId}` : ''}`,
         onSelect: () => {
           setLeftTab('compositions');
+          setSelectedCompositionId(composition.id);
           handleSeek(0);
         },
-      },
+      })),
       ...studioAssets.map((asset) => ({
         id: `asset:${asset.id}`,
         label: asset.name,
@@ -807,14 +1046,10 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
       })),
     ],
     [
-      compositionName,
       handleCopyAssetRef,
       handleSeek,
-      meta.durationInFrames,
-      meta.fps,
-      meta.height,
-      meta.width,
       currentDesignId,
+      projectCompositions,
       studioAssets,
     ],
   );
@@ -1057,6 +1292,15 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
           <span>{formatDuration(meta.durationInFrames, meta.fps)}</span>
         </div>
       </div>
+      {projectLoading || projectError ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-[rgba(255,255,255,0.06)] bg-[#15191d] px-3 py-2 text-[11px]">
+          {projectLoading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[rgba(255,255,255,0.5)]" /> : null}
+          {projectError ? <AlertCircle className="h-3.5 w-3.5 text-red-400" /> : null}
+          <span className={projectError ? 'text-red-300' : 'text-[rgba(255,255,255,0.58)]'}>
+            {projectError ?? 'Syncing Remotion project files...'}
+          </span>
+        </div>
+      ) : null}
 
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-[248px] shrink-0 flex-col border-r border-[rgba(255,255,255,0.06)] bg-[#191c20]">
@@ -1088,6 +1332,8 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                   Duration {formatDuration(meta.durationInFrames, meta.fps)}
                 </div>
                 <div className="mt-2 flex items-center gap-2 text-[10.5px] text-[rgba(255,255,255,0.5)]">
+                  <span>{projectCompositions.length} composition{projectCompositions.length === 1 ? '' : 's'}</span>
+                  <span>/</span>
                   <span>{timelineLanes.length} timed lane{timelineLanes.length === 1 ? '' : 's'}</span>
                   <span>/</span>
                   <span>{assetRefs.length} asset{assetRefs.length === 1 ? '' : 's'}</span>
@@ -1105,21 +1351,37 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                 </label>
               </div>
               <div className="min-h-0 flex-1 overflow-auto px-2 pb-2">
-                <button
-                  type="button"
-                  onClick={() => handleSeek(0)}
-                  className="flex w-full items-start gap-2 rounded-md bg-[#2a2e34] px-3 py-2 text-left transition-colors hover:bg-[#323741]"
-                >
-                  <Boxes className="mt-0.5 h-4 w-4 shrink-0 text-[rgba(255,255,255,0.65)]" />
-                  <div className="min-w-0">
-                    <div className="truncate text-[12px] font-medium text-[rgba(255,255,255,0.95)]">
-                      {compositionName}
-                    </div>
-                    <div className="mt-0.5 text-[10.5px] text-[rgba(255,255,255,0.5)]">
-                      {meta.width}x{meta.height}, {meta.fps} FPS
-                    </div>
-                  </div>
-                </button>
+                <div className="space-y-1">
+                  {projectCompositions.map((composition) => {
+                    const active = composition.id === selectedComposition?.id;
+                    return (
+                      <button
+                        key={composition.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedCompositionId(composition.id);
+                          setCurrentFrame(0);
+                          handleSeek(0);
+                        }}
+                        className={`flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left transition-colors ${
+                          active
+                            ? 'border-[rgba(111,124,255,0.45)] bg-[rgba(111,124,255,0.14)]'
+                            : 'border-[rgba(255,255,255,0.05)] bg-[#14171a] hover:bg-[#1b2026]'
+                        }`}
+                      >
+                        <Boxes className="mt-0.5 h-4 w-4 shrink-0 text-[rgba(255,255,255,0.65)]" />
+                        <div className="min-w-0">
+                          <div className="truncate text-[12px] font-medium text-[rgba(255,255,255,0.95)]">
+                            {composition.id}
+                          </div>
+                          <div className="mt-0.5 text-[10.5px] text-[rgba(255,255,255,0.5)]">
+                            {composition.width}x{composition.height}, {composition.fps} FPS
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
                 <div className="mt-3 space-y-1">
                   {visibleLanes.length > 0 ? (
                     visibleLanes.map((lane) => {
@@ -1624,7 +1886,9 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                   <div className="flex h-8 shrink-0 items-center justify-between border-b border-[rgba(255,255,255,0.06)] px-3 text-[11px]">
                     <div className="flex items-center gap-2">
                       <Code2 className="h-3.5 w-3.5 text-[rgba(255,255,255,0.55)]" />
-                      <span className="font-medium text-[rgba(255,255,255,0.9)]">Composition.tsx</span>
+                      <span className="font-medium text-[rgba(255,255,255,0.9)]">
+                        {editorPath.split('/').slice(-2).join('/') || 'Project file'}
+                      </span>
                       {editedCode !== null ? (
                         <span className="rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-on-accent)]">
                           edited
@@ -1653,6 +1917,25 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                         </button>
                       ) : null}
                     </div>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-[rgba(255,255,255,0.06)] px-3 py-2">
+                    {editorFiles.map((filePath) => {
+                      const active = filePath === editorPath;
+                      return (
+                        <button
+                          key={filePath}
+                          type="button"
+                          onClick={() => setEditorPath(filePath)}
+                          className={`rounded px-2 py-1 text-[10.5px] transition-colors ${
+                            active
+                              ? 'bg-[rgba(124,156,255,0.16)] text-[#a8bbff]'
+                              : 'text-[rgba(255,255,255,0.56)] hover:bg-[rgba(255,255,255,0.06)] hover:text-[rgba(255,255,255,0.88)]'
+                          }`}
+                        >
+                          {filePath.replace(/^src\//, '')}
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {showStarter && editedCode === null ? (
@@ -1683,7 +1966,7 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
 
                   <div className="flex shrink-0 items-center justify-between gap-2 border-t border-[rgba(255,255,255,0.06)] bg-[#1c2025] px-3 py-2">
                     <span className="text-[10.5px] text-[rgba(255,255,255,0.4)]">
-                      Live compilation - @babel/standalone - Remotion APIs pre-injected
+                      Project-backed preview - live compiled from Remotion source files
                     </span>
                     {error ? (
                       <span className="inline-flex items-center gap-1 text-[10.5px] text-red-400">

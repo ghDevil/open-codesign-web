@@ -120,6 +120,21 @@ export interface AnimationTimelineLane {
   kind: 'sequence' | 'series';
 }
 
+export interface AnimationProjectFile {
+  path: string;
+  content: string;
+}
+
+export interface RegisteredAnimationComposition {
+  id: string;
+  componentName: string;
+  filePath: string | null;
+  durationInFrames: number;
+  width: number;
+  height: number;
+  fps: number;
+}
+
 function unwrapCodeFence(value: string): string {
   const trimmed = value.trim();
   const match = trimmed.match(CODE_FENCE_RE);
@@ -252,10 +267,126 @@ function getJsxAttribute(openingElement: unknown, name: string): unknown {
   return null;
 }
 
+function readIdentifierProp(openingElement: unknown, name: string): string | null {
+  const value = getJsxAttribute(openingElement, name);
+  const record = getRecord(value);
+  if (!record) return null;
+  if (record['type'] === 'Identifier' && typeof record['name'] === 'string') {
+    return record['name'];
+  }
+  return null;
+}
+
 function readNumericProp(openingElement: unknown, name: string, env: NumericEnv): number | null {
   const value = getJsxAttribute(openingElement, name);
   if (value === null || value === true) return null;
   return evaluateNumericExpression(value, env);
+}
+
+function normalizeProjectFilePath(raw: string): string {
+  return raw.replaceAll('\\', '/').replace(/^\.\/+/, '').replace(/\/+/g, '/');
+}
+
+function dirnamePosix(filePath: string): string {
+  const normalized = normalizeProjectFilePath(filePath);
+  const index = normalized.lastIndexOf('/');
+  return index === -1 ? '' : normalized.slice(0, index);
+}
+
+function joinPosix(...parts: string[]): string {
+  return normalizeProjectFilePath(parts.filter((part) => part.length > 0).join('/'));
+}
+
+function resolveRelativeImport(fromPath: string, source: string, files: Set<string>): string | null {
+  const baseDir = dirnamePosix(fromPath);
+  const baseParts = baseDir.length > 0 ? baseDir.split('/') : [];
+  for (const segment of source.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      baseParts.pop();
+      continue;
+    }
+    baseParts.push(segment);
+  }
+  const candidate = baseParts.join('/');
+  const possibilities = [
+    candidate,
+    `${candidate}.ts`,
+    `${candidate}.tsx`,
+    `${candidate}.js`,
+    `${candidate}.jsx`,
+    `${candidate}/index.ts`,
+    `${candidate}/index.tsx`,
+    `${candidate}/index.js`,
+    `${candidate}/index.jsx`,
+  ].map(normalizeProjectFilePath);
+  for (const possibility of possibilities) {
+    if (files.has(possibility)) return possibility;
+  }
+  return null;
+}
+
+function collectLocalImportBindings(
+  programNode: unknown,
+  fromPath: string,
+  files: Set<string>,
+): Map<string, string> {
+  const bindings = new Map<string, string>();
+  const body = getArray(getRecord(programNode)?.['body']);
+  for (const statement of body) {
+    const record = getRecord(statement);
+    if (!record || record['type'] !== 'ImportDeclaration') continue;
+    const sourceRecord = getRecord(record['source']);
+    const source =
+      sourceRecord?.['type'] === 'StringLiteral' && typeof sourceRecord['value'] === 'string'
+        ? sourceRecord['value']
+        : null;
+    if (!source || (!source.startsWith('./') && !source.startsWith('../'))) continue;
+    const resolved = resolveRelativeImport(fromPath, source, files);
+    if (!resolved) continue;
+    for (const specifier of getArray(record['specifiers'])) {
+      const specifierRecord = getRecord(specifier);
+      const local = getRecord(specifierRecord?.['local']);
+      if (local?.['type'] === 'Identifier' && typeof local['name'] === 'string') {
+        bindings.set(local['name'], resolved);
+      }
+    }
+  }
+  return bindings;
+}
+
+function collectRegisteredCompositionsFromAst(
+  node: unknown,
+  env: NumericEnv,
+  importBindings: Map<string, string>,
+  output: RegisteredAnimationComposition[],
+): void {
+  const record = getRecord(node);
+  if (!record) return;
+  if (record['type'] === 'JSXElement') {
+    const openingElement = getRecord(record['openingElement']);
+    const jsxName = getJsxName(openingElement?.['name']);
+    if (jsxName === 'Composition') {
+      const id = readStringProp(openingElement, 'id') ?? `composition-${output.length + 1}`;
+      const componentName = readIdentifierProp(openingElement, 'component') ?? 'MyComposition';
+      output.push({
+        id,
+        componentName,
+        filePath: importBindings.get(componentName) ?? null,
+        durationInFrames: readNumericProp(openingElement, 'durationInFrames', env) ?? 150,
+        width: readNumericProp(openingElement, 'width', env) ?? 1920,
+        height: readNumericProp(openingElement, 'height', env) ?? 1080,
+        fps: readNumericProp(openingElement, 'fps', env) ?? 30,
+      });
+    }
+  }
+  for (const value of Object.values(record)) {
+    if (Array.isArray(value)) {
+      for (const entry of value) collectRegisteredCompositionsFromAst(entry, env, importBindings, output);
+      continue;
+    }
+    if (getNodeType(value)) collectRegisteredCompositionsFromAst(value, env, importBindings, output);
+  }
 }
 
 function readStringProp(openingElement: unknown, name: string): string | null {
@@ -500,6 +631,103 @@ export function extractAnimationComponentName(code: string): string | null {
     if (match?.[1]) return match[1];
   }
   return null;
+}
+
+export function extractRegisteredCompositions(
+  files: AnimationProjectFile[],
+): RegisteredAnimationComposition[] {
+  const normalizedFiles = files.map((file) => ({
+    path: normalizeProjectFilePath(file.path),
+    content: file.content,
+  }));
+  const fileSet = new Set(normalizedFiles.map((file) => file.path));
+  const rootFile =
+    normalizedFiles.find((file) => file.path === 'src/Root.tsx') ??
+    normalizedFiles.find((file) => file.path.endsWith('/Root.tsx')) ??
+    null;
+  if (!rootFile) return [];
+  try {
+    const ast = parse(rootFile.content, {
+      sourceType: 'module',
+      plugins: ['jsx', 'typescript'],
+      errorRecovery: true,
+    });
+    const env: NumericEnv = {};
+    collectNumericBindings(ast.program, env);
+    const bindings = collectLocalImportBindings(ast.program, rootFile.path, fileSet);
+    const output: RegisteredAnimationComposition[] = [];
+    collectRegisteredCompositionsFromAst(ast.program, env, bindings, output);
+    return output;
+  } catch {
+    return [];
+  }
+}
+
+function ensureProjectReadyCode(code: string): string {
+  const trimmed = unwrapCodeFence(code);
+  if (/from\s+['"]remotion['"]/.test(trimmed)) return trimmed;
+  return [
+    "import { AbsoluteFill, Easing, Sequence, Series, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';",
+    '',
+    trimmed,
+  ].join('\n');
+}
+
+function defaultCompositionFilePath(componentName: string): string {
+  return joinPosix('src', 'compositions', `${componentName}.tsx`);
+}
+
+export function buildRemotionProjectFilesFromCode(
+  code: string,
+  opts?: {
+    compositionId?: string;
+    compositionFilePath?: string;
+  },
+): AnimationProjectFile[] {
+  const componentName = extractAnimationComponentName(code) ?? 'MyComposition';
+  const meta = parseAnimationCodeMeta(code);
+  const compositionId = opts?.compositionId?.trim() || componentName;
+  const compositionFilePath = normalizeProjectFilePath(
+    opts?.compositionFilePath?.trim() || defaultCompositionFilePath(componentName),
+  );
+  const compositionImportPath = (() => {
+    const withoutExt = compositionFilePath.replace(/\.[^.]+$/, '');
+    if (!withoutExt.startsWith('src/')) return `./${withoutExt}`;
+    return `./${withoutExt.slice(4)}`;
+  })();
+  return [
+    {
+      path: 'src/index.ts',
+      content: [
+        "import { registerRoot } from 'remotion';",
+        "import { Root } from './Root';",
+        '',
+        'registerRoot(Root);',
+        '',
+      ].join('\n'),
+    },
+    {
+      path: 'src/Root.tsx',
+      content: [
+        "import React from 'react';",
+        "import { Composition } from 'remotion';",
+        `import { ${componentName} } from '${compositionImportPath}';`,
+        '',
+        'export const Root: React.FC = () => {',
+        '  return (',
+        '    <>',
+        `      <Composition id="${compositionId}" component={${componentName}} durationInFrames={${meta.durationInFrames}} width={${meta.width}} height={${meta.height}} fps={${meta.fps}} defaultProps={{}} />`,
+        '    </>',
+        '  );',
+        '};',
+        '',
+      ].join('\n'),
+    },
+    {
+      path: compositionFilePath,
+      content: ensureProjectReadyCode(code),
+    },
+  ];
 }
 
 export function aspectRatioToDimensions(aspectRatio: AnimationAspectRatio): {

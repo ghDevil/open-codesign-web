@@ -3,8 +3,10 @@ import {
   OPEN_CODESIGN_ANIMATION_CODE_SCRIPT_ID,
   OPEN_CODESIGN_ANIMATION_SCRIPT_ID,
   aspectRatioToDimensions,
+  buildRemotionProjectFilesFromCode,
   extractAnimationCodeFromHtml,
   extractAnimationComponentName,
+  extractRegisteredCompositions,
   extractAnimationSpecFromHtml,
   extractAnimationTimelineFromCode,
   normalizeAnimationSpec,
@@ -177,6 +179,83 @@ export const MyComposition = () => {
         endFrame: 90,
         depth: 1,
         kind: 'sequence',
+      },
+    ]);
+  });
+
+  it('builds a project-backed Remotion file set from component code', () => {
+    const files = buildRemotionProjectFilesFromCode(
+      `// @fps 30
+// @duration 180
+// @width 1280
+// @height 720
+export const Promo = () => {
+  return <div>Hello</div>;
+};`,
+      { compositionId: 'promo-video' },
+    );
+
+    expect(files.map((file) => file.path)).toEqual([
+      'src/index.ts',
+      'src/Root.tsx',
+      'src/compositions/Promo.tsx',
+    ]);
+    expect(files[0]?.content).toContain('registerRoot');
+    expect(files[1]?.content).toContain('id="promo-video"');
+    expect(files[2]?.content).toContain("from 'remotion'");
+  });
+
+  it('extracts registered compositions from a Remotion root project', () => {
+    const files = [
+      {
+        path: 'src/index.ts',
+        content: "import { registerRoot } from 'remotion';\nimport { Root } from './Root';\nregisterRoot(Root);\n",
+      },
+      {
+        path: 'src/Root.tsx',
+        content: `import React from 'react';
+import { Composition } from 'remotion';
+import { IntroComp } from './compositions/IntroComp';
+import { OutroComp } from './compositions/OutroComp';
+
+const fps = 30;
+const introFrames = fps * 2;
+
+export const Root: React.FC = () => (
+  <>
+    <Composition id="intro" component={IntroComp} durationInFrames={introFrames} width={1920} height={1080} fps={fps} defaultProps={{}} />
+    <Composition id="outro" component={OutroComp} durationInFrames={90} width={1080} height={1080} fps={30} defaultProps={{}} />
+  </>
+);`,
+      },
+      {
+        path: 'src/compositions/IntroComp.tsx',
+        content: "export const IntroComp = () => null;\n",
+      },
+      {
+        path: 'src/compositions/OutroComp.tsx',
+        content: "export const OutroComp = () => null;\n",
+      },
+    ];
+
+    expect(extractRegisteredCompositions(files)).toEqual([
+      {
+        id: 'intro',
+        componentName: 'IntroComp',
+        filePath: 'src/compositions/IntroComp.tsx',
+        durationInFrames: 60,
+        width: 1920,
+        height: 1080,
+        fps: 30,
+      },
+      {
+        id: 'outro',
+        componentName: 'OutroComp',
+        filePath: 'src/compositions/OutroComp.tsx',
+        durationInFrames: 90,
+        width: 1080,
+        height: 1080,
+        fps: 30,
       },
     ]);
   });

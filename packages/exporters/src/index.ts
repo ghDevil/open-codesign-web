@@ -22,6 +22,11 @@ export interface ExportResult {
   path: string;
 }
 
+export interface ExportProjectFile {
+  path: string;
+  content: string;
+}
+
 export type ExportProgressPhase =
   | 'queued'
   | 'preparing'
@@ -67,13 +72,23 @@ export async function exportArtifact(
   htmlContent: string,
   destinationPath: string,
   onProgress?: ExportProgressCallback,
+  options?: {
+    projectFiles?: ExportProjectFile[];
+    compositionId?: string;
+  },
 ): Promise<ExportResult> {
   if (format === 'html') {
     return exportHtml(htmlContent, destinationPath);
   }
   if (format === 'mp4') {
     const mod = await import('./mp4');
-    return mod.exportMp4(htmlContent, destinationPath, onProgress);
+    return mod.exportMp4(
+      htmlContent,
+      destinationPath,
+      onProgress,
+      options?.projectFiles,
+      options?.compositionId,
+    );
   }
   if (format === 'pdf') {
     const mod = await import('./pdf');

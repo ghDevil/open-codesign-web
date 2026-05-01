@@ -131,17 +131,65 @@ timeline.forEach(({ delay, el, animation }) => {
 
 ### Remotion Integration (Animation Mode)
 
-This app now has a dedicated **Animation Studio** that compiles Remotion code live in the preview. When a design is of kind `animation`, produce the app's normal HTML output and make sure the resulting `index.html` embeds raw React/Remotion component code in a special `<script>` tag.
+This app now has a dedicated **Animation Studio** backed by a Remotion project model. When a design is of kind `animation`, prefer writing a real Remotion project (`src/index.ts`, `src/Root.tsx`, and composition files under `src/compositions/`) when file tools are available.
 
 **CRITICAL rules:**
 1. Do not load Remotion from a CDN.
 2. Do not render the animation in the HTML body yourself.
-3. Output one exported React component named `MyComposition`.
+3. Prefer named exported compositions registered in `src/Root.tsx` with `<Composition />`, plus `src/index.ts` that calls `registerRoot(Root)`.
 4. Imports may come from `react`, `remotion`, `@remotion/shapes`, `@remotion/transitions`, `@remotion/transitions/fade`, `@remotion/transitions/slide`, `@remotion/transitions/wipe`, `@remotion/transitions/flip`, `@remotion/transitions/clock-wipe`, `@remotion/transitions/none`, and `@remotion/transitions/zoom-blur`.
-5. Do not wrap the component in `<Composition>` or call `registerRoot()`.
-6. If the environment uses a Codex-style `text_editor` / virtual-fs workflow, write this structure directly into `index.html` rather than apologizing about format limitations.
+5. If file tools are available, write real project files instead of embedding everything in one HTML artifact.
+6. The `<script id="open-codesign-animation-code">` HTML shape is only a fallback for environments that cannot write project files.
 
-**Required `index.html` structure:**
+**Preferred project structure:**
+
+`src/index.ts`
+```ts
+import { registerRoot } from 'remotion';
+import { Root } from './Root';
+
+registerRoot(Root);
+```
+
+`src/Root.tsx`
+```tsx
+import { Composition } from 'remotion';
+import { MyComposition } from './compositions/MyComposition';
+
+export const Root = () => (
+  <>
+    <Composition id="MainComposition" component={MyComposition} durationInFrames={150} fps={30} width={1920} height={1080} defaultProps={{}} />
+  </>
+);
+```
+
+`src/compositions/MyComposition.tsx`
+```tsx
+// @fps 30
+// @duration 150
+// @width 1920
+// @height 1080
+
+import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
+
+export const MyComposition = () => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+
+  const opacity = interpolate(frame, [0, 20], [0, 1], { extrapolateRight: 'clamp' });
+  const scale = spring({ frame, fps, config: { damping: 14, stiffness: 180 } });
+
+  return (
+    <AbsoluteFill style={{ background: '#08111f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ opacity, transform: `scale(${scale})`, color: '#f6f7fb', fontSize: 96, fontWeight: 700, fontFamily: 'Inter, sans-serif' }}>
+        Hello World
+      </div>
+    </AbsoluteFill>
+  );
+};
+```
+
+**Fallback `index.html` structure when file tools are unavailable:**
 
 <!doctype html>
 <html>

@@ -21,8 +21,10 @@ import { detectProviderFromKey, generateImage } from '@open-codesign/providers';
 import {
   ApplyCommentPayload,
   BRAND,
+  buildRemotionProjectFilesFromCode,
   CancelGenerationPayloadV1,
   CodesignError,
+  extractAnimationCodeFromHtml,
   GeneratePayload,
   GeneratePayloadV1,
   type LocalInputFile,
@@ -97,6 +99,7 @@ import { resolveActiveApiKey, resolveApiKeyWithKeylessFallback } from './resolve
 import { withRun } from './runContext';
 import {
   getDesign,
+  listDesignFiles,
   normalizeDesignFilePath,
   pruneDiagnosticEvents,
   recordDiagnosticEvent,
@@ -395,7 +398,20 @@ export function createRuntimeTextEditorFs({
 }: CreateRuntimeTextEditorFsOptions) {
   const baseCtx = { designId: designId ?? '', generationId } as const;
   const fsMap = new Map<string, string>();
-  if (previousHtml && previousHtml.trim().length > 0) {
+  if (designId !== null && db !== null) {
+    for (const file of listDesignFiles(db, designId)) {
+      fsMap.set(file.path, file.content);
+    }
+  }
+  if (fsMap.size === 0 && previousHtml && previousHtml.trim().length > 0) {
+    const animationCode = extractAnimationCodeFromHtml(previousHtml);
+    if (animationCode) {
+      for (const file of buildRemotionProjectFilesFromCode(animationCode)) {
+        fsMap.set(file.path, file.content);
+      }
+    }
+  }
+  if (!fsMap.has('index.html') && previousHtml && previousHtml.trim().length > 0) {
     fsMap.set('index.html', previousHtml);
   }
   for (const [name, content] of FRAME_TEMPLATES) {

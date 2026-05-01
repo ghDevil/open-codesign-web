@@ -7,6 +7,12 @@ import {
 
 export type { CompilationResult };
 
-export function useCompilation(code: string, assets: RemotionCompileAsset[] = []): CompilationResult {
-  return useMemo(() => compileRemotionCode(code, assets), [assets, code]);
+export function useCompilation(
+  code: string,
+  assets: RemotionCompileAsset[] = [],
+  opts?: {
+    componentNameOverride?: string;
+  },
+): CompilationResult {
+  return useMemo(() => compileRemotionCode(code, assets, opts), [assets, code, opts]);
 }

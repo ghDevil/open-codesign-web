@@ -45,6 +45,7 @@ export function useAgentStream(): void {
   const appendChatMessage = useCodesignStore((s) => s.appendChatMessage);
   const setStreamingAssistantText = useCodesignStore((s) => s.setStreamingAssistantText);
   const setPreviewHtmlFromAgent = useCodesignStore((s) => s.setPreviewHtmlFromAgent);
+  const noteAgentFileUpdate = useCodesignStore((s) => s.noteAgentFileUpdate);
   const updateChatToolStatus = useCodesignStore((s) => s.updateChatToolStatus);
   const persistAgentRunSnapshot = useCodesignStore((s) => s.persistAgentRunSnapshot);
   const inFlight = useRef<InFlightTurn | null>(null);
@@ -218,6 +219,7 @@ export function useAgentStream(): void {
     };
 
     const handleFsUpdated = (event: AgentStreamEvent) => {
+      noteAgentFileUpdate({ designId: event.designId, path: event.path ?? '' });
       // Live mirror of the agent's text_editor mutations into the iframe.
       // We only react to index.html — other paths (frames/, skills/) are
       // read-only context and never become the rendered artifact.
@@ -352,6 +354,7 @@ export function useAgentStream(): void {
     appendChatMessage,
     setStreamingAssistantText,
     setPreviewHtmlFromAgent,
+    noteAgentFileUpdate,
     updateChatToolStatus,
     persistAgentRunSnapshot,
   ]);
