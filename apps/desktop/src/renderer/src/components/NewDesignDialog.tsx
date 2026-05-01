@@ -113,7 +113,7 @@ export function NewDesignDialog() {
     >
       <div
         role="document"
-        className="w-full max-w-[560px] rounded-[var(--radius-2xl)] bg-[var(--color-background)] border border-[var(--color-border)] shadow-[var(--shadow-elevated)] animate-[panel-in_160ms_ease-out] overflow-hidden"
+        className="flex max-h-[80vh] w-full max-w-[560px] flex-col overflow-hidden rounded-[var(--radius-2xl)] border border-[var(--color-border)] bg-[var(--color-background)] shadow-[var(--shadow-elevated)] animate-[panel-in_160ms_ease-out]"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-4">
@@ -133,7 +133,7 @@ export function NewDesignDialog() {
           </button>
         </div>
 
-        <div className="px-5 pb-5 space-y-4">
+        <div className="min-h-0 overflow-y-auto px-5 pb-5 space-y-4">
           <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
             <p className="m-0 text-[11px] font-medium uppercase tracking-[0.06em] text-[var(--color-text-muted)]">
               Start with context

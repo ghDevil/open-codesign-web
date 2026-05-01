@@ -1,6 +1,7 @@
 import {
   extractAnimationCodeFromHtml,
   extractAnimationTimelineFromCode,
+  OPEN_CODESIGN_ANIMATION_CODE_SCRIPT_ID,
   parseAnimationCodeMeta,
   type AnimationTimelineLane,
 } from '@open-codesign/shared';
@@ -8,12 +9,15 @@ import { Player, type ErrorFallback, type PlayerRef } from '@remotion/player';
 import {
   AlertCircle,
   Boxes,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clapperboard,
   Code2,
+  Download,
   ExternalLink,
   FolderOpen,
+  LoaderCircle,
   Maximize2,
   Pause,
   Play,
@@ -23,10 +27,11 @@ import {
   StepBack,
   StepForward,
   TimerReset,
+  X,
 } from 'lucide-react';
+import type { ExportFormat, ExportInvokeResponse, ExportProgressEvent } from '../../../preload/index';
 import type { ReactElement } from 'react';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useCodesignStore } from '../store';
 import { useCompilation } from '../hooks/useCompilation';
 
 const RemotionCodeEditor = lazy(() =>
@@ -42,6 +47,29 @@ interface MenuItem {
   hint?: string;
   onSelect: () => void | Promise<void>;
 }
+
+type ExportDialogStatus = 'idle' | 'choosing' | 'exporting' | 'success' | 'error' | 'cancelled';
+
+interface ExportDialogState {
+  open: boolean;
+  format: ExportFormat;
+  status: ExportDialogStatus;
+  progress: number;
+  message: string;
+  exportId: string | null;
+  path: string | undefined;
+  bytes: number | undefined;
+  error: string | undefined;
+}
+
+const EXPORT_OPTIONS: Array<{ format: ExportFormat; label: string; hint: string }> = [
+  { format: 'mp4', label: 'MP4 video', hint: 'Remotion render' },
+  { format: 'html', label: 'HTML snapshot', hint: 'Portable preview' },
+  { format: 'pdf', label: 'PDF', hint: 'Static handoff' },
+  { format: 'pptx', label: 'PowerPoint', hint: 'Slides' },
+  { format: 'zip', label: 'ZIP package', hint: 'Bundle assets' },
+  { format: 'markdown', label: 'Markdown', hint: 'Notes + structure' },
+];
 
 const STARTER_TEMPLATE = `// @fps 30
 // @duration 150
@@ -176,6 +204,29 @@ function formatDuration(frames: number, fps: number): string {
   return `${totalSeconds.toFixed(2)}s`;
 }
 
+function formatExportSize(bytes?: number): string {
+  if (!bytes || bytes <= 0) return '-';
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getExportExtension(format: ExportFormat): string {
+  return format === 'markdown' ? 'md' : format;
+}
+
+function slugifyFilenamePart(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized.length > 0 ? normalized : 'animation';
+}
+
+function makeExportId(): string {
+  return `animation-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function extractCompositionName(code: string): string {
   const fnMatch = code.match(/export\s+(?:const|function)\s+(\w+)/);
   return fnMatch?.[1] ?? 'MyComposition';
@@ -197,12 +248,42 @@ function extractAssetRefs(code: string): string[] {
   return [...found];
 }
 
+function withAnimationCodeHtml(baseHtml: string, code: string): string {
+  const scriptTag = `<script id="${OPEN_CODESIGN_ANIMATION_CODE_SCRIPT_ID}" type="text/plain">\n${code}\n</script>`;
+  if (!baseHtml.trim()) {
+    return [
+      '<!doctype html>',
+      '<html lang="en">',
+      '  <head>',
+      '    <meta charset="UTF-8" />',
+      '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+      '    <title>Animation Export</title>',
+      '  </head>',
+      '  <body>',
+      `    ${scriptTag}`,
+      '  </body>',
+      '</html>',
+    ].join('\n');
+  }
+
+  const existing = new RegExp(
+    `<script[^>]*id=["']${OPEN_CODESIGN_ANIMATION_CODE_SCRIPT_ID}["'][^>]*>[\\s\\S]*?<\\/script>`,
+    'i',
+  );
+  if (existing.test(baseHtml)) {
+    return baseHtml.replace(existing, scriptTag);
+  }
+  if (baseHtml.includes('</body>')) {
+    return baseHtml.replace('</body>', `  ${scriptTag}\n</body>`);
+  }
+  return `${baseHtml}\n${scriptTag}`;
+}
+
 interface AnimationStudioPanelProps {
   html: string;
 }
 
 export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): ReactElement {
-  const exportActive = useCodesignStore((s) => s.exportActive);
   const generatedCode = useMemo(() => extractAnimationCodeFromHtml(html), [html]);
   const [editedCode, setEditedCode] = useState<string | null>(null);
   const [leftTab, setLeftTab] = useState<LeftTab>('compositions');
@@ -212,8 +293,20 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLaneId, setSelectedLaneId] = useState<string | null>(null);
   const [activeMenu, setActiveMenu] = useState<StudioMenu>(null);
+  const [exportDialog, setExportDialog] = useState<ExportDialogState>({
+    open: false,
+    format: 'mp4',
+    status: 'idle',
+    progress: 0,
+    message: 'Choose an export format to render or package this animation.',
+    exportId: null,
+    path: undefined,
+    bytes: undefined,
+    error: undefined,
+  });
   const playerRef = useRef<PlayerRef>(null);
   const menuBarRef = useRef<HTMLDivElement | null>(null);
+  const exportHasLiveProgressRef = useRef(false);
 
   useEffect(() => {
     setEditedCode(null);
@@ -248,6 +341,45 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
       document.removeEventListener('keydown', onEscape);
     };
   }, [activeMenu]);
+
+  useEffect(() => {
+    if (!window.codesign?.onExportProgress) return;
+    return window.codesign.onExportProgress((event: ExportProgressEvent) => {
+      setExportDialog((current) => {
+        if (!current.open || !current.exportId || current.exportId !== event.exportId) {
+          return current;
+        }
+        exportHasLiveProgressRef.current = true;
+        return {
+          ...current,
+          status: event.phase === 'done' ? 'exporting' : 'exporting',
+          progress: Math.max(current.progress, Math.min(0.99, event.progress)),
+          message: event.message,
+        };
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!exportDialog.open) {
+      exportHasLiveProgressRef.current = false;
+      return;
+    }
+    if (exportDialog.status !== 'choosing' && exportDialog.status !== 'exporting') return;
+    const timer = window.setInterval(() => {
+      if (exportHasLiveProgressRef.current) return;
+      setExportDialog((current) => {
+        if (current.status !== 'choosing' && current.status !== 'exporting') return current;
+        const ceiling = current.status === 'choosing' ? 0.16 : 0.84;
+        const increment = current.status === 'choosing' ? 0.01 : 0.03;
+        return {
+          ...current,
+          progress: Math.min(ceiling, current.progress + increment),
+        };
+      });
+    }, 180);
+    return () => window.clearInterval(timer);
+  }, [exportDialog.open, exportDialog.status]);
 
   const code = editedCode ?? generatedCode ?? '';
   const showStarter = !code;
@@ -342,6 +474,112 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const handleFullscreen = useCallback(() => {
     playerRef.current?.requestFullscreen();
   }, []);
+  const closeExportDialog = useCallback(() => {
+    exportHasLiveProgressRef.current = false;
+    setExportDialog({
+      open: false,
+      format: 'mp4',
+      status: 'idle',
+      progress: 0,
+      message: 'Choose an export format to render or package this animation.',
+      exportId: null,
+      path: undefined,
+      bytes: undefined,
+      error: undefined,
+    });
+  }, []);
+  const openExportDialog = useCallback((format: ExportFormat) => {
+    exportHasLiveProgressRef.current = false;
+    setExportDialog({
+      open: true,
+      format,
+      status: 'idle',
+      progress: 0,
+      message: format === 'mp4' ? 'Render an MP4 using the Remotion export pipeline.' : 'Export the current animation artifact.',
+      exportId: null,
+      path: undefined,
+      bytes: undefined,
+      error: undefined,
+    });
+  }, []);
+  const handleRunExport = useCallback(async () => {
+    if (!window.codesign) {
+      setExportDialog((current) => ({
+        ...current,
+        status: 'error',
+        progress: 0,
+        error: 'Renderer bridge is unavailable.',
+        message: 'Export is unavailable because the renderer bridge is disconnected.',
+      }));
+      return;
+    }
+
+    const exportId = makeExportId();
+    const format = exportDialog.format;
+    const extension = getExportExtension(format);
+    const defaultFilename = `${slugifyFilenamePart(compositionName)}-${new Date()
+      .toISOString()
+      .replace(/[:.]/g, '-')
+      .slice(0, 19)}.${extension}`;
+
+    exportHasLiveProgressRef.current = false;
+    setExportDialog((current) => ({
+      ...current,
+      status: 'choosing',
+      progress: 0.04,
+      exportId,
+      path: undefined,
+      bytes: undefined,
+      error: undefined,
+      message: 'Choose where to save the export.',
+    }));
+
+    try {
+      const exportHtml =
+        editedCode !== null || showStarter ? withAnimationCodeHtml(html, codeForCompilation) : html;
+      const result: ExportInvokeResponse = await window.codesign.export({
+        format,
+        htmlContent: exportHtml,
+        defaultFilename,
+        exportId,
+      });
+      if (result.status === 'cancelled') {
+        exportHasLiveProgressRef.current = false;
+        setExportDialog((current) => ({
+          ...current,
+          status: 'cancelled',
+          progress: 0,
+          exportId: null,
+          message: 'Export cancelled.',
+        }));
+        return;
+      }
+
+      exportHasLiveProgressRef.current = false;
+      setExportDialog((current) => ({
+        ...current,
+        status: 'success',
+        progress: 1,
+        exportId: null,
+        path: result.path,
+        bytes: result.bytes,
+        message: 'Export finished successfully.',
+      }));
+    } catch (error) {
+      exportHasLiveProgressRef.current = false;
+      setExportDialog((current) => ({
+        ...current,
+        status: 'error',
+        exportId: null,
+        error: error instanceof Error ? error.message : String(error),
+        message: 'Export failed.',
+      }));
+    }
+  }, [codeForCompilation, compositionName, editedCode, exportDialog.format, html, showStarter]);
+  const handleShowExportedItem = useCallback(() => {
+    if (!exportDialog.path || !/[\\/]/.test(exportDialog.path)) return;
+    void window.codesign?.diagnostics?.showItemInFolder(exportDialog.path);
+  }, [exportDialog.path]);
   const openExternalDoc = useCallback((url: string) => {
     void window.codesign?.openExternal(url);
   }, []);
@@ -356,40 +594,40 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
         id: 'file-export-mp4',
         label: 'Export MP4 video',
         hint: 'Remotion render',
-        onSelect: () => exportActive('mp4'),
+        onSelect: () => openExportDialog('mp4'),
       },
       {
         id: 'file-export-html',
         label: 'Export HTML snapshot',
         hint: '.html',
-        onSelect: () => exportActive('html'),
+        onSelect: () => openExportDialog('html'),
       },
       {
         id: 'file-export-pdf',
         label: 'Export PDF',
         hint: '.pdf',
-        onSelect: () => exportActive('pdf'),
+        onSelect: () => openExportDialog('pdf'),
       },
       {
         id: 'file-export-pptx',
         label: 'Export PowerPoint',
         hint: '.pptx',
-        onSelect: () => exportActive('pptx'),
+        onSelect: () => openExportDialog('pptx'),
       },
       {
         id: 'file-export-zip',
         label: 'Export ZIP package',
         hint: '.zip',
-        onSelect: () => exportActive('zip'),
+        onSelect: () => openExportDialog('zip'),
       },
       {
         id: 'file-export-markdown',
         label: 'Export Markdown',
         hint: '.md',
-        onSelect: () => exportActive('markdown'),
+        onSelect: () => openExportDialog('markdown'),
       },
     ],
-    [exportActive],
+    [openExportDialog],
   );
 
   const viewMenuItems = useMemo<MenuItem[]>(
@@ -457,12 +695,17 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
       {
         id: 'render-mp4',
         label: 'Render MP4 video',
-        hint: 'Uses export pipeline',
-        onSelect: () => exportActive('mp4'),
+        hint: 'Open export dialog',
+        onSelect: () => openExportDialog('mp4'),
       },
     ],
-    [exportActive],
+    [openExportDialog],
   );
+  const canShowExportedItem =
+    exportDialog.status === 'success' &&
+    typeof exportDialog.path === 'string' &&
+    /[\\/]/.test(exportDialog.path) &&
+    Boolean(window.codesign?.diagnostics?.showItemInFolder);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#111315] text-[rgba(255,255,255,0.9)]">
@@ -510,7 +753,7 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                 </div>
                 <div className="mt-2 flex items-center gap-2 text-[10.5px] text-[rgba(255,255,255,0.5)]">
                   <span>{timelineLanes.length} timed lane{timelineLanes.length === 1 ? '' : 's'}</span>
-                  <span>•</span>
+                  <span>/</span>
                   <span>{assetRefs.length} asset{assetRefs.length === 1 ? '' : 's'}</span>
                 </div>
               </div>
@@ -573,7 +816,7 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                               ) : null}
                             </div>
                             <div className="mt-0.5 text-[10px] text-[rgba(255,255,255,0.46)]">
-                              {lane.kind === 'series' ? 'Series' : 'Sequence'} •{' '}
+                              {lane.kind === 'series' ? 'Series' : 'Sequence'} /{' '}
                               {formatFrameClock(lane.startFrame, meta.fps)} -{' '}
                               {formatFrameClock(lane.endFrame, meta.fps)}
                             </div>
@@ -652,6 +895,14 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                 <StudioMenuDropdown items={renderMenuItems} onSelect={runMenuAction} />
               ) : null}
             </div>
+            <button
+              type="button"
+              onClick={() => openExportDialog('mp4')}
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-[rgba(255,255,255,0.82)] transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-[rgba(255,255,255,0.96)]"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Render
+            </button>
             <button
               type="button"
               onClick={() => setShowCodePanel((value) => !value)}
@@ -1011,6 +1262,178 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
           </div>
         </section>
       </div>
+
+      {exportDialog.open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(6,8,12,0.72)] p-4 backdrop-blur-sm">
+          <div className="flex max-h-[80vh] w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#15181c] shadow-[0_32px_96px_rgba(0,0,0,0.45)]">
+            <div className="flex items-start justify-between gap-3 border-b border-[rgba(255,255,255,0.06)] px-5 py-4">
+              <div>
+                <div className="text-[15px] font-semibold text-[rgba(255,255,255,0.96)]">
+                  Export animation
+                </div>
+                <div className="mt-1 text-[12px] leading-[1.5] text-[rgba(255,255,255,0.55)]">
+                  Remotion renders the current composition separately from the live preview, so exports get their own visible workflow and status.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeExportDialog}
+                disabled={exportDialog.status === 'choosing' || exportDialog.status === 'exporting'}
+                className="rounded-md p-2 text-[rgba(255,255,255,0.46)] transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-[rgba(255,255,255,0.92)] disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Close export dialog"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="min-h-0 overflow-y-auto px-5 py-4">
+              <div className="grid grid-cols-2 gap-2">
+                {EXPORT_OPTIONS.map((option) => {
+                  const active = option.format === exportDialog.format;
+                  return (
+                    <button
+                      key={option.format}
+                      type="button"
+                      disabled={exportDialog.status === 'choosing' || exportDialog.status === 'exporting'}
+                      onClick={() =>
+                        setExportDialog((current) => ({
+                          ...current,
+                          format: option.format,
+                          status: current.status === 'success' || current.status === 'error' || current.status === 'cancelled' ? 'idle' : current.status,
+                          progress:
+                            current.status === 'success' || current.status === 'error' || current.status === 'cancelled'
+                              ? 0
+                              : current.progress,
+                          message:
+                            option.format === 'mp4'
+                              ? 'Render an MP4 using the Remotion export pipeline.'
+                              : 'Export the current animation artifact.',
+                          error: undefined,
+                          path: undefined,
+                          bytes: undefined,
+                        }))
+                      }
+                      className={`rounded-xl border px-3 py-3 text-left transition-colors ${
+                        active
+                          ? 'border-[rgba(124,156,255,0.44)] bg-[rgba(124,156,255,0.12)]'
+                          : 'border-[rgba(255,255,255,0.07)] bg-[#1a1e23] hover:bg-[#20252b]'
+                      } disabled:cursor-not-allowed disabled:opacity-60`}
+                    >
+                      <div className="text-[12px] font-medium text-[rgba(255,255,255,0.94)]">
+                        {option.label}
+                      </div>
+                      <div className="mt-1 text-[10.5px] text-[rgba(255,255,255,0.45)]">
+                        {option.hint}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 rounded-xl border border-[rgba(255,255,255,0.07)] bg-[#101316] px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2 text-[10.5px] text-[rgba(255,255,255,0.48)]">
+                  <span>{compositionName}</span>
+                  <span>/</span>
+                  <span>{meta.width}x{meta.height}</span>
+                  <span>/</span>
+                  <span>{meta.fps} FPS</span>
+                  <span>/</span>
+                  <span>{formatDuration(meta.durationInFrames, meta.fps)}</span>
+                </div>
+                <div className="mt-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[12px] font-medium text-[rgba(255,255,255,0.92)]">
+                      {exportDialog.message}
+                    </div>
+                    <div className="text-[11px] text-[rgba(255,255,255,0.44)]">
+                      {Math.round(exportDialog.progress * 100)}%
+                    </div>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-[rgba(255,255,255,0.08)]">
+                    <div
+                      className={`h-full rounded-full transition-[width,background-color] duration-200 ${
+                        exportDialog.status === 'error'
+                          ? 'bg-[#ef4444]'
+                          : exportDialog.status === 'success'
+                            ? 'bg-[#22c55e]'
+                            : 'bg-[#7c9cff]'
+                      }`}
+                      style={{ width: `${Math.max(exportDialog.progress * 100, exportDialog.status === 'idle' ? 0 : 6)}%` }}
+                    />
+                  </div>
+                </div>
+                {exportDialog.status === 'choosing' || exportDialog.status === 'exporting' ? (
+                  <div className="mt-3 inline-flex items-center gap-2 text-[11px] text-[rgba(255,255,255,0.56)]">
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    {exportDialog.format === 'mp4'
+                      ? 'Rendering with Remotion and encoding the video output.'
+                      : 'Preparing the export package.'}
+                  </div>
+                ) : null}
+                {exportDialog.status === 'success' ? (
+                  <div className="mt-3 rounded-lg border border-[rgba(34,197,94,0.25)] bg-[rgba(34,197,94,0.08)] px-3 py-2 text-[11px] text-[rgba(220,252,231,0.92)]">
+                    Saved {exportDialog.path ?? 'export'} ({formatExportSize(exportDialog.bytes)}).
+                  </div>
+                ) : null}
+                {exportDialog.status === 'cancelled' ? (
+                  <div className="mt-3 rounded-lg border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[11px] text-[rgba(255,255,255,0.72)]">
+                    Export was cancelled before rendering started.
+                  </div>
+                ) : null}
+                {exportDialog.status === 'error' && exportDialog.error ? (
+                  <div className="mt-3 rounded-lg border border-[rgba(239,68,68,0.24)] bg-[rgba(239,68,68,0.08)] px-3 py-2 text-[11px] leading-[1.5] text-[rgba(254,226,226,0.94)]">
+                    {exportDialog.error}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 border-t border-[rgba(255,255,255,0.06)] px-5 py-4">
+              <div className="text-[11px] text-[rgba(255,255,255,0.42)]">
+                {exportDialog.format === 'mp4'
+                  ? 'MP4 exports use the Remotion render pipeline behind the scenes.'
+                  : 'Non-video exports package the current artifact for handoff.'}
+              </div>
+              <div className="flex items-center gap-2">
+                {canShowExportedItem ? (
+                  <button
+                    type="button"
+                    onClick={handleShowExportedItem}
+                    className="rounded-md border border-[rgba(255,255,255,0.08)] px-3 py-2 text-[12px] text-[rgba(255,255,255,0.86)] transition-colors hover:bg-[rgba(255,255,255,0.05)]"
+                  >
+                    Show in folder
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={closeExportDialog}
+                  disabled={exportDialog.status === 'choosing' || exportDialog.status === 'exporting'}
+                  className="rounded-md border border-[rgba(255,255,255,0.08)] px-3 py-2 text-[12px] text-[rgba(255,255,255,0.86)] transition-colors hover:bg-[rgba(255,255,255,0.05)] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {exportDialog.status === 'success' || exportDialog.status === 'cancelled' ? 'Done' : 'Close'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRunExport()}
+                  disabled={exportDialog.status === 'choosing' || exportDialog.status === 'exporting'}
+                  className="inline-flex items-center gap-2 rounded-md bg-[#7c9cff] px-3 py-2 text-[12px] font-medium text-[#0d1220] transition-opacity hover:opacity-92 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {exportDialog.status === 'choosing' || exportDialog.status === 'exporting' ? (
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                  ) : exportDialog.status === 'success' ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                  {exportDialog.status === 'success'
+                    ? 'Export again'
+                    : `Export ${EXPORT_OPTIONS.find((option) => option.format === exportDialog.format)?.label ?? exportDialog.format.toUpperCase()}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

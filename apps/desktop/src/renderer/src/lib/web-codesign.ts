@@ -486,6 +486,7 @@ function installWebCodesign(): void {
       downloadBlob(downloadedFilename, blob);
       return { status: 'saved', path: downloadedFilename, bytes: blob.size };
     },
+    onExportProgress: (() => () => {}) as unknown as CodesignApi['onExportProgress'],
     locale: {
       getSystem: async () => {
         const result = await apiJson<{ locale?: string }>('/api/locale');

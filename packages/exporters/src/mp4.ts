@@ -11,6 +11,7 @@ import {
   OPEN_CODESIGN_ANIMATION_COMPOSITION_ID,
   extractAnimationSpecFromHtml,
 } from '@open-codesign/shared';
+import type { ExportProgressCallback } from './index';
 
 const require = createRequire(import.meta.url);
 const RUNTIME_NODE_MODULES_DIR = path.join(process.cwd(), 'runtime', 'node_modules');
@@ -128,15 +129,27 @@ async function renderFromBundle(params: {
   compositionId: string;
   destinationPath: string;
   inputProps?: Record<string, unknown>;
+  onProgress?: ExportProgressCallback;
 }): Promise<{ bytes: number; path: string }> {
   const { renderMedia, selectComposition } = await getRemotionRenderer();
   const browserExecutable = findBrowserExecutable();
+  params.onProgress?.({
+    phase: 'preparing',
+    progress: 0.12,
+    message: 'Loading composition metadata',
+  });
   const composition = await selectComposition({
     serveUrl: params.serveUrl,
     id: params.compositionId,
     ...(params.inputProps ? { inputProps: params.inputProps } : {}),
     ...(browserExecutable ? { browserExecutable } : {}),
     logLevel: 'error',
+  });
+  params.onProgress?.({
+    phase: 'preparing',
+    progress: 0.18,
+    message: 'Composition ready',
+    totalFrames: composition.durationInFrames,
   });
   await renderMedia({
     composition,
@@ -147,6 +160,21 @@ async function renderFromBundle(params: {
     imageFormat: 'jpeg',
     ...(browserExecutable ? { browserExecutable } : {}),
     logLevel: 'error',
+    onProgress: (progress) => {
+      const phase = progress.stitchStage === 'muxing' ? 'finalizing' : 'rendering';
+      const clamped = Math.min(0.97, 0.18 + progress.progress * 0.77);
+      params.onProgress?.({
+        phase,
+        progress: clamped,
+        message:
+          phase === 'finalizing'
+            ? 'Encoding and muxing video'
+            : `Rendering frames ${progress.renderedFrames}/${composition.durationInFrames}`,
+        renderedFrames: progress.renderedFrames,
+        encodedFrames: progress.encodedFrames,
+        totalFrames: composition.durationInFrames,
+      });
+    },
   });
   const details = await stat(params.destinationPath);
   return { bytes: details.size, path: params.destinationPath };
@@ -155,6 +183,7 @@ async function renderFromBundle(params: {
 async function renderDynamicAnimationCode(
   code: string,
   destinationPath: string,
+  onProgress?: ExportProgressCallback,
 ): Promise<{ bytes: number; path: string }> {
   const componentName = extractAnimationComponentName(code);
   if (!componentName) {
@@ -170,6 +199,12 @@ async function renderDynamicAnimationCode(
   const buildRoot = path.join(runtimeRoot, 'generated');
   await mkdir(buildRoot, { recursive: true });
   const tempDir = await mkdtemp(path.join(buildRoot, 'animation-'));
+  onProgress?.({
+    phase: 'preparing',
+    progress: 0.04,
+    message: 'Preparing Remotion export runtime',
+    totalFrames: meta.durationInFrames,
+  });
 
   try {
     const compositionPath = path.join(tempDir, 'composition.tsx');
@@ -193,18 +228,29 @@ async function renderDynamicAnimationCode(
     );
 
     const { bundle } = await getRemotionBundler();
+    onProgress?.({
+      phase: 'preparing',
+      progress: 0.08,
+      message: 'Bundling Remotion composition',
+      totalFrames: meta.durationInFrames,
+    });
     const serveUrl = await bundle({ entryPoint: rootPath });
     return await renderFromBundle({
       serveUrl,
       compositionId: DYNAMIC_ANIMATION_COMPOSITION_ID,
       destinationPath,
+      ...(onProgress ? { onProgress } : {}),
     });
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
 }
 
-export async function exportMp4(htmlContent: string, destinationPath: string): Promise<{
+export async function exportMp4(
+  htmlContent: string,
+  destinationPath: string,
+  onProgress?: ExportProgressCallback,
+): Promise<{
   bytes: number;
   path: string;
 }> {
@@ -219,15 +265,21 @@ export async function exportMp4(htmlContent: string, destinationPath: string): P
 
   try {
     if (animationCode) {
-      return await renderDynamicAnimationCode(animationCode, destinationPath);
+      return await renderDynamicAnimationCode(animationCode, destinationPath, onProgress);
     }
 
     const serveUrl = await getAnimationBundle();
+    onProgress?.({
+      phase: 'preparing',
+      progress: 0.08,
+      message: 'Loading default animation bundle',
+    });
     return await renderFromBundle({
       serveUrl,
       compositionId: OPEN_CODESIGN_ANIMATION_COMPOSITION_ID,
       inputProps: { spec },
       destinationPath,
+      ...(onProgress ? { onProgress } : {}),
     });
   } catch (error) {
     if (error instanceof CodesignError) throw error;

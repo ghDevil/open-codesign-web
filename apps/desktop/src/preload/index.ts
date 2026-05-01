@@ -34,11 +34,13 @@ import type {
   ModelsListResponse,
   TestEndpointResponse,
 } from '../main/connection-ipc';
+import type { ExportProgressEvent } from '../main/exporter-ipc';
 import type { ImageGenerationSettingsView } from '../main/image-generation-settings';
 
 export type { ConnectionTestError, ConnectionTestResult, ModelsListResponse, TestEndpointResponse };
 export type { ClaudeCodeUserType, ExternalConfigsDetection };
 export type { CodexOAuthStatus };
+export type { ExportProgressEvent };
 export type { ImageGenerationSettingsView };
 
 export interface ValidateKeyResult {
@@ -289,8 +291,20 @@ const api = {
         items: DesignSystemLibraryItem[];
       }>,
   },
-  export: (payload: { format: ExportFormat; htmlContent: string; defaultFilename?: string }) =>
+  export: (payload: {
+    format: ExportFormat;
+    htmlContent: string;
+    defaultFilename?: string;
+    exportId?: string;
+  }) =>
     ipcRenderer.invoke('codesign:export', payload) as Promise<ExportInvokeResponse>,
+  onExportProgress: (cb: (event: ExportProgressEvent) => void) => {
+    const listener = (_e: unknown, event: ExportProgressEvent) => cb(event);
+    ipcRenderer.on('codesign:export-progress', listener);
+    return () => {
+      ipcRenderer.removeListener('codesign:export-progress', listener);
+    };
+  },
   locale: {
     getSystem: () => ipcRenderer.invoke('locale:get-system') as Promise<string>,
     getCurrent: () => ipcRenderer.invoke('locale:get-current') as Promise<string>,

@@ -22,6 +22,25 @@ export interface ExportResult {
   path: string;
 }
 
+export type ExportProgressPhase =
+  | 'queued'
+  | 'preparing'
+  | 'rendering'
+  | 'encoding'
+  | 'finalizing'
+  | 'done';
+
+export interface ExportProgressUpdate {
+  phase: ExportProgressPhase;
+  progress: number;
+  message: string;
+  renderedFrames?: number;
+  encodedFrames?: number;
+  totalFrames?: number;
+}
+
+export type ExportProgressCallback = (update: ExportProgressUpdate) => void;
+
 export function isExporterReady(_format: ExporterFormat): boolean {
   return true;
 }
@@ -47,13 +66,14 @@ export async function exportArtifact(
   format: ExporterFormat,
   htmlContent: string,
   destinationPath: string,
+  onProgress?: ExportProgressCallback,
 ): Promise<ExportResult> {
   if (format === 'html') {
     return exportHtml(htmlContent, destinationPath);
   }
   if (format === 'mp4') {
     const mod = await import('./mp4');
-    return mod.exportMp4(htmlContent, destinationPath);
+    return mod.exportMp4(htmlContent, destinationPath, onProgress);
   }
   if (format === 'pdf') {
     const mod = await import('./pdf');

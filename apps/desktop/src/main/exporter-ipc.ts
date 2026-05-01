@@ -1,6 +1,6 @@
 import { type ExporterFormat, exportArtifact } from '@open-codesign/exporters';
 import { CodesignError, ERROR_CODES } from '@open-codesign/shared';
-import type { BrowserWindow } from 'electron';
+import { BrowserWindow } from 'electron';
 import { dialog, ipcMain } from './electron-runtime';
 
 const FORMAT_FILTERS: Record<ExporterFormat, Electron.FileFilter[]> = {
@@ -16,12 +16,24 @@ export interface ExportRequest {
   format: ExporterFormat;
   htmlContent: string;
   defaultFilename?: string;
+  exportId?: string;
 }
 
 export interface ExportResponse {
   status: 'saved' | 'cancelled';
   path?: string;
   bytes?: number;
+}
+
+export interface ExportProgressEvent {
+  exportId: string;
+  format: ExporterFormat;
+  phase: 'queued' | 'preparing' | 'rendering' | 'encoding' | 'finalizing' | 'done';
+  progress: number;
+  message: string;
+  renderedFrames?: number;
+  encodedFrames?: number;
+  totalFrames?: number;
 }
 
 export function parseRequest(raw: unknown): ExportRequest {
@@ -32,6 +44,7 @@ export function parseRequest(raw: unknown): ExportRequest {
   const format = r['format'];
   const html = r['htmlContent'];
   const defaultFilename = r['defaultFilename'];
+  const exportId = r['exportId'];
   if (
     format !== 'html' &&
     format !== 'mp4' &&
@@ -52,13 +65,26 @@ export function parseRequest(raw: unknown): ExportRequest {
   if (typeof defaultFilename === 'string' && defaultFilename.length > 0) {
     out.defaultFilename = defaultFilename;
   }
+  if (typeof exportId === 'string' && exportId.length > 0) {
+    out.exportId = exportId;
+  }
   return out;
 }
 
 export function registerExporterIpc(getWindow: () => BrowserWindow | null): void {
-  ipcMain.handle('codesign:export', async (_evt, raw: unknown): Promise<ExportResponse> => {
+  ipcMain.handle('codesign:export', async (evt, raw: unknown): Promise<ExportResponse> => {
     const req = parseRequest(raw);
     const win = getWindow();
+    const sendProgress = (event: Omit<ExportProgressEvent, 'exportId' | 'format'>): void => {
+      if (!req.exportId) return;
+      const target = win ?? BrowserWindow.fromWebContents(evt.sender);
+      target?.webContents.send('codesign:export-progress', {
+        exportId: req.exportId,
+        format: req.format,
+        ...event,
+      } satisfies ExportProgressEvent);
+    };
+
     const defaultExt = req.format === 'markdown' ? 'md' : req.format;
     const opts: Electron.SaveDialogOptions = {
       title: `Export design as ${req.format.toUpperCase()}`,
@@ -70,9 +96,21 @@ export function registerExporterIpc(getWindow: () => BrowserWindow | null): void
       return { status: 'cancelled' };
     }
 
-    // All four formats ship in tier 1; the heavy deps load lazily inside
-    // exportArtifact. Errors propagate to the renderer as toasts (PRINCIPLES §10).
-    const result = await exportArtifact(req.format, req.htmlContent, picked.filePath);
+    sendProgress({
+      phase: 'queued',
+      progress: 0.02,
+      message: 'Save location selected',
+    });
+
+    const result = await exportArtifact(req.format, req.htmlContent, picked.filePath, (update) => {
+      sendProgress(update);
+    });
+
+    sendProgress({
+      phase: 'done',
+      progress: 1,
+      message: 'Export complete',
+    });
     return { status: 'saved', path: result.path, bytes: result.bytes };
   });
 }
