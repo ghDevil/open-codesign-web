@@ -316,7 +316,13 @@ async function parseSseResponse(
         if (!line.startsWith('data:')) continue;
         const raw = line.slice(5).trim();
         if (!raw) continue;
-        const event = JSON.parse(raw) as Record<string, unknown>;
+        let event: Record<string, unknown>;
+        try {
+          event = JSON.parse(raw) as Record<string, unknown>;
+        } catch (parseError) {
+          console.error('Failed to parse streaming event JSON:', parseError, 'raw:', raw);
+          continue;
+        }
         if (event['type'] === 'done') {
           return event['result'];
         }
@@ -470,12 +476,12 @@ function installWebCodesign(): void {
           method: 'DELETE',
         }) as Promise<{ activeId: string | null; items: DesignSystemLibraryItem[] }>,
     },
-    export: async ({ format, htmlContent, defaultFilename, projectFiles, compositionId }) => {
+    export: async ({ format, htmlContent, defaultFilename }) => {
       const filename = defaultFilename ?? `open-codesign.${format === 'markdown' ? 'md' : format}`;
       const response = await fetch('/api/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ format, htmlContent, defaultFilename: filename, projectFiles, compositionId }),
+        body: JSON.stringify({ format, htmlContent, defaultFilename: filename }),
       });
       if (!response.ok) {
         throw new Error(await readError(response));
@@ -486,7 +492,6 @@ function installWebCodesign(): void {
       downloadBlob(downloadedFilename, blob);
       return { status: 'saved', path: downloadedFilename, bytes: blob.size };
     },
-    onExportProgress: (() => () => {}) as unknown as CodesignApi['onExportProgress'],
     locale: {
       getSystem: async () => {
         const result = await apiJson<{ locale?: string }>('/api/locale');
@@ -749,11 +754,6 @@ function installWebCodesign(): void {
         apiJson<DesignFile>(
           `/api/designs/${encodeURIComponent(designId)}/files/view?path=${encodeURIComponent(path)}`,
         ),
-      upsert: (designId: string, path: string, content: string) =>
-        apiJson<DesignFile>(`/api/designs/${encodeURIComponent(designId)}/files`, {
-          method: 'PUT',
-          body: { path, content },
-        }),
     },
     chat: {
       list: (designId: string) => apiJson(`/api/designs/${encodeURIComponent(designId)}/chat`),
