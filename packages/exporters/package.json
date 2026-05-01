@@ -21,8 +21,8 @@
   "dependencies": {
     "@open-codesign/animation": "workspace:*",
     "@open-codesign/shared": "workspace:*",
-    "@remotion/bundler": "^4.0.454",
-    "@remotion/renderer": "^4.0.454",
+    "@remotion/bundler": "4.0.455",
+    "@remotion/renderer": "4.0.455",
     "pptxgenjs": "^4.0.1",
     "puppeteer-core": "^24.42.0",
     "zip-lib": "^1.0.4"
