@@ -104,9 +104,6 @@ importers:
       lucide-react:
         specifier: ^1.11.0
         version: 1.11.0(react@19.2.5)
-      monaco-editor:
-        specifier: ^0.55.1
-        version: 0.55.1
       react:
         specifier: ^19.0.0
         version: 19.2.5
@@ -182,10 +179,10 @@ importers:
     dependencies:
       '@mariozechner/pi-agent-core':
         specifier: ^0.70.2
-        version: 0.70.2(ws@8.20.0)(zod@4.3.6)
+        version: 0.70.2(ws@8.20.0)(zod@3.25.76)
       '@mariozechner/pi-ai':
         specifier: ^0.70.2
-        version: 0.70.2(ws@8.20.0)(zod@4.3.6)
+        version: 0.70.2(ws@8.20.0)(zod@3.25.76)
       '@open-codesign/artifacts':
         specifier: workspace:*
         version: link:../../packages/artifacts
@@ -374,7 +371,7 @@ importers:
     dependencies:
       '@mariozechner/pi-ai':
         specifier: ^0.70.2
-        version: 0.70.2(ws@8.20.0)(zod@3.25.76)
+        version: 0.70.2(ws@8.20.0)(zod@4.3.6)
       '@open-codesign/shared':
         specifier: workspace:*
         version: link:../shared
@@ -7360,6 +7357,19 @@ snapshots:
       fs-extra: 8.1.0
       globby: 11.1.0
       read-yaml-file: 1.1.0
+
+  '@mariozechner/pi-agent-core@0.70.2(ws@8.20.0)(zod@3.25.76)':
+    dependencies:
+      '@mariozechner/pi-ai': 0.70.2(ws@8.20.0)(zod@3.25.76)
+      typebox: 1.1.33
+    transitivePeerDependencies:
+      - '@modelcontextprotocol/sdk'
+      - aws-crt
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+      - ws
+      - zod
 
   '@mariozechner/pi-agent-core@0.70.2(ws@8.20.0)(zod@4.3.6)':
     dependencies:

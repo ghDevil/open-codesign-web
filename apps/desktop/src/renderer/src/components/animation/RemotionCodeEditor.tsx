@@ -1,7 +1,16 @@
-import Editor, { type Monaco } from '@monaco-editor/react';
-import type { editor } from 'monaco-editor';
+import Editor, { type Monaco, loader } from '@monaco-editor/react';
 import type { ReactElement } from 'react';
 import { useCallback, useRef } from 'react';
+
+// `@monaco-editor/react` is a React wrapper around Monaco. The actual editor
+// runtime is fetched by `@monaco-editor/loader`, which is the simplest setup
+// for our hosted web build and matches the general pattern Remotion documents
+// for browser-side AI editing surfaces.
+loader.config({
+  paths: {
+    vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs',
+  },
+});
 
 const REMOTION_TYPES = `
 declare module 'remotion' {
@@ -36,41 +45,32 @@ export function RemotionCodeEditor({
   isStreaming = false,
 }: RemotionCodeEditorProps): ReactElement {
   const monacoRef = useRef<Monaco | null>(null);
-  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
-  const handleEditorMount = useCallback(
-    (editorInstance: editor.IStandaloneCodeEditor, monaco: Monaco) => {
-      monacoRef.current = monaco;
-      editorRef.current = editorInstance;
+  const handleEditorMount = useCallback((_editor: unknown, monaco: Monaco) => {
+    monacoRef.current = monaco;
 
-      // biome-ignore lint/suspicious/noExplicitAny: monaco language services are not typed
-      const ts = (monaco.languages as any).typescript;
-      if (ts) {
-        ts.typescriptDefaults?.setCompilerOptions({
-          target: ts.ScriptTarget?.ESNext,
-          module: ts.ModuleKind?.ESNext,
-          jsx: ts.JsxEmit?.Preserve,
-          allowNonTsExtensions: true,
-          strict: false,
-          noEmit: true,
-          esModuleInterop: true,
-          moduleResolution: ts.ModuleResolutionKind?.NodeJs,
-          skipLibCheck: true,
-          allowJs: true,
-        });
-        ts.typescriptDefaults?.setDiagnosticsOptions({
-          // The injected component model intentionally references globals
-          // (useCurrentFrame, AbsoluteFill, etc.) and removes imports — full
-          // semantic validation would surface false positives. We just want
-          // syntax validation and JSX support.
-          noSemanticValidation: true,
-          noSyntaxValidation: false,
-        });
-        ts.typescriptDefaults?.addExtraLib(REMOTION_TYPES, 'remotion.d.ts');
-      }
-    },
-    [],
-  );
+    // biome-ignore lint/suspicious/noExplicitAny: Monaco language services are loosely typed here.
+    const ts = (monaco.languages as any).typescript;
+    if (!ts) return;
+
+    ts.typescriptDefaults?.setCompilerOptions({
+      target: ts.ScriptTarget?.ESNext,
+      module: ts.ModuleKind?.ESNext,
+      jsx: ts.JsxEmit?.Preserve,
+      allowNonTsExtensions: true,
+      strict: false,
+      noEmit: true,
+      esModuleInterop: true,
+      moduleResolution: ts.ModuleResolutionKind?.NodeJs,
+      skipLibCheck: true,
+      allowJs: true,
+    });
+    ts.typescriptDefaults?.setDiagnosticsOptions({
+      noSemanticValidation: true,
+      noSyntaxValidation: false,
+    });
+    ts.typescriptDefaults?.addExtraLib(REMOTION_TYPES, 'remotion.d.ts');
+  }, []);
 
   return (
     <Editor
@@ -102,7 +102,7 @@ export function RemotionCodeEditor({
       }}
       loading={
         <div className="flex h-full w-full items-center justify-center bg-[#1e1e1e] text-[12px] text-[rgba(255,255,255,0.4)]">
-          Loading editor…
+          Loading editor...
         </div>
       }
     />

@@ -9,7 +9,7 @@ import {
   isOverlayMessage,
 } from '@open-codesign/runtime';
 import { extractAnimationCodeFromHtml, extractAnimationSpecFromHtml } from '@open-codesign/shared';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmptyState } from '../preview/EmptyState';
 import { ErrorState } from '../preview/ErrorState';
 import { useCodesignStore } from '../store';
@@ -20,10 +20,15 @@ import { FilesTabView } from './FilesTabView';
 import { PhoneFrame } from './PhoneFrame';
 import { PreviewToolbar } from './PreviewToolbar';
 import { TweakPanel } from './TweakPanel';
-import { AnimationPreviewPanel } from './AnimationPreviewPanel';
-import { AnimationStudioPanel } from './AnimationStudioPanel';
 import { CommentBubble } from './comment/CommentBubble';
 import { PinOverlay } from './comment/PinOverlay';
+
+const AnimationPreviewPanel = lazy(() =>
+  import('./AnimationPreviewPanel').then((mod) => ({ default: mod.AnimationPreviewPanel })),
+);
+const AnimationStudioPanel = lazy(() =>
+  import('./AnimationStudioPanel').then((mod) => ({ default: mod.AnimationStudioPanel })),
+);
 
 export interface PreviewPaneProps {
   onPickStarter: (prompt: string) => void;
@@ -141,6 +146,14 @@ export function handlePreviewMessage(
 
 const COMMENT_HINT_CLASS =
   'absolute left-[var(--space-5)] top-[var(--space-5)] z-10 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-[var(--space-3)] py-[var(--space-1)] text-[var(--text-xs)] text-[var(--color-text-secondary)] shadow-[var(--shadow-soft)] backdrop-blur';
+
+function AnimationPanelFallback() {
+  return (
+    <div className="flex h-full items-center justify-center bg-[var(--color-background)]">
+      <div className="text-[12px] text-[var(--color-text-muted)]">Loading animation studio...</div>
+    </div>
+  );
+}
 
 interface PreviewSlotProps {
   designId: string;
@@ -518,9 +531,17 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   } else if (activeTab?.kind === 'files' && previewHtml) {
     body = <FilesTabView />;
   } else if (isAnimationDesign) {
-    body = <AnimationStudioPanel html={previewHtml ?? ''} />;
+    body = (
+      <Suspense fallback={<AnimationPanelFallback />}>
+        <AnimationStudioPanel html={previewHtml ?? ''} />
+      </Suspense>
+    );
   } else if (animationSpec && previewHtml) {
-    body = <AnimationPreviewPanel html={previewHtml} />;
+    body = (
+      <Suspense fallback={<AnimationPanelFallback />}>
+        <AnimationPreviewPanel html={previewHtml} />
+      </Suspense>
+    );
   } else {
     // Pool slots stay mounted even when the current design has no preview —
     // background iframes for recently-visited designs keep their documents

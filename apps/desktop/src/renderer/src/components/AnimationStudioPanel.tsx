@@ -2,9 +2,16 @@ import { extractAnimationCodeFromHtml, parseAnimationCodeMeta } from '@open-code
 import { Player, type ErrorFallback, type PlayerRef } from '@remotion/player';
 import { AlertCircle, Code2, Eye, RotateCcw, Sparkles, SplitSquareHorizontal } from 'lucide-react';
 import type { ReactElement } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCompilation } from '../hooks/useCompilation';
-import { RemotionCodeEditor } from './animation/RemotionCodeEditor';
+
+// Lazy-load Monaco - `@monaco-editor/react` pulls a sizeable shim and the
+// official Remotion template defers it the same way (Next.js dynamic ssr:false).
+// Without lazy loading, any failure in the Monaco loader would tear down the
+// whole app instead of just the editor pane.
+const RemotionCodeEditor = lazy(() =>
+  import('./animation/RemotionCodeEditor').then((mod) => ({ default: mod.RemotionCodeEditor })),
+);
 
 type StudioMode = 'preview' | 'split' | 'code';
 
@@ -15,7 +22,7 @@ const STARTER_TEMPLATE = `// @fps 30
 
 export const MyComposition = () => {
   const frame = useCurrentFrame();
-  const { fps, durationInFrames } = useVideoConfig();
+  const { fps } = useVideoConfig();
 
   const opacity = interpolate(frame, [0, 20], [0, 1], {
     extrapolateRight: 'clamp',
@@ -73,7 +80,6 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const [mode, setMode] = useState<StudioMode>('split');
   const playerRef = useRef<PlayerRef>(null);
 
-  // When a new generation comes in, drop manual edits.
   useEffect(() => {
     setEditedCode(null);
   }, [generatedCode]);
@@ -89,16 +95,19 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const handleEditStarter = useCallback(() => setEditedCode(STARTER_TEMPLATE), []);
   const handleCodeChange = useCallback((next: string) => setEditedCode(next), []);
 
-  const PlayerArea = (
+  const playerKey = useMemo(
+    () =>
+      `${meta.width}:${meta.height}:${meta.fps}:${meta.durationInFrames}:${codeForCompilation.length}:${codeForCompilation.slice(0, 120)}`,
+    [codeForCompilation, meta.durationInFrames, meta.fps, meta.height, meta.width],
+  );
+
+  const playerArea = (
     <div className="relative flex h-full flex-col bg-[#040812]">
       <div className="relative flex flex-1 items-center justify-center overflow-hidden p-4">
         {Component && !error ? (
           <Player
             ref={playerRef}
-            // The component identity changes on every recompile; keying by it
-            // ensures the player remounts cleanly instead of replaying stale
-            // animation state.
-            key={Component.toString()}
+            key={playerKey}
             component={Component}
             durationInFrames={meta.durationInFrames}
             compositionWidth={meta.width}
@@ -129,26 +138,27 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                 </pre>
               </>
             ) : (
-              <div className="text-[13px] text-[rgba(255,255,255,0.4)]">Compiling…</div>
+              <div className="text-[13px] text-[rgba(255,255,255,0.4)]">Compiling...</div>
             )}
           </div>
         )}
 
-        <div className="absolute top-3 right-3 rounded-full bg-[rgba(0,0,0,0.55)] px-3 py-1 text-[11px] text-[rgba(255,255,255,0.75)] backdrop-blur-sm">
-          {meta.width}×{meta.height} · {meta.fps}fps · {Math.round((meta.durationInFrames / meta.fps) * 10) / 10}s
+        <div className="absolute right-3 top-3 rounded-full bg-[rgba(0,0,0,0.55)] px-3 py-1 text-[11px] text-[rgba(255,255,255,0.75)] backdrop-blur-sm">
+          {meta.width}x{meta.height} - {meta.fps}fps -{' '}
+          {Math.round((meta.durationInFrames / meta.fps) * 10) / 10}s
         </div>
 
         {showStarter ? (
           <div className="absolute left-3 top-3 flex items-center gap-2 rounded-full bg-[rgba(124,156,255,0.15)] px-3 py-1 text-[11px] font-medium text-[#7c9cff] backdrop-blur-sm">
             <Sparkles className="h-3 w-3" />
-            Starter — describe your animation in chat to replace
+            Starter - describe your animation in chat to replace
           </div>
         ) : null}
       </div>
     </div>
   );
 
-  const EditorArea = (
+  const editorArea = (
     <div className="flex h-full flex-col bg-[#1e1e1e]">
       <div className="flex shrink-0 items-center gap-2 border-b border-[rgba(255,255,255,0.06)] bg-[#252526] px-3 py-2">
         <Code2 className="h-3.5 w-3.5 text-[rgba(255,255,255,0.55)]" />
@@ -198,12 +208,20 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
         </div>
       ) : (
         <div className="flex-1 overflow-hidden">
-          <RemotionCodeEditor value={code} onChange={handleCodeChange} />
+          <Suspense
+            fallback={
+              <div className="flex h-full w-full items-center justify-center text-[12px] text-[rgba(255,255,255,0.4)]">
+                Loading editor...
+              </div>
+            }
+          >
+            <RemotionCodeEditor value={code} onChange={handleCodeChange} />
+          </Suspense>
         </div>
       )}
       <div className="flex shrink-0 items-center justify-between gap-2 border-t border-[rgba(255,255,255,0.06)] bg-[#252526] px-3 py-2">
         <span className="text-[10.5px] text-[rgba(255,255,255,0.4)]">
-          Live compilation · @babel/standalone · Remotion APIs pre-injected
+          Live compilation - @babel/standalone - Remotion APIs pre-injected
         </span>
         {error ? (
           <span className="inline-flex items-center gap-1 text-[10.5px] text-red-400">
@@ -211,7 +229,7 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
             error
           </span>
         ) : (
-          <span className="text-[10.5px] text-[rgba(124,180,140,0.85)]">✓ compiles</span>
+          <span className="text-[10.5px] text-[rgba(124,180,140,0.85)]">Compiled</span>
         )}
       </div>
     </div>
@@ -245,14 +263,14 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
         </div>
       </div>
 
-      <div className="relative flex flex-1 min-h-0">
-        {mode === 'preview' ? PlayerArea : null}
-        {mode === 'code' ? EditorArea : null}
+      <div className="relative flex min-h-0 flex-1">
+        {mode === 'preview' ? playerArea : null}
+        {mode === 'code' ? editorArea : null}
         {mode === 'split' ? (
           <>
-            <div className="min-w-0 flex-1">{PlayerArea}</div>
+            <div className="min-w-0 flex-1">{playerArea}</div>
             <div className="w-px shrink-0 bg-[var(--color-border)]" />
-            <div className="min-w-0 flex-1">{EditorArea}</div>
+            <div className="min-w-0 flex-1">{editorArea}</div>
           </>
         ) : null}
       </div>
