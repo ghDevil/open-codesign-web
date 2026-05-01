@@ -385,18 +385,25 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const menuBarRef = useRef<HTMLDivElement | null>(null);
   const exportHasLiveProgressRef = useRef(false);
   const quickSwitcherInputRef = useRef<HTMLInputElement | null>(null);
+  const projectSyncInFlightRef = useRef(false);
+  const seededProjectDesignIdRef = useRef<string | null>(null);
 
   const loadProjectFiles = useCallback(
     async (seedIfMissing: boolean) => {
+      if (projectSyncInFlightRef.current) return;
+      projectSyncInFlightRef.current = true;
       if (!currentDesignId || !window.codesign?.files?.list || !window.codesign.files.view) {
         const fallback = buildRemotionProjectFilesFromCode(generatedCode ?? STARTER_TEMPLATE);
         setProjectFiles(fallback);
         setProjectLoading(false);
         setProjectError(null);
+        projectSyncInFlightRef.current = false;
         return;
       }
 
-      setProjectLoading(true);
+      if (seedIfMissing) {
+        setProjectLoading(true);
+      }
       setProjectError(null);
       try {
         const listed = await window.codesign.files.list(currentDesignId);
@@ -442,7 +449,10 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
       } catch (error) {
         setProjectError(error instanceof Error ? error.message : String(error));
       } finally {
-        setProjectLoading(false);
+        if (seedIfMissing) {
+          setProjectLoading(false);
+        }
+        projectSyncInFlightRef.current = false;
       }
     },
     [currentDesignId, generatedCode, html, setPreviewHtml],
@@ -454,8 +464,16 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   }, [generatedCode]);
 
   useEffect(() => {
-    void loadProjectFiles(true);
-  }, [loadProjectFiles]);
+    if (!currentDesignId) {
+      seededProjectDesignIdRef.current = null;
+      return;
+    }
+    const isInitialSeedForDesign = seededProjectDesignIdRef.current !== currentDesignId;
+    if (isInitialSeedForDesign) {
+      seededProjectDesignIdRef.current = currentDesignId;
+    }
+    void loadProjectFiles(isInitialSeedForDesign);
+  }, [currentDesignId, loadProjectFiles]);
 
   useEffect(() => {
     if (!lastFsUpdate || lastFsUpdate.designId !== currentDesignId) return;
