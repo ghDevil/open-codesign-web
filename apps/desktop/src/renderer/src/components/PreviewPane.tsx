@@ -450,7 +450,6 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
     () => (currentDesignId ? readDesignIntent(currentDesignId) : null),
     [currentDesignId],
   );
-  const isAnimationDesign = currentDesignIntent?.kind === 'animation';
   const animationCode = useMemo(
     () => (previewHtml ? extractAnimationCodeFromHtml(previewHtml) : null),
     [previewHtml],
@@ -459,6 +458,11 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
     () => (!animationCode && previewHtml ? extractAnimationSpecFromHtml(previewHtml) : null),
     [animationCode, previewHtml],
   );
+  // Treat the design as animation either if intent says so OR the artifact
+  // already contains a Remotion code/spec block. The fallback covers cases
+  // where localStorage intent was lost (other browser, cleared cache).
+  const isAnimationDesign =
+    currentDesignIntent?.kind === 'animation' || animationCode !== null || animationSpec !== null;
   const showCommentUi = interactionMode === 'comment';
   const snapshotComments = currentSnapshotId
     ? comments.filter((c) => c.snapshotId === currentSnapshotId)
@@ -513,7 +517,7 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
     );
   } else if (activeTab?.kind === 'files' && previewHtml) {
     body = <FilesTabView />;
-  } else if (isAnimationDesign && (animationCode || !animationSpec)) {
+  } else if (isAnimationDesign) {
     body = <AnimationStudioPanel html={previewHtml ?? ''} />;
   } else if (animationSpec && previewHtml) {
     body = <AnimationPreviewPanel html={previewHtml} />;
@@ -555,12 +559,12 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   }
 
   const hasTabs = canvasTabs.length > 0;
-  const isWelcome = !errorMessage && !previewHtml && !designHasContent;
+  const isWelcome = !errorMessage && !previewHtml && !designHasContent && !isAnimationDesign;
 
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex flex-col min-h-0 flex-1">
-        {isWelcome ? null : (
+        {isWelcome || isAnimationDesign ? null : (
           <div className="flex items-stretch justify-between gap-[var(--space-2)] border-b border-[var(--color-border-muted)] bg-[var(--color-background-secondary)] pl-[var(--space-2)]">
             {hasTabs ? <CanvasTabBar /> : <div />}
             <PreviewToolbar />
@@ -569,7 +573,9 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
         <CanvasErrorBar />
         <div className="relative flex-1 overflow-hidden">
           {body}
-          {previewHtml && !animationSpec && !animationCode ? <TweakPanel iframeRef={iframeRef} /> : null}
+          {previewHtml && !animationSpec && !animationCode && !isAnimationDesign ? (
+            <TweakPanel iframeRef={iframeRef} />
+          ) : null}
         </div>
         {commentBubble && interactionMode === 'comment'
           ? (() => {
