@@ -14,25 +14,31 @@ import {
   ChevronRight,
   Clapperboard,
   Code2,
+  Copy,
   Download,
   ExternalLink,
   FolderOpen,
+  Image as ImageIcon,
   LoaderCircle,
   Maximize2,
+  Music4,
   Pause,
   Play,
+  Plus,
   RotateCcw,
   Search,
   Sparkles,
   StepBack,
   StepForward,
   TimerReset,
+  Video,
   X,
 } from 'lucide-react';
 import type { ExportFormat, ExportInvokeResponse, ExportProgressEvent } from '../../../preload/index';
 import type { ReactElement } from 'react';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCompilation } from '../hooks/useCompilation';
+import { useCodesignStore } from '../store';
 
 const RemotionCodeEditor = lazy(() =>
   import('./animation/RemotionCodeEditor').then((mod) => ({ default: mod.RemotionCodeEditor })),
@@ -60,6 +66,28 @@ interface ExportDialogState {
   path: string | undefined;
   bytes: number | undefined;
   error: string | undefined;
+}
+
+type StudioAssetKind = 'image' | 'video' | 'audio' | 'file';
+
+interface StudioAsset {
+  id: string;
+  key: string;
+  name: string;
+  path: string;
+  kind: StudioAssetKind;
+  dataUrl?: string;
+  mimeType?: string;
+  size: number;
+}
+
+type QuickSwitcherMode = 'default' | 'commands' | 'docs';
+
+interface QuickSwitcherItem {
+  id: string;
+  label: string;
+  subtitle?: string;
+  onSelect: () => void;
 }
 
 const EXPORT_OPTIONS: Array<{ format: ExportFormat; label: string; hint: string }> = [
@@ -227,6 +255,28 @@ function makeExportId(): string {
   return `animation-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function inferAssetKind(mimeType: string | undefined, name: string): StudioAssetKind {
+  if (mimeType?.startsWith('image/')) return 'image';
+  if (mimeType?.startsWith('video/')) return 'video';
+  if (mimeType?.startsWith('audio/')) return 'audio';
+  const lower = name.toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|svg)$/.test(lower)) return 'image';
+  if (/\.(mp4|webm|mov|m4v)$/.test(lower)) return 'video';
+  if (/\.(mp3|wav|ogg|m4a)$/.test(lower)) return 'audio';
+  return 'file';
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return (
+    tag === 'INPUT' ||
+    tag === 'TEXTAREA' ||
+    tag === 'SELECT' ||
+    target.isContentEditable
+  );
+}
+
 function extractCompositionName(code: string): string {
   const fnMatch = code.match(/export\s+(?:const|function)\s+(\w+)/);
   return fnMatch?.[1] ?? 'MyComposition';
@@ -284,6 +334,10 @@ interface AnimationStudioPanelProps {
 }
 
 export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): ReactElement {
+  const currentDesignId = useCodesignStore((s) => s.currentDesignId);
+  const inputFiles = useCodesignStore((s) => s.inputFiles);
+  const pickInputFiles = useCodesignStore((s) => s.pickInputFiles);
+  const removeInputFile = useCodesignStore((s) => s.removeInputFile);
   const generatedCode = useMemo(() => extractAnimationCodeFromHtml(html), [html]);
   const [editedCode, setEditedCode] = useState<string | null>(null);
   const [leftTab, setLeftTab] = useState<LeftTab>('compositions');
@@ -293,6 +347,9 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLaneId, setSelectedLaneId] = useState<string | null>(null);
   const [activeMenu, setActiveMenu] = useState<StudioMenu>(null);
+  const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
+  const [quickSwitcherQuery, setQuickSwitcherQuery] = useState('');
+  const [quickSwitcherIndex, setQuickSwitcherIndex] = useState(0);
   const [exportDialog, setExportDialog] = useState<ExportDialogState>({
     open: false,
     format: 'mp4',
@@ -307,6 +364,7 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const playerRef = useRef<PlayerRef>(null);
   const menuBarRef = useRef<HTMLDivElement | null>(null);
   const exportHasLiveProgressRef = useRef(false);
+  const quickSwitcherInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setEditedCode(null);
@@ -384,7 +442,31 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const code = editedCode ?? generatedCode ?? '';
   const showStarter = !code;
   const codeForCompilation = showStarter ? STARTER_TEMPLATE : code;
-  const { Component, error } = useCompilation(codeForCompilation);
+  const studioAssets = useMemo<StudioAsset[]>(
+    () =>
+      inputFiles.map((file) => ({
+        id: file.path,
+        key: file.name,
+        name: file.name,
+        path: file.path,
+        kind: inferAssetKind(file.mimeType, file.name),
+        ...(file.dataUrl ? { dataUrl: file.dataUrl } : {}),
+        ...(file.mimeType ? { mimeType: file.mimeType } : {}),
+        size: file.size,
+      })),
+    [inputFiles],
+  );
+  const compileAssets = useMemo(
+    () =>
+      studioAssets
+        .filter((asset) => typeof asset.dataUrl === 'string' && asset.dataUrl.length > 0)
+        .flatMap((asset) => [
+          { key: asset.name, dataUrl: asset.dataUrl as string },
+          { key: asset.path, dataUrl: asset.dataUrl as string },
+        ]),
+    [studioAssets],
+  );
+  const { Component, error } = useCompilation(codeForCompilation, compileAssets);
   const meta = useMemo(() => parseAnimationCodeMeta(codeForCompilation), [codeForCompilation]);
   const compositionName = useMemo(() => extractCompositionName(codeForCompilation), [codeForCompilation]);
   const assetRefs = useMemo(() => extractAssetRefs(codeForCompilation), [codeForCompilation]);
@@ -399,6 +481,17 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
     if (!query) return timelineLanes;
     return timelineLanes.filter((lane) => lane.label.toLowerCase().includes(query));
   }, [searchQuery, timelineLanes]);
+
+  const visibleAssets = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return studioAssets;
+    return studioAssets.filter(
+      (asset) =>
+        asset.name.toLowerCase().includes(query) ||
+        asset.path.toLowerCase().includes(query) ||
+        asset.kind.toLowerCase().includes(query),
+    );
+  }, [searchQuery, studioAssets]);
 
   useEffect(() => {
     if (visibleLanes.length === 0) {
@@ -435,6 +528,12 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
       label: `${String(Math.floor(index / 60)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}`,
     }));
   }, [meta.durationInFrames, meta.fps]);
+
+  const quickSwitcherMode: QuickSwitcherMode = quickSwitcherQuery.startsWith('>')
+    ? 'commands'
+    : quickSwitcherQuery.startsWith('?')
+      ? 'docs'
+      : 'default';
 
   const handleCodeChange = useCallback((next: string) => setEditedCode(next), []);
   const handleResetEdits = useCallback(() => setEditedCode(null), []);
@@ -583,6 +682,243 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
   const openExternalDoc = useCallback((url: string) => {
     void window.codesign?.openExternal(url);
   }, []);
+  const handleAttachAssets = useCallback(() => {
+    void pickInputFiles();
+    setLeftTab('assets');
+  }, [pickInputFiles]);
+  const copyToClipboard = useCallback((value: string, message: string) => {
+    void navigator.clipboard?.writeText(value).then(
+      () => {
+        setExportDialog((current) =>
+          current.open
+            ? current
+            : {
+                ...current,
+                open: false,
+                status: current.status,
+                message,
+              },
+        );
+      },
+      () => {},
+    );
+  }, []);
+  const handleCopyAssetRef = useCallback(
+    (asset: StudioAsset) => {
+      copyToClipboard(`staticFile("${asset.name}")`, `Copied staticFile("${asset.name}")`);
+    },
+    [copyToClipboard],
+  );
+  const handleCopyAssetName = useCallback(
+    (asset: StudioAsset) => {
+      copyToClipboard(asset.name, `Copied ${asset.name}`);
+    },
+    [copyToClipboard],
+  );
+  const commandItems = useMemo<QuickSwitcherItem[]>(
+    () => [
+      {
+        id: 'command-render',
+        label: 'Render MP4 video',
+        subtitle: 'Open export dialog',
+        onSelect: () => openExportDialog('mp4'),
+      },
+      {
+        id: 'command-assets',
+        label: 'Attach local assets',
+        subtitle: 'Add images, video or audio to this project',
+        onSelect: handleAttachAssets,
+      },
+      {
+        id: 'command-toggle-code',
+        label: showCodePanel ? 'Hide code panel' : 'Show code panel',
+        subtitle: 'Toggle the right-hand editor',
+        onSelect: () => setShowCodePanel((value) => !value),
+      },
+      {
+        id: 'command-compositions',
+        label: 'Open compositions rail',
+        subtitle: 'Switch left panel',
+        onSelect: () => setLeftTab('compositions'),
+      },
+      {
+        id: 'command-assets-rail',
+        label: 'Open assets rail',
+        subtitle: 'Switch left panel',
+        onSelect: () => setLeftTab('assets'),
+      },
+    ],
+    [handleAttachAssets, openExportDialog, showCodePanel],
+  );
+  const docItems = useMemo<QuickSwitcherItem[]>(
+    () => [
+      {
+        id: 'doc-studio',
+        label: 'Starting the Studio',
+        subtitle: 'Official Remotion docs',
+        onSelect: () => openExternalDoc('https://www.remotion.dev/docs/studio'),
+      },
+      {
+        id: 'doc-keyboard',
+        label: 'Keyboard navigation',
+        subtitle: 'Official Remotion docs',
+        onSelect: () => openExternalDoc('https://www.remotion.dev/docs/studio/keyboard-navigation'),
+      },
+      {
+        id: 'doc-switcher',
+        label: 'Quick switcher',
+        subtitle: 'Official Remotion docs',
+        onSelect: () => openExternalDoc('https://www.remotion.dev/docs/studio/quick-switcher'),
+      },
+      {
+        id: 'doc-ai',
+        label: 'Building with Remotion and AI',
+        subtitle: 'Official Remotion docs',
+        onSelect: () => openExternalDoc('https://www.remotion.dev/docs/ai'),
+      },
+      {
+        id: 'doc-compile',
+        label: 'Just-in-time compilation',
+        subtitle: 'Official Remotion docs',
+        onSelect: () => openExternalDoc('https://www.remotion.dev/docs/ai/dynamic-compilation'),
+      },
+    ],
+    [openExternalDoc],
+  );
+  const defaultQuickItems = useMemo<QuickSwitcherItem[]>(
+    () => [
+      {
+        id: `composition:${compositionName}`,
+        label: compositionName,
+        subtitle: `${meta.width}x${meta.height} / ${meta.fps} FPS / ${formatDuration(meta.durationInFrames, meta.fps)}${currentDesignId ? ` / ${currentDesignId}` : ''}`,
+        onSelect: () => {
+          setLeftTab('compositions');
+          handleSeek(0);
+        },
+      },
+      ...studioAssets.map((asset) => ({
+        id: `asset:${asset.id}`,
+        label: asset.name,
+        subtitle: `${asset.kind} / ${asset.path}`,
+        onSelect: () => {
+          setLeftTab('assets');
+          handleCopyAssetRef(asset);
+        },
+      })),
+    ],
+    [
+      compositionName,
+      handleCopyAssetRef,
+      handleSeek,
+      meta.durationInFrames,
+      meta.fps,
+      meta.height,
+      meta.width,
+      currentDesignId,
+      studioAssets,
+    ],
+  );
+  const filteredQuickItems = useMemo(() => {
+    const rawQuery = quickSwitcherQuery.trim();
+    const query =
+      quickSwitcherMode === 'commands' || quickSwitcherMode === 'docs'
+        ? rawQuery.slice(1).trim().toLowerCase()
+        : rawQuery.toLowerCase();
+    const source =
+      quickSwitcherMode === 'commands'
+        ? commandItems
+        : quickSwitcherMode === 'docs'
+          ? docItems
+          : defaultQuickItems;
+    if (!query) return source;
+    return source.filter(
+      (item) =>
+        item.label.toLowerCase().includes(query) ||
+        item.subtitle?.toLowerCase().includes(query),
+    );
+  }, [commandItems, defaultQuickItems, docItems, quickSwitcherMode, quickSwitcherQuery]);
+
+  useEffect(() => {
+    if (!quickSwitcherOpen) return;
+    setQuickSwitcherIndex(0);
+    const timer = window.setTimeout(() => quickSwitcherInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [quickSwitcherOpen]);
+
+  useEffect(() => {
+    setQuickSwitcherIndex((current) =>
+      filteredQuickItems.length === 0 ? 0 : Math.min(current, filteredQuickItems.length - 1),
+    );
+  }, [filteredQuickItems.length]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      const metaOrCtrl = event.metaKey || event.ctrlKey;
+      if (metaOrCtrl && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setQuickSwitcherOpen(true);
+        return;
+      }
+      if (quickSwitcherOpen) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          setQuickSwitcherOpen(false);
+          return;
+        }
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          setQuickSwitcherIndex((current) =>
+            filteredQuickItems.length === 0 ? 0 : (current + 1) % filteredQuickItems.length,
+          );
+          return;
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          setQuickSwitcherIndex((current) =>
+            filteredQuickItems.length === 0
+              ? 0
+              : (current - 1 + filteredQuickItems.length) % filteredQuickItems.length,
+          );
+          return;
+        }
+        if (event.key === 'Enter') {
+          const selected = filteredQuickItems[quickSwitcherIndex];
+          if (!selected) return;
+          event.preventDefault();
+          selected.onSelect();
+          setQuickSwitcherOpen(false);
+          return;
+        }
+        return;
+      }
+      if (isTypingTarget(event.target) || exportDialog.open) return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        handleTogglePlayback();
+        return;
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        seekBy(event.shiftKey ? -meta.fps : -1);
+        return;
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        seekBy(event.shiftKey ? meta.fps : 1);
+        return;
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    exportDialog.open,
+    filteredQuickItems,
+    handleTogglePlayback,
+    meta.fps,
+    quickSwitcherIndex,
+    quickSwitcherOpen,
+    seekBy,
+  ]);
   const runMenuAction = useCallback((action: () => void | Promise<void>) => {
     setActiveMenu(null);
     void action();
@@ -833,25 +1169,110 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
               </div>
             </div>
           ) : (
-            <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
-              {assetRefs.length > 0 ? (
-                <div className="space-y-2">
-                  {assetRefs.map((asset) => (
-                    <div
-                      key={asset}
-                      className="rounded-md border border-[rgba(255,255,255,0.06)] bg-[#14171a] px-3 py-2"
-                    >
-                      <div className="truncate text-[12px] font-medium text-[rgba(255,255,255,0.9)]">
-                        {asset}
-                      </div>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="border-b border-[rgba(255,255,255,0.06)] px-3 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-[13px] font-semibold text-[rgba(255,255,255,0.95)]">Project assets</div>
+                    <div className="mt-1 text-[11px] text-[rgba(255,255,255,0.48)]">
+                      Attach local media, then reference it in code with <code>staticFile("filename")</code>.
                     </div>
-                  ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAttachAssets}
+                    className="inline-flex items-center gap-1 rounded-md border border-[rgba(255,255,255,0.08)] bg-[#14171a] px-2.5 py-1.5 text-[11px] text-[rgba(255,255,255,0.82)] transition-colors hover:bg-[#1b2026]"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add
+                  </button>
                 </div>
-              ) : (
-                <div className="rounded-md border border-dashed border-[rgba(255,255,255,0.08)] bg-[#14171a] px-4 py-5 text-[11px] leading-[1.6] text-[rgba(255,255,255,0.5)]">
-                  No imported assets yet. The composition is currently self-contained.
+                <div className="mt-3">
+                  <label className="flex items-center gap-2 rounded-md border border-[rgba(255,255,255,0.08)] bg-[#14171a] px-2 py-1.5 text-[11px] text-[rgba(255,255,255,0.45)]">
+                    <Search className="h-3.5 w-3.5" />
+                    <input
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      placeholder="Search assets"
+                      className="min-w-0 flex-1 bg-transparent text-[11px] text-[rgba(255,255,255,0.72)] outline-none placeholder:text-[rgba(255,255,255,0.35)]"
+                    />
+                  </label>
                 </div>
-              )}
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
+                {visibleAssets.length > 0 ? (
+                  <div className="space-y-2">
+                    {visibleAssets.map((asset) => (
+                      <div
+                        key={asset.id}
+                        className="rounded-md border border-[rgba(255,255,255,0.06)] bg-[#14171a] p-2"
+                      >
+                        <div className="flex items-start gap-2">
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[#0f1114]">
+                            {asset.kind === 'image' && asset.dataUrl ? (
+                              <img src={asset.dataUrl} alt={asset.name} className="h-full w-full object-cover" />
+                            ) : asset.kind === 'video' ? (
+                              <Video className="h-4 w-4 text-[rgba(255,255,255,0.55)]" />
+                            ) : asset.kind === 'audio' ? (
+                              <Music4 className="h-4 w-4 text-[rgba(255,255,255,0.55)]" />
+                            ) : (
+                              <ImageIcon className="h-4 w-4 text-[rgba(255,255,255,0.55)]" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-[12px] font-medium text-[rgba(255,255,255,0.92)]">
+                              {asset.name}
+                            </div>
+                            <div className="mt-0.5 truncate text-[10px] text-[rgba(255,255,255,0.45)]">
+                              {asset.path}
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-[rgba(255,255,255,0.42)]">
+                              <span>{asset.kind}</span>
+                              <span>/</span>
+                              <span>{formatExportSize(asset.size)}</span>
+                              {assetRefs.includes(asset.name) ? (
+                                <>
+                                  <span>/</span>
+                                  <span className="text-[rgba(124,156,255,0.82)]">in code</span>
+                                </>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-2 flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyAssetRef(asset)}
+                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10.5px] text-[rgba(255,255,255,0.82)] transition-colors hover:bg-[rgba(255,255,255,0.06)]"
+                          >
+                            <Copy className="h-3 w-3" />
+                            Copy staticFile()
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyAssetName(asset)}
+                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10.5px] text-[rgba(255,255,255,0.62)] transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-[rgba(255,255,255,0.9)]"
+                          >
+                            Copy name
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeInputFile(asset.path)}
+                            className="ml-auto inline-flex items-center gap-1 rounded px-2 py-1 text-[10.5px] text-[rgba(255,255,255,0.48)] transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-[rgba(255,255,255,0.88)]"
+                          >
+                            <X className="h-3 w-3" />
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-[rgba(255,255,255,0.08)] bg-[#14171a] px-4 py-5 text-[11px] leading-[1.6] text-[rgba(255,255,255,0.5)]">
+                    No project assets yet. Add local media here, then reference it inside the composition using <code>staticFile("filename")</code>.
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </aside>
@@ -895,6 +1316,23 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
                 <StudioMenuDropdown items={renderMenuItems} onSelect={runMenuAction} />
               ) : null}
             </div>
+            <button
+              type="button"
+              onClick={() => setQuickSwitcherOpen(true)}
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-[rgba(255,255,255,0.55)] transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-[rgba(255,255,255,0.95)]"
+              title="Quick switcher (Ctrl/Cmd+K)"
+            >
+              <Search className="h-3.5 w-3.5" />
+              Jump
+            </button>
+            <button
+              type="button"
+              onClick={handleAttachAssets}
+              className="inline-flex items-center gap-1 rounded px-2 py-1 text-[rgba(255,255,255,0.82)] transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-[rgba(255,255,255,0.96)]"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Assets
+            </button>
             <button
               type="button"
               onClick={() => openExportDialog('mp4')}
@@ -1262,6 +1700,65 @@ export function AnimationStudioPanel({ html }: AnimationStudioPanelProps): React
           </div>
         </section>
       </div>
+
+      {quickSwitcherOpen ? (
+        <div className="fixed inset-0 z-40 flex items-start justify-center bg-[rgba(6,8,12,0.42)] p-6">
+          <div className="w-full max-w-[560px] overflow-hidden rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#15181c] shadow-[0_32px_96px_rgba(0,0,0,0.45)]">
+            <div className="border-b border-[rgba(255,255,255,0.06)] px-4 py-3">
+              <div className="flex items-center gap-2 rounded-xl border border-[rgba(255,255,255,0.08)] bg-[#101316] px-3 py-2">
+                <Search className="h-4 w-4 text-[rgba(255,255,255,0.46)]" />
+                <input
+                  ref={quickSwitcherInputRef}
+                  value={quickSwitcherQuery}
+                  onChange={(event) => setQuickSwitcherQuery(event.target.value)}
+                  placeholder='Search compositions and assets. Use ">" for commands, "?" for docs.'
+                  className="min-w-0 flex-1 bg-transparent text-[13px] text-[rgba(255,255,255,0.92)] outline-none placeholder:text-[rgba(255,255,255,0.36)]"
+                />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10.5px] text-[rgba(255,255,255,0.42)]">
+                <span>Ctrl/Cmd+K to open</span>
+                <span>/</span>
+                <span>Enter to select</span>
+                <span>/</span>
+                <span>Esc to close</span>
+              </div>
+            </div>
+            <div className="max-h-[420px] overflow-y-auto p-2">
+              {filteredQuickItems.length > 0 ? (
+                filteredQuickItems.map((item, index) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onMouseEnter={() => setQuickSwitcherIndex(index)}
+                    onClick={() => {
+                      item.onSelect();
+                      setQuickSwitcherOpen(false);
+                    }}
+                    className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
+                      index === quickSwitcherIndex
+                        ? 'bg-[rgba(124,156,255,0.14)] text-[rgba(255,255,255,0.96)]'
+                        : 'text-[rgba(255,255,255,0.82)] hover:bg-[rgba(255,255,255,0.05)]'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12px] font-medium">{item.label}</div>
+                      {item.subtitle ? (
+                        <div className="mt-0.5 text-[10.5px] text-[rgba(255,255,255,0.45)]">
+                          {item.subtitle}
+                        </div>
+                      ) : null}
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="px-4 py-10 text-center text-[12px] text-[rgba(255,255,255,0.45)]">
+                  Nothing matched that query.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {exportDialog.open ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(6,8,12,0.72)] p-4 backdrop-blur-sm">

@@ -30,6 +30,11 @@ export interface CompilationResult {
   error: string | null;
 }
 
+export interface RemotionCompileAsset {
+  key: string;
+  dataUrl: string;
+}
+
 function stripImports(code: string): string {
   let cleaned = code;
   cleaned = cleaned.replace(
@@ -97,7 +102,10 @@ function extractComponentBody(code: string): { source: string; componentName: st
   };
 }
 
-export function compileRemotionCode(code: string): CompilationResult {
+export function compileRemotionCode(
+  code: string,
+  assets: RemotionCompileAsset[] = [],
+): CompilationResult {
   if (!code?.trim()) {
     return { Component: null, error: null };
   }
@@ -115,6 +123,30 @@ export function compileRemotionCode(code: string): CompilationResult {
     }
 
     const wrappedCode = `${transpiled.code}\nreturn typeof ${componentName} !== 'undefined' ? ${componentName} : null;`;
+
+    const assetMap = new Map<string, string>();
+    for (const asset of assets) {
+      assetMap.set(asset.key, asset.dataUrl);
+      const normalized = asset.key.replace(/\\/g, '/');
+      assetMap.set(normalized, asset.dataUrl);
+      const baseName = normalized.split('/').pop();
+      if (baseName) assetMap.set(baseName, asset.dataUrl);
+      if (!normalized.startsWith('assets/')) {
+        assetMap.set(`assets/${normalized}`, asset.dataUrl);
+        if (baseName) assetMap.set(`assets/${baseName}`, asset.dataUrl);
+      }
+    }
+
+    const resolveStaticFile = (input: string): string => {
+      const normalized = input.replace(/\\/g, '/');
+      return (
+        assetMap.get(input) ??
+        assetMap.get(normalized) ??
+        assetMap.get(normalized.split('/').pop() ?? normalized) ??
+        assetMap.get(`assets/${normalized}`) ??
+        input
+      );
+    };
 
     const createComponent = new Function(
       'React',
@@ -178,7 +210,7 @@ export function compileRemotionCode(code: string): CompilationResult {
       interpolate,
       spring,
       random,
-      staticFile,
+      resolveStaticFile ?? staticFile,
       useCurrentFrame,
       useVideoConfig,
       // Shapes

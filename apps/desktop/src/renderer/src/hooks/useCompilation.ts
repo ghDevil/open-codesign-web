@@ -1,8 +1,12 @@
 import { useMemo } from 'react';
-import { type CompilationResult, compileRemotionCode } from '../lib/remotion-compiler';
+import {
+  type CompilationResult,
+  type RemotionCompileAsset,
+  compileRemotionCode,
+} from '../lib/remotion-compiler';
 
 export type { CompilationResult };
 
-export function useCompilation(code: string): CompilationResult {
-  return useMemo(() => compileRemotionCode(code), [code]);
+export function useCompilation(code: string, assets: RemotionCompileAsset[] = []): CompilationResult {
+  return useMemo(() => compileRemotionCode(code, assets), [assets, code]);
 }

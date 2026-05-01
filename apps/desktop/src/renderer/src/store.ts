@@ -1438,6 +1438,8 @@ export interface PromptContextExtras {
   } | null;
   /** Plain-text content extracted from any DOCX/PPTX/XLSX uploads. */
   extractedDocs?: Array<{ name: string; kind: string; text: string }>;
+  /** Local media assets attached to the project that animation code can reference. */
+  localAssets?: Array<{ name: string; mimeType?: string }>;
 }
 
 const FIDELITY_GUIDANCE: Record<string, string> = {
@@ -1528,6 +1530,22 @@ function intentToPromptHeader(intent: PromptContextExtras['intent']): string | n
   return lines.join('\n');
 }
 
+function localAssetsToPromptHeader(
+  assets: PromptContextExtras['localAssets'],
+  intent: PromptContextExtras['intent'],
+): string | null {
+  if (!assets || assets.length === 0 || intent?.kind !== 'animation') return null;
+  const lines = [
+    '## PROJECT ASSETS',
+    'Use attached media when it helps. In Remotion code, reference these assets with `staticFile("filename.ext")`.',
+    '',
+  ];
+  for (const asset of assets.slice(0, 24)) {
+    lines.push(`- ${asset.name}${asset.mimeType ? ` (${asset.mimeType})` : ''}`);
+  }
+  return lines.join('\n');
+}
+
 function extractedDocsToPromptHeader(
   docs: PromptContextExtras['extractedDocs'],
 ): string | null {
@@ -1549,9 +1567,11 @@ export function buildEnrichedPrompt(
 ): string {
   const intentHeader = intentToPromptHeader(extras?.intent ?? null);
   const docsHeader = extractedDocsToPromptHeader(extras?.extractedDocs);
+  const assetsHeader = localAssetsToPromptHeader(extras?.localAssets, extras?.intent ?? null);
   const headers: string[] = [];
   if (intentHeader) headers.push(intentHeader);
   if (docsHeader) headers.push(docsHeader);
+  if (assetsHeader) headers.push(assetsHeader);
 
   if (pendingEdits.length === 0) {
     if (headers.length === 0) return userPrompt;
@@ -1995,11 +2015,23 @@ export const useCodesignStore = create<CodesignState>((set, get) => ({
         kind: f.documentKind ?? 'document',
         text: f.extractedText as string,
       }));
+    const localAssets = (request.attachments ?? [])
+      .filter(
+        (f) =>
+          typeof f.name === 'string' &&
+          f.name.length > 0 &&
+          (typeof f.dataUrl === 'string' || typeof f.mimeType === 'string'),
+      )
+      .map((f) => ({
+        name: f.name,
+        ...(typeof f.mimeType === 'string' ? { mimeType: f.mimeType } : {}),
+      }));
     const enrichedPrompt = buildEnrichedPrompt(request.prompt, pendingEdits, {
       // Only inject the intent header on the first prompt; afterwards the
       // model has the artifact in scope and the framing is already established.
       intent: isFirstPrompt ? designIntent : null,
       extractedDocs,
+      localAssets,
     });
     if (isFirstPrompt && designIdAtStart) {
       // Consume so subsequent turns don't re-prepend the intent.

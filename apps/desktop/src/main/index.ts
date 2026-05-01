@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path_module from 'node:path';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   type AgentEvent,
@@ -283,6 +283,36 @@ function extensionFromMimeType(mimeType: string): string {
   if (mimeType === 'image/jpeg') return 'jpg';
   if (mimeType === 'image/webp') return 'webp';
   return 'png';
+}
+
+function inferPreviewMimeType(filePath: string): string | null {
+  switch (extname(filePath).toLowerCase()) {
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.webp':
+      return 'image/webp';
+    case '.gif':
+      return 'image/gif';
+    case '.svg':
+      return 'image/svg+xml';
+    case '.mp4':
+      return 'video/mp4';
+    case '.webm':
+      return 'video/webm';
+    case '.mov':
+      return 'video/quicktime';
+    case '.mp3':
+      return 'audio/mpeg';
+    case '.wav':
+      return 'audio/wav';
+    case '.ogg':
+      return 'audio/ogg';
+    default:
+      return null;
+  }
 }
 
 function sanitizeAssetStem(input: string | undefined, fallback: string): string {
@@ -810,7 +840,18 @@ function registerIpcHandlers(db: Database | null): void {
       result.filePaths.map(async (path) => {
         try {
           const info = await stat(path);
-          return { path, name: basename(path), size: info.size };
+          const mimeType = inferPreviewMimeType(path);
+          if (!mimeType || info.size > 15 * 1024 * 1024) {
+            return { path, name: basename(path), size: info.size, ...(mimeType ? { mimeType } : {}) };
+          }
+          const buffer = await readFile(path);
+          return {
+            path,
+            name: basename(path),
+            size: info.size,
+            mimeType,
+            dataUrl: `data:${mimeType};base64,${buffer.toString('base64')}`,
+          };
         } catch {
           return { path, name: basename(path), size: 0 };
         }
