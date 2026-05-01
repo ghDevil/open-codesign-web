@@ -2469,7 +2469,8 @@ const FIGMA_PROMPT_PREFIX = [
 const FIGMA_PREFETCH_CHAR_LIMIT = 1_600;
 const HTTP_URL_RE = /https?:\/\/[^\s)\]"']+/gi;
 const PLAYWRIGHT_INTENT_RE = /\b(playwright|browser|snapshot|screenshot)\b/i;
-const WEBPAGE_INTENT_RE = /\b(site|website|webpage|web page|page|screen|layout|inspect|review|audit|compare|check|test)\b/i;
+const WEBPAGE_REVIEW_INTENT_RE =
+  /\b(inspect|review|audit|compare|check|test|verify|validate|crawl|qa)\b/i;
 const PLAYWRIGHT_PROMPT_PREFIX = [
   'When inspecting a web page, do not use generic URL-reading tools.',
   'Use the Playwright MCP browser_navigate tool first, then browser_snapshot or browser_take_screenshot.',
@@ -2524,7 +2525,7 @@ function shouldPrefetchBrowserContext(prompt: string, referenceUrl?: string): bo
   const playableUrl = extractPlayableUrl(prompt);
   if (playableUrl === undefined) return false;
 
-  return PLAYWRIGHT_INTENT_RE.test(prompt) || WEBPAGE_INTENT_RE.test(prompt);
+  return PLAYWRIGHT_INTENT_RE.test(prompt) || WEBPAGE_REVIEW_INTENT_RE.test(prompt);
 }
 
 /** Extract file key and optional node-id from a figma.com/design URL */
@@ -2959,7 +2960,12 @@ async function buildPrefetchedBrowserPromptContext(
 const BCGPT_INTENT_RE = /basecamp|project|todo|message|campfire|schedule|checkin/i;
 
 function filterMcpToolsForPrompt<T extends { name: string }>(prompt: string, tools: T[]): T[] {
-  if (!PLAYWRIGHT_INTENT_RE.test(prompt)) return tools.slice(0, 128);
+  const shouldKeepBrowserTools =
+    PLAYWRIGHT_INTENT_RE.test(prompt) || extractPlayableUrl(prompt) !== undefined;
+
+  if (!shouldKeepBrowserTools) {
+    return tools.filter((tool) => !PLAYWRIGHT_TOOL_NAMES.has(tool.name)).slice(0, 128);
+  }
 
   const browserTools = tools.filter((tool) => PLAYWRIGHT_TOOL_NAMES.has(tool.name));
   const nonBrowserTools = tools.filter((tool) => !tool.name.startsWith('browser_'));
